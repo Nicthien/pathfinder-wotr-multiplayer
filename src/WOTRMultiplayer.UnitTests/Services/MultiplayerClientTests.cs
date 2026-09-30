@@ -390,6 +390,25 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimePausePolicy_UpdatesInTurnBasedWithoutChangingGamePause()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.TurnBased, Epoch = 4 }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimePauseChanged>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimePauseChanged
+            {
+                Epoch = 4, Sequence = 1, Policy = (int)PausePolicy.HostOnly,
+                PausedPlayers = [], ResumeVotes = [], IsPaused = false
+            });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.PausePolicy, Is.EqualTo(PausePolicy.HostOnly));
+            A.CallTo(() => _gameInteractionService.SetPause(A<bool>._)).MustNotHaveHappened();
+        }
+
+        [Test]
         public void RealTimePauseChange_IgnoresStaleStateAndAppliesNewState()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())

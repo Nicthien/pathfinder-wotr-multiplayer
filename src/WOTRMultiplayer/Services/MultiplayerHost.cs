@@ -2611,6 +2611,36 @@ namespace WOTRMultiplayer.Services
             });
         }
 
+        public bool SetRealTimePausePolicy(PausePolicy policy)
+        {
+            if (!IsActive || Game?.RealTimeCombat == null
+                || !Enum.IsDefined(typeof(PausePolicy), policy)
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+            {
+                return false;
+            }
+
+            lock (_realTimePauseLock)
+            {
+                Game.RealTimeCombat.PausePolicy = policy;
+                // A policy change invalidates any outstanding consensus votes.
+                Game.RealTimeCombat.ResumeVotes.Clear();
+                Game.RealTimeCombat.PauseSequence++;
+                Send(new NotifyRealTimePauseChanged
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Sequence = Game.RealTimeCombat.PauseSequence,
+                    IsPaused = Game.RealTimeCombat.IsManualPauseActive,
+                    Policy = (int)policy,
+                    PausedPlayers = [.. Game.RealTimeCombat.PausedPlayers],
+                    ResumeVotes = []
+                });
+            }
+
+            Logger.LogInformation("Real-time pause policy changed. Policy={Policy}, Epoch={Epoch}", policy, Game.RealTimeCombat.Epoch);
+            return true;
+        }
+
         private void OnClientRealTimePauseRequested(long receivedFrom, ClientRealTimePauseRequested message)
         {
             ApplyRealTimePauseRequest(receivedFrom, message);

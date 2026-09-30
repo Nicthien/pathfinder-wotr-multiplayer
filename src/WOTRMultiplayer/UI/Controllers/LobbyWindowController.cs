@@ -24,9 +24,12 @@ using WOTRMultiplayer.Abstractions.UI.Controllers;
 using WOTRMultiplayer.Abstractions.UI.Windows;
 using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
 using WOTRMultiplayer.Extensions;
 using WOTRMultiplayer.Services.Settings;
+using WOTRMultiplayer.Services;
 using WOTRMultiplayer.UI.Tooltips;
 using WOTRMultiplayer.UI.Windows;
 using WOTRMultiplayer.UnityBehaviours;
@@ -72,6 +75,8 @@ namespace WOTRMultiplayer.UI.Controllers
 
         private readonly ConcurrentDictionary<LobbyWindowOwner, GameObject> _contents = new();
         private LobbyWindowOwner _activeOwner;
+        private GameConnectivity _lastRealTimeConnectivity;
+        private string _lastRealTimeControlState;
 
         private readonly List<IDisposable> _disposables = [];
 
@@ -219,6 +224,13 @@ namespace WOTRMultiplayer.UI.Controllers
                 AddServerInfo(serverInfoContainerObject.transform, endpointText);
             }
 
+            if (_activeOwner == LobbyWindowOwner.EscMenu)
+            {
+                _lastRealTimeConnectivity = connectivity;
+                _lastRealTimeControlState = GetRealTimeControlState();
+                AddRealTimeCombatControls(serverInfoContainerObject.transform, connectivity);
+            }
+
             if (connectivity.External == null)
             {
                 return;
@@ -273,6 +285,23 @@ namespace WOTRMultiplayer.UI.Controllers
             // sadly, there is no auto-width in place. Calculating it manually based on the font/length is an option, but lazy approach with 6x of the button size should be enough, right?
             var config = new TooltipConfig { Width = (int)copyButtonRect.sizeDelta.x * 6, PreferredHeight = 60 };
             copyButton.OnHover.AddListener(x => ShowTooltip(copyButton, x, template, config));
+        }
+
+        public void RefreshRealTimeCombatControls()
+        {
+            if (_activeOwner == LobbyWindowOwner.EscMenu && _lastRealTimeConnectivity != null
+                && _lastRealTimeControlState != GetRealTimeControlState())
+            {
+                UpdateServerInfo(_lastRealTimeConnectivity);
+            }
+        }
+
+        private string GetRealTimeControlState()
+        {
+            var actor = _multiplayerActorAccessor.Current as MultiplayerActorBase;
+            var state = actor?.Game?.RealTimeCombat;
+            return state == null ? string.Empty
+                : $"{actor.Game.Combat?.Stage}:{state.Mode}:{state.Phase}:{state.PausePolicy}:{state.PauseSequence}:{state.Epoch}";
         }
 
         public void UpdateCharacterOwnerDropdown(NetworkCharacter character, bool silent = false)
@@ -422,6 +451,96 @@ namespace WOTRMultiplayer.UI.Controllers
 
             serverInfoBox.SetText(text);
         }
+
+        private void AddRealTimeCombatControls(Transform parent, GameConnectivity connectivity)
+        {
+            var actor = _multiplayerActorAccessor.Current as MultiplayerActorBase;
+            var state = actor?.Game?.RealTimeCombat;
+            if (state == null)
+            {
+                return;
+            }
+
+            var inCombat = actor.Game.Combat?.Stage == NetworkCombatStage.Running;
+            var mode = state.Mode == CombatMode.RealTimeWithPause ? "Temps réel avec pause" : "Tour par tour";
+            var phase = state.Phase switch
+            {
+                CombatSynchronizationPhase.PreparingModeSwitch or CombatSynchronizationPhase.Synchronizing => "Synchronisation",
+                CombatSynchronizationPhase.Repairing => "Réparation",
+                CombatSynchronizationPhase.FallingBackToTurnBased => "Retour au tour par tour",
+                _ => state.IsManualPauseActive ? "En pause" : mode
+            };
+            AddServerInfo(parent, $"Combat : {phase}");
+            AddServerInfo(parent, $"Politique de pause : {GetPausePolicyLabel(state.PausePolicy)}");
+
+            if (!inCombat || state.Phase != CombatSynchronizationPhase.Stable)
+            {
+                return;
+            }
+
+            if (_multiplayerActorAccessor.Host.IsActive)
+            {
+                AddCombatButton(parent, state.Mode == CombatMode.TurnBased ? "Passer en temps réel" : "Passer en tour par tour", () =>
+                {
+                    var nextMode = state.Mode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
+                    _ = ChangeModeAndRefreshAsync(nextMode, connectivity);
+                });
+                AddCombatButton(parent, "Changer la politique de pause", () =>
+                {
+                    var nextPolicy = (PausePolicy)(((int)state.PausePolicy + 1) % 3);
+                    if (_multiplayerActorAccessor.Host.SetRealTimePausePolicy(nextPolicy))
+                    {
+                        UpdateServerInfo(connectivity);
+                    }
+                });
+                if (state.Mode == CombatMode.RealTimeWithPause)
+                {
+                    AddCombatButton(parent, "Réparer la synchronisation", () =>
+                        _ = RepairAndRefreshAsync(connectivity));
+                }
+            }
+
+            if (state.Mode == CombatMode.RealTimeWithPause)
+            {
+                AddCombatButton(parent, state.IsManualPauseActive ? "Demander la reprise" : "Mettre en pause", () =>
+                {
+                    var requested = _multiplayerActorAccessor.Host.IsActive
+                        ? _multiplayerActorAccessor.Host.RequestLocalRealTimePause(!state.IsManualPauseActive)
+                        : _multiplayerActorAccessor.Client is MultiplayerClient client && client.RequestRealTimePause(!state.IsManualPauseActive);
+                    if (requested)
+                    {
+                        UpdateServerInfo(connectivity);
+                    }
+                });
+            }
+        }
+
+        private async System.Threading.Tasks.Task ChangeModeAndRefreshAsync(CombatMode mode, GameConnectivity connectivity)
+        {
+            await _multiplayerActorAccessor.Host.RequestRealTimeCombatModeAsync(mode);
+            _mainThreadAccessor.Post(() => UpdateServerInfo(connectivity));
+        }
+
+        private async System.Threading.Tasks.Task RepairAndRefreshAsync(GameConnectivity connectivity)
+        {
+            await _multiplayerActorAccessor.Host.BeginRealTimeRepairAsync();
+            _mainThreadAccessor.Post(() => UpdateServerInfo(connectivity));
+        }
+
+        private void AddCombatButton(Transform parent, string label, Action action)
+        {
+            var buttonObject = _uiFactory.CreateButton(parent);
+            buttonObject.GetComponentInChildren<TextMeshProUGUI>().SetText(label);
+            buttonObject.GetComponent<OwlcatButton>().OnLeftClick.AddListener(() => action());
+        }
+
+        private static string GetPausePolicyLabel(PausePolicy policy) => policy switch
+        {
+            PausePolicy.HostOnly => "Hôte seul",
+            PausePolicy.AnyoneConsensusResume => "Tous peuvent mettre en pause, reprise commune",
+            PausePolicy.AnyoneFreeResume => "Tous peuvent mettre en pause ou reprendre",
+            _ => "Inconnue"
+        };
 
         private Transform FindCharacterContainer(NetworkCharacter character)
         {

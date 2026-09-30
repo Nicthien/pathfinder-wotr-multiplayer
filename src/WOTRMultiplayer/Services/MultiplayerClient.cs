@@ -1148,7 +1148,7 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyRealTimePauseChanged(long receivedFrom, NotifyRealTimePauseChanged message)
         {
-            if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause
+            if (Game?.RealTimeCombat == null || message == null
                 || message.Epoch != Game.RealTimeCombat.Epoch
                 || message.Sequence <= Game.RealTimeCombat.PauseSequence
                 || message.IsPaused != (message.PausedPlayers?.Count > 0)
@@ -1161,7 +1161,10 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.PausePolicy = (PausePolicy)message.Policy;
             Game.RealTimeCombat.PausedPlayers = [.. message.PausedPlayers];
             Game.RealTimeCombat.ResumeVotes = [.. message.ResumeVotes ?? []];
-            GameInteraction.SetPause(message.IsPaused || Game.ForcedPause != null);
+            if (Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause)
+            {
+                GameInteraction.SetPause(message.IsPaused || Game.ForcedPause != null);
+            }
         }
 
         private async void OnNotifyRealTimeModeTransition(long receivedFrom, NotifyRealTimeModeTransition message)

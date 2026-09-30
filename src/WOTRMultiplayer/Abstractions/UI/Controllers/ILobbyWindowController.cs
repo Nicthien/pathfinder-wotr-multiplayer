@@ -18,6 +18,8 @@ namespace WOTRMultiplayer.Abstractions.UI.Controllers
 
         void UpdateServerInfo(GameConnectivity connectivity);
 
+        void RefreshRealTimeCombatControls();
+
         void UpdateCharacters(List<NetworkCharacter> characters, bool isDropdownInteractable);
 
         void UpdateCharacterOwnerDropdown(NetworkCharacter character, bool silent = false);

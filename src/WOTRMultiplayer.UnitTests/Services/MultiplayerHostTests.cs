@@ -450,6 +450,22 @@ namespace WOTRMultiplayer.UnitTests.Services
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
         }
 
+        [Test]
+        public void RealTimePausePolicy_HostPublishesPolicyEvenBeforeModeSwitch()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.TurnBased, Epoch = 4 }
+            };
+
+            Assert.That(_multiplayerHost.SetRealTimePausePolicy(PausePolicy.AnyoneFreeResume), Is.True);
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.PausePolicy, Is.EqualTo(PausePolicy.AnyoneFreeResume));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimePauseChanged>.That.Matches(x =>
+                x.Epoch == 4 && x.Sequence == 1 && x.Policy == (int)PausePolicy.AnyoneFreeResume)))
+                .MustHaveHappenedOnceExactly();
+        }
+
         private static ClientRealTimeRepairAck RepairAck(long epoch, RealTimeRepairStage stage, ulong hash, bool applied = true)
         {
             return new ClientRealTimeRepairAck
