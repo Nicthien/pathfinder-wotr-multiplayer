@@ -97,6 +97,7 @@ namespace WOTRMultiplayer
                 entry.OnGUI += OnGui;
                 entry.OnSaveGUI += OnSaveGui;
                 entry.OnToggle += OnToggle;
+                entry.OnUpdate += OnUpdate;
 
                 var harmony = new Harmony(entry.Info.Id);
                 harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -133,6 +134,18 @@ namespace WOTRMultiplayer
         private static void TaskScheduler_UnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
         {
             _logger.LogError(e.Exception, "Unobserved task exception");
+        }
+
+        private static void OnUpdate(UnityModManager.ModEntry entry, float deltaTime)
+        {
+            try
+            {
+                Multiplayer?.UpdateRealTimeCombat();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Real-time combat update failed; no further state was sent this frame");
+            }
         }
 
         private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)

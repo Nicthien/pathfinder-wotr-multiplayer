@@ -4,7 +4,7 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 1;
+        public const int ProtocolVersion = 2;
 
         public CombatMode Mode { get; set; } = CombatMode.TurnBased;
 

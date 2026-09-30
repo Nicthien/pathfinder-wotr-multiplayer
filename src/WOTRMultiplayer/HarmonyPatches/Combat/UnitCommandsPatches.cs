@@ -178,7 +178,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                     case UnitLootUnit unitLootUnit when unitLootUnit.CreatedByPlayer:
                         var path = PathVisualizer.Instance?.CurrentPathForUnit(unitLootUnit.Executor.View);
                         var networkPath = path?.vectorPath.Select(v => v.ToNetworkVector3()).ToList();
-                        var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(__instance.Executor);
+                        var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(__instance.Executor);
                         var networkUnitLootUnit = new NetworkUnitLootUnit
                         {
                             InitiatorUnitId = __instance.Executor.UniqueId,
@@ -459,7 +459,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         {
             var path = PathVisualizer.Instance?.CurrentPathForUnit(command.Executor.View);
             var networkPath = path?.vectorPath.Select(v => v.ToNetworkVector3()).ToList();
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(command.Executor);
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(command.Executor);
             var attackMode = Game.Instance.TurnBasedCombatController.CurrentTurn?.m_AttackMode;
 
             var abilityUse = new NetworkAbilityUse
@@ -478,7 +478,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         private static void OnUnitMove(UnitEntityData unit, Vector3 destination)
         {
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(unit);
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(unit);
             var path = PathVisualizer.Instance?.m_CurrentPath?.vectorPath;
             var attackMode = Game.Instance.TurnBasedCombatController.CurrentTurn?.m_AttackMode;
             var unitMoveTo = new NetworkUnitMoveTo
@@ -498,7 +498,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         {
             var path = PathVisualizer.Instance?.CurrentPathForUnit(command.Executor.View);
             var networkPath = path?.vectorPath.Select(v => v.ToNetworkVector3()).ToList();
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(command.Executor);
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(command.Executor);
 
             var unitAttack = new NetworkUnitAttack
             {

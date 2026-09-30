@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -48,12 +49,47 @@ namespace WOTRMultiplayer.Services
     {
         private readonly INetworkHostConnection _networkHost;
         private readonly IHashService _hashService;
+        private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
+        private DateTime _nextRealTimeSnapshotAt;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
         public bool IsActive => _networkHost.IsActive;
 
         public bool IsInLobby => IsActive && Status == NetworkLobbyStage.Lobby;
+
+        public void PublishRealTimeCombatSnapshot()
+        {
+            if (Game?.Combat?.Stage != NetworkCombatStage.Running
+                || Game.RealTimeCombat.Mode != CombatMode.RealTimeWithPause
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                || DateTime.UtcNow < _nextRealTimeSnapshotAt)
+            {
+                return;
+            }
+
+            _nextRealTimeSnapshotAt = DateTime.UtcNow.AddMilliseconds(250);
+
+            var state = CombatInteraction.GetRealTimeCombatState();
+            var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
+            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+            var sequence = coordinator.PublishAuthoritativeSnapshot(hash);
+            _realTimeSnapshotHashes[(Game.RealTimeCombat.Epoch, sequence)] = hash;
+            foreach (var key in _realTimeSnapshotHashes.Keys)
+            {
+                if (key.Epoch != Game.RealTimeCombat.Epoch || key.Sequence < sequence - 32)
+                {
+                    _realTimeSnapshotHashes.TryRemove(key, out _);
+                }
+            }
+            Send(new NotifyRealTimeCombatSnapshot
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Sequence = sequence,
+                CanonicalStateHash = hash,
+                State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
+            });
+        }
 
         protected override bool HasControlOverUI => true;
 
@@ -1703,6 +1739,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientCombatTurnEndSynchronized>(OnClientCombatTurnEndSynchronized)
                .On<NotifyCombatLocalTurnEnded>(OnNotifyCombatLocalTurnEnded)
                .On<ClientInvalidUnitTurnStartRequested>(OnClientInvalidUnitTurnStartRequested)
+               .On<ClientRealTimeStateHash>(OnClientRealTimeStateHash)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -1849,6 +1886,27 @@ namespace WOTRMultiplayer.Services
         {
             var navigation = Mapper.Map<KingdomNavigationType>(message.Type);
             Game.PlayersInKingdomNavigationType.AddOrUpdate(receivedFrom, navigation, (key, existing) => navigation);
+        }
+
+        private void OnClientRealTimeStateHash(long receivedFrom, ClientRealTimeStateHash message)
+        {
+            if (Game?.RealTimeCombat == null || GetPlayer(receivedFrom) == null)
+            {
+                return;
+            }
+
+            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+            if (!_realTimeSnapshotHashes.TryGetValue((message.Epoch, message.Sequence), out var expectedHash)
+                || !coordinator.TryCompareClientSnapshot(message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash, out var requiresRepair))
+            {
+                Logger.LogDebug("Ignoring stale real-time state hash. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, message.Epoch, message.Sequence);
+                return;
+            }
+
+            if (requiresRepair)
+            {
+                Logger.LogWarning("Real-time snapshot hash differs after client application; timing drift is possible until a paused verification barrier. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash);
+            }
         }
 
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)

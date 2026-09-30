@@ -38,6 +38,8 @@ namespace WOTRMultiplayer.Abstractions
 
         void Initialize();
 
+        void UpdateRealTimeCombat();
+
         void TerminateMultiplayer();
 
         void OnStartGameMode(GameModeType type);

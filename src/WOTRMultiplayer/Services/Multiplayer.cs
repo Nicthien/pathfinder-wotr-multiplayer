@@ -89,6 +89,14 @@ namespace WOTRMultiplayer.Services
             _hotkeysService.Initialize();
         }
 
+        public void UpdateRealTimeCombat()
+        {
+            if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
+            {
+                host.PublishRealTimeCombatSnapshot();
+            }
+        }
+
         public void TerminateMultiplayer()
         {
             _logger.LogInformation("Disposing both multiplayer host/client");

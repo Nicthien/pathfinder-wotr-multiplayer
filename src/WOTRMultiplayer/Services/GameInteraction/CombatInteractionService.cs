@@ -258,9 +258,38 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return state;
         }
 
+        public NetworkCombatState GetRealTimeCombatState()
+        {
+            // The turn-based controller is not initialized when the game runs in RTwP.
+            // Do not read its round, surprise state or per-unit turn data here.
+            return new NetworkCombatState
+            {
+                Units = GetUnitsInCombat(includeTurnBasedInfo: false),
+                AreaEffects = _mapper.Map<List<NetworkAreaEffect>>(_gameStateLookupService.GetAreaEffects())
+            };
+        }
+
+        public Task<NetworkCombatState> GetRealTimeCombatStateAsync()
+        {
+            var completion = new TaskCompletionSource<NetworkCombatState>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    completion.TrySetResult(GetRealTimeCombatState());
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to collect real-time combat state");
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
         public Task UpdateCombatStateAsync(NetworkCombatState networkCombatState, List<NetworkAreaEffect> networkAreaEffects, bool requiresFullUpdate)
         {
-            var taskCompletion = new TaskCompletionSource<bool>();
+            var taskCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try
@@ -305,7 +334,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error while updating combat state");
-                    throw;
+                    // Propagate the failure to the awaiting network handler. Throwing only on
+                    // the main thread leaves this TaskCompletionSource unresolved forever.
+                    taskCompletion.TrySetException(ex);
                 }
             });
 
@@ -932,6 +963,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public List<NetworkUnit> GetUnitsInCombat()
         {
+            return GetUnitsInCombat(includeTurnBasedInfo: true);
+        }
+
+        private List<NetworkUnit> GetUnitsInCombat(bool includeTurnBasedInfo)
+        {
             try
             {
                 var unitsInCombat = Game.Instance.State.Units.InCombat().ToDictionary(x => x.UniqueId, x => x);
@@ -949,7 +985,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         break;
                 }
 
-                var units = GetUnitsState([.. unitsInCombat.Values]);
+                var units = GetUnitsState([.. unitsInCombat.Values], includeTurnBasedInfo);
                 return units;
 
             }
@@ -960,7 +996,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
-        private List<NetworkUnit> GetUnitsState(List<UnitEntityData> unitEntities)
+        private List<NetworkUnit> GetUnitsState(List<UnitEntityData> unitEntities, bool includeTurnBasedInfo = true)
         {
             var units = new List<NetworkUnit>();
             foreach (var unitEntity in unitEntities)
@@ -970,7 +1006,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     Id = unitEntity.UniqueId,
                     Position = unitEntity.Position.ToNetworkVector3(),
                     Orientation = unitEntity.Orientation,
-                    TurnBasedInfo = GetUnitTurnBasedInfo(unitEntity),
+                    TurnBasedInfo = includeTurnBasedInfo ? GetUnitTurnBasedInfo(unitEntity) : null,
                     CombatState = GetUnitCombatState(unitEntity),
                     Descriptor = GetUnitDescriptor(unitEntity),
                     BuffCollection = _buffInteractionService.GetUnitBuffs(unitEntity),
@@ -1092,7 +1128,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void SetTurnMovementLimit(string rawMovementLimit, UnitEntityData executor)
         {
-            var turn = Game.Instance.TurnBasedCombatController.CurrentTurn;
+            var turn = Game.Instance.TurnBasedCombatController?.CurrentTurn;
             if (!string.IsNullOrEmpty(rawMovementLimit) && turn != null)
             {
                 Enum.TryParse<TurnController.MovementLimit>(rawMovementLimit, true, out var movementLimit);
@@ -1230,7 +1266,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             if (unit == null || remoteUnit == null)
             {
-                _logger.LogWarning("Unable to update missing unit. UnitId={UnitId}, NetworkUnitId={NetworkUnitId}", unit.UniqueId, remoteUnit.Id);
+                _logger.LogWarning("Unable to update missing unit. UnitId={UnitId}, NetworkUnitId={NetworkUnitId}", unit?.UniqueId, remoteUnit?.Id);
                 return;
             }
 
@@ -1300,7 +1336,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             SetCommandPath(networkUnitMoveTo.VectorPath, command);
             SetTurnMovementLimit(networkUnitMoveTo.MovementLimit, executorUnit);
 
-            var turn = Game.Instance.TurnBasedCombatController.CurrentTurn;
+            var turn = Game.Instance.TurnBasedCombatController?.CurrentTurn;
             if (turn != null && networkUnitMoveTo.AttackMode != null)
             {
                 turn.m_AttackMode = (TurnController.AttackMode)Enum.Parse(typeof(TurnController.AttackMode), networkUnitMoveTo.AttackMode);
@@ -1357,7 +1393,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             command.IsCharge = networkUnitAttack.IsCharge;
             command.CreatedByPlayer = true;
 
-            var turn = Game.Instance.TurnBasedCombatController.CurrentTurn;
+            var turn = Game.Instance.TurnBasedCombatController?.CurrentTurn;
             if (turn != null)
             {
                 turn.m_AttackMode = command.ForceFullAttack ? TurnController.AttackMode.FullAttack : TurnController.AttackMode.SingleAttack;
@@ -1397,7 +1433,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 commandType = UnitCommand.CommandType.Standard;
             }
 
-            var turn = Game.Instance.TurnBasedCombatController.CurrentTurn;
+            var turn = Game.Instance.TurnBasedCombatController?.CurrentTurn;
             if (turn != null)
             {
                 turn.m_AttackMode = (TurnController.AttackMode)Enum.Parse(typeof(TurnController.AttackMode), networkAbilityUse.AttackMode);

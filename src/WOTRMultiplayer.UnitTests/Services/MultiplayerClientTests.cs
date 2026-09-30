@@ -1,5 +1,6 @@
 ﻿using System;
 using AutoMapper;
+using System.Threading.Tasks;
 using FakeItEasy;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
@@ -8,7 +9,12 @@ using WOTRMultiplayer.Abstractions.IO;
 using WOTRMultiplayer.Abstractions.Random;
 using WOTRMultiplayer.Abstractions.Settings;
 using WOTRMultiplayer.Config.Mapping;
+using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.Entities.AreaEffects;
+using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Networking.Abstractions;
+using WOTRMultiplayer.Networking.Messages.Game;
 using WOTRMultiplayer.Services;
 using WOTRMultiplayer.UnitTests.FakeRules;
 
@@ -85,6 +91,30 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             // Assert
             A.CallTo(() => _networkClient.ConnectAsync(host, port, A<TimeSpan>.Ignored)).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void RealTimeSnapshot_CurrentSequence_IsAppliedAndAcknowledged()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
+            };
+            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._, A<System.Collections.Generic.List<NetworkAreaEffect>>._, false))
+                .Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimeCombatSnapshot
+            {
+                Epoch = 2,
+                Sequence = 1,
+                State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
+            });
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>.That.Matches(x => x.Epoch == 2 && x.Sequence == 1)))
+                .MustHaveHappenedOnceExactly();
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
         }
     }
 }

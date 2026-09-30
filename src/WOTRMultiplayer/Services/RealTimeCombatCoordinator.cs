@@ -26,6 +26,30 @@ namespace WOTRMultiplayer.Services
             return ++_state.LastAuthoritativeSequence;
         }
 
+        public long PublishAuthoritativeSnapshot(ulong canonicalStateHash)
+        {
+            if (_state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable)
+            {
+                throw new InvalidOperationException("Authoritative snapshots require stable real-time combat.");
+            }
+
+            _state.CanonicalStateHash = canonicalStateHash;
+            return NextAuthoritativeSequence();
+        }
+
+        public bool TryCompareClientSnapshot(long epoch, long sequence, ulong expectedStateHash, ulong clientStateHash, out bool requiresRepair)
+        {
+            requiresRepair = false;
+            if (_state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable
+                || epoch != _state.Epoch || sequence > _state.LastAuthoritativeSequence || sequence <= 0)
+            {
+                return false;
+            }
+
+            requiresRepair = clientStateHash != expectedStateHash;
+            return true;
+        }
+
         public bool IsCurrent(long epoch, long sequence)
         {
             return epoch == _state.Epoch && sequence > 0 && sequence > _state.LastAuthoritativeSequence;

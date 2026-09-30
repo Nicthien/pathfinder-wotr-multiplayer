@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using System.Threading;
 using AutoMapper;
 using Kingmaker.UI.Kingdom;
 using Kingmaker.Utility;
@@ -18,6 +19,7 @@ using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
 using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.Dungeon;
@@ -43,6 +45,7 @@ namespace WOTRMultiplayer.Services
     public class MultiplayerClient : MultiplayerActorBase, IMultiplayerClient
     {
         private readonly INetworkClientConnection _networkClient;
+        private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
 
         public Action OnNetworkError { get; set; }
 
@@ -598,6 +601,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyAIActionSelected>(OnNotifyAIActionExecuted)
                .On<NotifyCombatLocalTurnEnded>(OnNotifyCombatLocalTurnEnded)
                .On<NotifyCombatTurnEnded>(OnNotifyCombatTurnEnded)
+               .On<NotifyRealTimeCombatSnapshot>(OnNotifyRealTimeCombatSnapshot)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -948,6 +952,46 @@ namespace WOTRMultiplayer.Services
         private void OnNotifyCombatTurnEnded(long receivedFrom, NotifyCombatTurnEnded message)
         {
             SetCombatTurnStage(NetworkCombatTurnStage.Ended);
+        }
+
+        private async void OnNotifyRealTimeCombatSnapshot(long receivedFrom, NotifyRealTimeCombatSnapshot message)
+        {
+            await _realTimeSnapshotGate.WaitAsync();
+            try
+            {
+                if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause || message.State == null)
+                {
+                    return;
+                }
+
+                var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+                if (!coordinator.IsCurrent(message.Epoch, message.Sequence))
+                {
+                    Logger.LogDebug("Ignoring stale real-time combat snapshot. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+                    return;
+                }
+
+                var state = Mapper.Map<NetworkCombatState>(message.State);
+                await CombatInteraction.UpdateCombatStateAsync(state, [], requiresFullUpdate: false);
+                var actual = await CombatInteraction.GetRealTimeCombatStateAsync();
+                var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = actual });
+                Game.RealTimeCombat.LastAuthoritativeSequence = message.Sequence;
+                Game.RealTimeCombat.CanonicalStateHash = message.CanonicalStateHash;
+                Send(new ClientRealTimeStateHash
+                {
+                    Epoch = message.Epoch,
+                    Sequence = message.Sequence,
+                    CanonicalStateHash = hash
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Real-time combat snapshot could not be applied. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+            }
+            finally
+            {
+                _realTimeSnapshotGate.Release();
+            }
         }
 
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)

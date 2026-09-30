@@ -296,7 +296,9 @@
             NotifyMagicHackSpellCreated,
             ClientInvalidUnitTurnStartRequested,
             NotifyArmyCombatTurnSynchronizationRequired,
-            ClientArmyCombatTurnSynchronized
+            ClientArmyCombatTurnSynchronized,
+            NotifyRealTimeCombatSnapshot,
+            ClientRealTimeStateHash
         }
 
         public static class Mods

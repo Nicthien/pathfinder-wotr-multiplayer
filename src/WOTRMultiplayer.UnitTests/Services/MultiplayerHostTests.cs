@@ -131,6 +131,25 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeSnapshot_IsPublishedOnlyDuringStableRealTimeCombat()
+        {
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatState()).Returns(new NetworkCombatState());
+
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatSnapshot>.That.Matches(x => x.Epoch == 5 && x.Sequence == 1 && x.State != null)))
+                .MustHaveHappenedOnceExactly();
+            _multiplayerHost.Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatSnapshot>._)).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void OnNotifyDropItem__CallsGameInteraction()
         {
             // Arrange

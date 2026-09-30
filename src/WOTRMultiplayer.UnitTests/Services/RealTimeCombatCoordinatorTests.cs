@@ -52,6 +52,34 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void SnapshotComparison_UsesHashForAcknowledgedSequence()
+        {
+            var coordinator = CreateRealTime(1UL);
+            var first = coordinator.PublishAuthoritativeSnapshot(10UL);
+            var latest = coordinator.PublishAuthoritativeSnapshot(20UL);
+
+            Assert.That(coordinator.TryCompareClientSnapshot(coordinator.State.Epoch, first, 10UL, 10UL, out var repair), Is.True);
+            Assert.That(repair, Is.False);
+            Assert.That(coordinator.TryCompareClientSnapshot(coordinator.State.Epoch, first, 10UL, 9UL, out repair), Is.True);
+            Assert.That(repair, Is.True);
+            Assert.That(coordinator.TryCompareClientSnapshot(coordinator.State.Epoch - 1, latest, 20UL, 9UL, out _), Is.False);
+            Assert.That(coordinator.TryCompareClientSnapshot(coordinator.State.Epoch, latest + 1, 20UL, 9UL, out _), Is.False);
+            Assert.That(coordinator.TryCompareClientSnapshot(coordinator.State.Epoch, latest, 20UL, 20UL, out repair), Is.True);
+            Assert.That(repair, Is.False);
+            Assert.That(coordinator.TryCompareClientSnapshot(coordinator.State.Epoch, latest, 20UL, 21UL, out repair), Is.True);
+            Assert.That(repair, Is.True);
+        }
+
+        [Test]
+        public void SnapshotPublication_IsBlockedDuringRepair()
+        {
+            var coordinator = CreateRealTime(1UL);
+            coordinator.BeginRepair();
+
+            Assert.Throws<InvalidOperationException>(() => coordinator.PublishAuthoritativeSnapshot(2UL));
+        }
+
+        [Test]
         public void Repair_TwoFailures_RequiresTurnBasedFallback()
         {
             var coordinator = CreateRealTime(10UL);
