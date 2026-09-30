@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
@@ -51,6 +52,9 @@ namespace WOTRMultiplayer.Services
         private long _nextRealTimeCommandSequence;
         private long _realTimePauseRequestEpoch;
         private long _nextRealTimePauseRequestSequence;
+        private readonly ConcurrentDictionary<string, ConcurrentQueue<NetworkAIAction>> _realTimeAIActions = new(StringComparer.Ordinal);
+        private long _realTimeAISequenceEpoch;
+        private long _lastRealTimeAISequence;
 
         public Action OnNetworkError { get; set; }
 
@@ -141,6 +145,19 @@ namespace WOTRMultiplayer.Services
             }
 
             _networkClient?.Reset();
+            _realTimeAIActions.Clear();
+            _realTimeAISequenceEpoch = 0;
+            _lastRealTimeAISequence = 0;
+        }
+
+        public bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action)
+        {
+            action = null;
+            return IsRealTimeCombatActive && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                && _realTimeAISequenceEpoch == Game.RealTimeCombat.Epoch
+                && !string.IsNullOrWhiteSpace(unitId)
+                && _realTimeAIActions.TryGetValue(unitId, out var queue)
+                && queue.TryDequeue(out action);
         }
 
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
@@ -687,6 +704,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeCombatCommandAccepted>(OnNotifyRealTimeCombatCommandAccepted)
                .On<NotifyRealTimePauseChanged>(OnNotifyRealTimePauseChanged)
                .On<NotifyRealTimeModeTransition>(OnNotifyRealTimeModeTransition)
+               .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -1176,6 +1194,9 @@ namespace WOTRMultiplayer.Services
                     state.PendingMode = mode;
                     state.Epoch = message.Epoch;
                     state.LastAuthoritativeSequence = 0;
+                    _realTimeAIActions.Clear();
+                    _realTimeAISequenceEpoch = message.Epoch;
+                    _lastRealTimeAISequence = 0;
                     state.Phase = CombatSynchronizationPhase.PreparingModeSwitch;
                     await GameInteraction.SetPauseAsync(true);
                     SendRealTimeModeAck(message, true, 0);
@@ -1271,6 +1292,105 @@ namespace WOTRMultiplayer.Services
             });
         }
 
+        private async void OnNotifyRealTimeRepair(long receivedFrom, NotifyRealTimeRepair message)
+        {
+            await _realTimeSnapshotGate.WaitAsync();
+            try
+            {
+                if (Game?.RealTimeCombat == null || message == null
+                    || !Enum.IsDefined(typeof(RealTimeRepairStage), message.Stage)
+                    || !Enum.IsDefined(typeof(CombatMode), message.Mode))
+                {
+                    return;
+                }
+                var state = Game.RealTimeCombat;
+                var stage = (RealTimeRepairStage)message.Stage;
+                if (stage == RealTimeRepairStage.Prepare)
+                {
+                    if (message.Epoch <= state.Epoch || state.Mode != CombatMode.RealTimeWithPause
+                        || (state.Phase != CombatSynchronizationPhase.Stable
+                            && state.Phase != CombatSynchronizationPhase.Repairing))
+                    {
+                        return;
+                    }
+                    state.Epoch = message.Epoch;
+                    state.LastAuthoritativeSequence = 0;
+                    _realTimeAIActions.Clear();
+                    _realTimeAISequenceEpoch = message.Epoch;
+                    _lastRealTimeAISequence = 0;
+                    state.Phase = CombatSynchronizationPhase.Repairing;
+                    await GameInteraction.SetPauseAsync(true);
+                    SendRealTimeRepairAck(message, true, 0);
+                    return;
+                }
+                if (message.Epoch != state.Epoch)
+                {
+                    return;
+                }
+                if (stage == RealTimeRepairStage.Verify
+                    && state.Phase == CombatSynchronizationPhase.Repairing)
+                {
+                    var local = await CombatInteraction.GetRealTimeCombatStateAsync();
+                    var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = local });
+                    SendRealTimeRepairAck(message, true, hash);
+                    return;
+                }
+                if (stage == RealTimeRepairStage.Apply
+                    && state.Phase == CombatSynchronizationPhase.Repairing && message.State != null)
+                {
+                    var hash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    state.CanonicalStateHash = message.CanonicalStateHash;
+                    SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash);
+                    return;
+                }
+                if (stage == RealTimeRepairStage.Fallback
+                    && (state.Phase == CombatSynchronizationPhase.Repairing
+                        || state.Phase == CombatSynchronizationPhase.FallingBackToTurnBased)
+                    && message.State != null)
+                {
+                    state.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
+                    var hash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    await GameInteraction.SetTurnBasedCombatModeAsync(true);
+                    state.CanonicalStateHash = message.CanonicalStateHash;
+                    SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash);
+                    return;
+                }
+                if (stage == RealTimeRepairStage.Resume
+                    && (state.Phase == CombatSynchronizationPhase.Repairing
+                        || state.Phase == CombatSynchronizationPhase.FallingBackToTurnBased))
+                {
+                    state.Mode = (CombatMode)message.Mode;
+                    state.CanonicalStateHash = message.CanonicalStateHash;
+                    state.Phase = CombatSynchronizationPhase.Stable;
+                    GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to apply real-time combat repair. Epoch={Epoch}, Stage={Stage}", message?.Epoch, message?.Stage);
+                if (message != null && message.Stage != (int)RealTimeRepairStage.Resume)
+                {
+                    SendRealTimeRepairAck(message, false, 0);
+                }
+            }
+            finally
+            {
+                _realTimeSnapshotGate.Release();
+            }
+        }
+
+        private void SendRealTimeRepairAck(NotifyRealTimeRepair message, bool applied, ulong hash)
+        {
+            Send(new ClientRealTimeRepairAck
+            {
+                Epoch = message.Epoch,
+                Stage = message.Stage,
+                PlayerId = Game.LocalPlayerId,
+                CanonicalStateHash = hash,
+                Applied = applied
+            });
+        }
+
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
         {
             if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: false))
@@ -1297,6 +1417,32 @@ namespace WOTRMultiplayer.Services
         {
             if (Game.ArmyCombat != null)
             {
+                return;
+            }
+
+            if (Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause)
+            {
+                if (message?.Action == null || message.RealTimeEpoch != Game.RealTimeCombat.Epoch
+                    || message.RealTimeSequence <= 0)
+                {
+                    return;
+                }
+                if (_realTimeAISequenceEpoch != message.RealTimeEpoch)
+                {
+                    _realTimeAISequenceEpoch = message.RealTimeEpoch;
+                    _lastRealTimeAISequence = 0;
+                    _realTimeAIActions.Clear();
+                }
+                if (message.RealTimeSequence <= _lastRealTimeAISequence)
+                {
+                    return;
+                }
+                _lastRealTimeAISequence = message.RealTimeSequence;
+                var authoritativeAction = Mapper.Map<NetworkAIAction>(message.Action);
+                if (!string.IsNullOrWhiteSpace(authoritativeAction.UnitId))
+                {
+                    _realTimeAIActions.GetOrAdd(authoritativeAction.UnitId, _ => new ConcurrentQueue<NetworkAIAction>()).Enqueue(authoritativeAction);
+                }
                 return;
             }
 

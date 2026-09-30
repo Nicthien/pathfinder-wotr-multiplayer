@@ -4104,6 +4104,11 @@ namespace WOTRMultiplayer.Services
             }
         }
 
+        public bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action)
+        {
+            return _multiplayerActorAccessor.Client.TryConsumeAuthoritativeRealTimeAIAction(unitId, out action);
+        }
+
         public void OnAreaLoaded()
         {
             try

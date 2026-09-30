@@ -304,7 +304,9 @@
             ClientRealTimePauseRequested,
             NotifyRealTimePauseChanged,
             NotifyRealTimeModeTransition,
-            ClientRealTimeModeTransitionAck
+            ClientRealTimeModeTransitionAck,
+            NotifyRealTimeRepair,
+            ClientRealTimeRepairAck
         }
 
         public static class Mods

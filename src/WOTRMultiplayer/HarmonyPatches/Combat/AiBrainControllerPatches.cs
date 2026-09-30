@@ -72,10 +72,49 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         }
 
         [HarmonyPatch(typeof(AiBrainController), nameof(AiBrainController.FindBestAction))]
+        [HarmonyPrefix]
+        public static bool AiBrainController_FindBestAction_Prefix(UnitEntityData unit, DecisionContext context, ref AiAction bestActionResult, ref UnitEntityData bestTargetResult)
+        {
+            if (!Main.Multiplayer.IsRealTimeClientCombatActive)
+            {
+                return true;
+            }
+
+            bestActionResult = null;
+            bestTargetResult = null;
+            if (unit == null || !Main.Multiplayer.TryConsumeAuthoritativeRealTimeAIAction(unit.UniqueId, out var action))
+            {
+                // The client must wait for the host's choice, never roll its own AI decision.
+                return false;
+            }
+
+            var selectedAction = Main.State.FindAIAction(unit, action);
+            var target = string.IsNullOrWhiteSpace(action.TargetId) ? null : Main.State.GetUnitEntity(action.TargetId);
+            if (selectedAction == null || (!string.IsNullOrWhiteSpace(action.TargetId) && target == null))
+            {
+                Main.GetLogger<AiBrainControllerPatches>().LogError("Authoritative real-time AI choice cannot be resolved. UnitId={UnitId}, ActionId={ActionId}, TargetId={TargetId}", unit.UniqueId, action.Id, action.TargetId);
+                return false;
+            }
+
+            bestActionResult = selectedAction;
+            bestTargetResult = target;
+            if (action.DecisionContext != null)
+            {
+                context.BestPath = new ForcedPath([.. action.DecisionContext.VectorPath.Select(x => x.ToUnityVector3())]);
+                context.BestEnableFiveFootStep = action.DecisionContext.BestEnableFiveFootStep;
+                if (action.DecisionContext.BestDestinationPoint != null)
+                {
+                    context.BestDestinationPoint = action.DecisionContext.BestDestinationPoint.ToUnityVector3();
+                }
+            }
+            return false;
+        }
+
+        [HarmonyPatch(typeof(AiBrainController), nameof(AiBrainController.FindBestAction))]
         [HarmonyPostfix]
         public static void AiBrainController_FindBestAction_Postfix(UnitEntityData unit, DecisionContext context, ref AiAction bestActionResult, ref UnitEntityData bestTargetResult)
         {
-            if (!Main.Multiplayer.IsActive || bestActionResult == null)
+            if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive || bestActionResult == null)
             {
                 return;
             }

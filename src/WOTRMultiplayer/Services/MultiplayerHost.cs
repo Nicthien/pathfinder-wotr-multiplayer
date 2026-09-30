@@ -65,6 +65,12 @@ namespace WOTRMultiplayer.Services
         private DateTime _realTimeModeSwitchDeadline;
         private bool _realTimeModeCommitInProgress;
         private NotifyRealTimeModeTransition _lastRealTimeAbort;
+        private DateTime _realTimeRepairDeadline;
+        private RealTimeRepairStage? _realTimeRepairStage;
+        private NetworkCombatState _realTimeRepairCheckpoint;
+        private bool _realTimeRepairHasMismatch;
+        private long _realTimeAISequenceEpoch;
+        private long _nextRealTimeAISequence;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -83,6 +89,7 @@ namespace WOTRMultiplayer.Services
         public void PublishRealTimeCombatSnapshot()
         {
             CheckRealTimeModeSwitchTimeout();
+            CheckRealTimeRepairTimeout();
             if (Game?.Combat?.Stage != NetworkCombatStage.Running
                 || Game.RealTimeCombat.Mode != CombatMode.RealTimeWithPause
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
@@ -1713,6 +1720,16 @@ namespace WOTRMultiplayer.Services
             {
                 Action = Mapper.Map<Networking.Messages.Contracts.NetworkAIAction>(aiAction)
             };
+            if (IsRealTimeCombatActive && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable)
+            {
+                if (_realTimeAISequenceEpoch != Game.RealTimeCombat.Epoch)
+                {
+                    _realTimeAISequenceEpoch = Game.RealTimeCombat.Epoch;
+                    _nextRealTimeAISequence = 0;
+                }
+                message.RealTimeEpoch = Game.RealTimeCombat.Epoch;
+                message.RealTimeSequence = ++_nextRealTimeAISequence;
+            }
             Send(message);
             return null;
         }
@@ -2020,6 +2037,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimeCombatCommand>(OnClientRealTimeCombatCommand)
                .On<ClientRealTimePauseRequested>(OnClientRealTimePauseRequested)
                .On<ClientRealTimeModeTransitionAck>(OnClientRealTimeModeTransitionAck)
+               .On<ClientRealTimeRepairAck>(OnClientRealTimeRepairAck)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -2170,7 +2188,12 @@ namespace WOTRMultiplayer.Services
 
         private void OnClientRealTimeStateHash(long receivedFrom, ClientRealTimeStateHash message)
         {
-            if (Game?.RealTimeCombat == null || GetPlayer(receivedFrom) == null)
+            _mainThreadAccessor.Post(() => ProcessClientRealTimeStateHash(receivedFrom, message));
+        }
+
+        private void ProcessClientRealTimeStateHash(long receivedFrom, ClientRealTimeStateHash message)
+        {
+            if (Game?.RealTimeCombat == null || message == null || GetPlayer(receivedFrom) == null)
             {
                 return;
             }
@@ -2185,8 +2208,271 @@ namespace WOTRMultiplayer.Services
 
             if (requiresRepair)
             {
-                Logger.LogWarning("Real-time snapshot hash differs after client application; timing drift is possible until a paused verification barrier. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash);
+                Logger.LogWarning("Real-time moving snapshot differs; starting paused verification before treating it as divergence. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash);
+                _ = BeginRealTimeRepairAsync();
             }
+        }
+
+        public async Task BeginRealTimeRepairAsync()
+        {
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+            {
+                return;
+            }
+            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+            coordinator.BeginRepair();
+            Game.RealTimeCombat.RequiredPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).ToHashSet();
+            Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            _realTimeRepairStage = RealTimeRepairStage.Prepare;
+            _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+            try
+            {
+                await GameInteraction.SetPauseAsync(true);
+                Send(new NotifyRealTimeRepair
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Stage = (int)RealTimeRepairStage.Prepare,
+                    Mode = (int)CombatMode.RealTimeWithPause
+                });
+                if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                {
+                    StartRealTimeRepairVerification();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to pause for real-time combat verification. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
+                GameInteraction.SetPause(true);
+            }
+        }
+
+        private void StartRealTimeRepairVerification()
+        {
+            if (Game?.RealTimeCombat?.Phase != CombatSynchronizationPhase.Repairing)
+            {
+                return;
+            }
+            _realTimeRepairCheckpoint = CombatInteraction.GetRealTimeCombatState();
+            Game.RealTimeCombat.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = _realTimeRepairCheckpoint });
+            _realTimeRepairHasMismatch = false;
+            _realTimeRepairStage = RealTimeRepairStage.Verify;
+            Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+            Send(new NotifyRealTimeRepair
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Stage = (int)RealTimeRepairStage.Verify,
+                Mode = (int)CombatMode.RealTimeWithPause,
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
+            });
+            if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+            {
+                CompleteRealTimeRepair();
+            }
+        }
+
+        private void StartRealTimeRepairApply()
+        {
+            _realTimeRepairStage = RealTimeRepairStage.Apply;
+            Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+            Send(new NotifyRealTimeRepair
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Stage = (int)RealTimeRepairStage.Apply,
+                Mode = (int)CombatMode.RealTimeWithPause,
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
+                State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
+            });
+            if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+            {
+                CompleteRealTimeRepair();
+            }
+        }
+
+        private void CompleteRealTimeRepair()
+        {
+            var hash = Game.RealTimeCombat.CanonicalStateHash;
+            new RealTimeCombatCoordinator(Game.RealTimeCombat).CompleteRepair(hash, hash);
+            FinishRealTimeRepair(CombatMode.RealTimeWithPause);
+        }
+
+        private void FinishRealTimeRepair(CombatMode mode)
+        {
+            _realTimeRepairStage = null;
+            _realTimeRepairDeadline = default;
+            _realTimeRepairCheckpoint = null;
+            Game.RealTimeCombat.RequiredPlayers.Clear();
+            Game.RealTimeCombat.ReadyPlayers.Clear();
+            Send(new NotifyRealTimeRepair
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Stage = (int)RealTimeRepairStage.Resume,
+                Mode = (int)mode,
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
+            });
+            GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+        }
+
+        private async Task FailRealTimeRepairAttemptAsync(ulong clientHash)
+        {
+            if (Game?.RealTimeCombat?.Phase != CombatSynchronizationPhase.Repairing)
+            {
+                return;
+            }
+            var hostHash = Game.RealTimeCombat.CanonicalStateHash;
+            var differingHash = clientHash == hostHash ? hostHash ^ 1UL : clientHash;
+            new RealTimeCombatCoordinator(Game.RealTimeCombat).CompleteRepair(hostHash, differingHash);
+            if (Game.RealTimeCombat.Phase == CombatSynchronizationPhase.FallingBackToTurnBased)
+            {
+                await StartRealTimeRepairFallbackAsync();
+                return;
+            }
+            new RealTimeCombatCoordinator(Game.RealTimeCombat).BeginRepair();
+            Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            _realTimeRepairStage = RealTimeRepairStage.Prepare;
+            _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+            Send(new NotifyRealTimeRepair
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Stage = (int)RealTimeRepairStage.Prepare,
+                Mode = (int)CombatMode.RealTimeWithPause
+            });
+            if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+            {
+                StartRealTimeRepairVerification();
+            }
+        }
+
+        private async Task StartRealTimeRepairFallbackAsync()
+        {
+            try
+            {
+                await GameInteraction.SetTurnBasedCombatModeAsync(true);
+                _realTimeRepairCheckpoint = CombatInteraction.GetRealTimeCombatState();
+                Game.RealTimeCombat.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = _realTimeRepairCheckpoint });
+                Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+                _realTimeRepairStage = RealTimeRepairStage.Fallback;
+                _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+                Send(new NotifyRealTimeRepair
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Stage = (int)RealTimeRepairStage.Fallback,
+                    Mode = (int)CombatMode.TurnBased,
+                    CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
+                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
+                });
+                if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                {
+                    CommitRealTimeRepairFallback();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to apply automatic turn-based fallback. Epoch={Epoch}; game remains paused and saving is blocked", Game.RealTimeCombat.Epoch);
+                GameInteraction.SetPause(true);
+            }
+        }
+
+        private void CommitRealTimeRepairFallback()
+        {
+            new RealTimeCombatCoordinator(Game.RealTimeCombat).CommitFallback(Game.RealTimeCombat.CanonicalStateHash);
+            FinishRealTimeRepair(CombatMode.TurnBased);
+        }
+
+        private void CheckRealTimeRepairTimeout()
+        {
+            if (!_realTimeRepairStage.HasValue || _realTimeRepairDeadline == default
+                || DateTime.UtcNow <= _realTimeRepairDeadline)
+            {
+                return;
+            }
+            _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+            if (_realTimeRepairStage == RealTimeRepairStage.Fallback)
+            {
+                Logger.LogWarning("Waiting for peer to acknowledge turn-based fallback. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
+                Send(new NotifyRealTimeRepair
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Stage = (int)RealTimeRepairStage.Fallback,
+                    Mode = (int)CombatMode.TurnBased,
+                    CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
+                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
+                });
+                return;
+            }
+            Logger.LogWarning("Real-time repair barrier timed out. Epoch={Epoch}, Stage={Stage}", Game.RealTimeCombat.Epoch, _realTimeRepairStage);
+            _ = FailRealTimeRepairAttemptAsync(0);
+        }
+
+        private void OnClientRealTimeRepairAck(long receivedFrom, ClientRealTimeRepairAck message)
+        {
+            _mainThreadAccessor.Post(async () =>
+            {
+                try
+                {
+                    if (Game?.RealTimeCombat == null || message == null || !_realTimeRepairStage.HasValue
+                        || message.Epoch != Game.RealTimeCombat.Epoch || message.PlayerId != receivedFrom
+                        || (int)_realTimeRepairStage.Value != message.Stage
+                        || !Game.RealTimeCombat.RequiredPlayers.Contains(receivedFrom))
+                    {
+                        return;
+                    }
+                    if (!message.Applied)
+                    {
+                        await FailRealTimeRepairAttemptAsync(message.CanonicalStateHash);
+                        return;
+                    }
+                    if (_realTimeRepairStage == RealTimeRepairStage.Prepare)
+                    {
+                        Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
+                        if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                        {
+                            StartRealTimeRepairVerification();
+                        }
+                    }
+                    else if (_realTimeRepairStage == RealTimeRepairStage.Verify)
+                    {
+                        _realTimeRepairHasMismatch |= message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash;
+                        Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
+                        if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                        {
+                            if (_realTimeRepairHasMismatch) StartRealTimeRepairApply();
+                            else CompleteRealTimeRepair();
+                        }
+                    }
+                    else if (_realTimeRepairStage == RealTimeRepairStage.Apply)
+                    {
+                        if (message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash)
+                        {
+                            await FailRealTimeRepairAttemptAsync(message.CanonicalStateHash);
+                            return;
+                        }
+                        Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
+                        if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                        {
+                            CompleteRealTimeRepair();
+                        }
+                    }
+                    else if (_realTimeRepairStage == RealTimeRepairStage.Fallback)
+                    {
+                        if (message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash)
+                        {
+                            Logger.LogError("Peer could not verify turn-based fallback. PlayerId={PlayerId}, Epoch={Epoch}", receivedFrom, message.Epoch);
+                            return;
+                        }
+                        Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
+                        if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                        {
+                            CommitRealTimeRepairFallback();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Unable to process real-time repair acknowledgement. PlayerId={PlayerId}, Epoch={Epoch}", receivedFrom, message?.Epoch);
+                }
+            });
         }
 
         private void OnClientRealTimeCombatCommand(long receivedFrom, ClientRealTimeCombatCommand message)
@@ -2722,6 +3008,37 @@ namespace WOTRMultiplayer.Services
 
                 TryEndForcedPause(Game.LocalPlayerId);
                 TryCompleteRealTimeAbort();
+                HandleRealTimeRepairPeerDisconnected(playerId);
+            }
+        }
+
+        private void HandleRealTimeRepairPeerDisconnected(long playerId)
+        {
+            if (!_realTimeRepairStage.HasValue || Game?.RealTimeCombat == null)
+            {
+                return;
+            }
+            Game.RealTimeCombat.RequiredPlayers.Remove(playerId);
+            Game.RealTimeCombat.ReadyPlayers.Remove(playerId);
+            if (!Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+            {
+                return;
+            }
+            switch (_realTimeRepairStage.Value)
+            {
+                case RealTimeRepairStage.Prepare:
+                    StartRealTimeRepairVerification();
+                    break;
+                case RealTimeRepairStage.Verify:
+                    if (_realTimeRepairHasMismatch) StartRealTimeRepairApply();
+                    else CompleteRealTimeRepair();
+                    break;
+                case RealTimeRepairStage.Apply:
+                    CompleteRealTimeRepair();
+                    break;
+                case RealTimeRepairStage.Fallback:
+                    CommitRealTimeRepairFallback();
+                    break;
             }
         }
 

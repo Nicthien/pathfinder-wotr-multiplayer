@@ -139,5 +139,31 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.Applied, Is.False);
             Assert.That(copy.CanonicalStateHash, Is.EqualTo(999UL));
         }
+
+        [Test]
+        public void RepairMessages_RoundTripStageStateAndAcknowledgement()
+        {
+            var instruction = Serializer.DeepClone(new NotifyRealTimeRepair
+            {
+                Epoch = 9,
+                Stage = (int)RealTimeRepairStage.Apply,
+                Mode = 1,
+                CanonicalStateHash = 77UL,
+                State = new NetworkCombatState { Units = [new NetworkUnit { Id = "unit-a" }] }
+            });
+            var ack = Serializer.DeepClone(new ClientRealTimeRepairAck
+            {
+                Epoch = 9,
+                Stage = (int)RealTimeRepairStage.Apply,
+                PlayerId = 42,
+                CanonicalStateHash = 77UL,
+                Applied = true
+            });
+
+            Assert.That(instruction.State.Units[0].Id, Is.EqualTo("unit-a"));
+            Assert.That(instruction.CanonicalStateHash, Is.EqualTo(77UL));
+            Assert.That(ack.PlayerId, Is.EqualTo(42));
+            Assert.That(ack.Applied, Is.True);
+        }
     }
 }

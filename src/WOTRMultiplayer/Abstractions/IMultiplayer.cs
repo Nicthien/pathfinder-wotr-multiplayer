@@ -501,6 +501,8 @@ namespace WOTRMultiplayer.Abstractions
 
         NetworkAIAction OnAfterAISelectedAction(NetworkAIAction action);
 
+        bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action);
+
         void OnUnitMoveTo(NetworkUnitMoveTo unitMoveTo);
 
         void OnEnterKingdom(NetworkKingdomEntryPoint kingdomEntryPoint);

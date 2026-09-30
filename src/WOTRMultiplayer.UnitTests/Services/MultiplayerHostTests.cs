@@ -356,6 +356,113 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task RealTimeRepair_PausedVerificationMatch_ResumesWithoutApplyingSnapshot()
+        {
+            PrepareRealTimeRepairTest();
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(_networkServer);
+
+            await _multiplayerHost.BeginRealTimeRepairAsync();
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Prepare, 0));
+            var hash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash;
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Verify, hash));
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Apply)))
+                .MustNotHaveHappened();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Resume)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public async Task RealTimeRepair_MismatchThenMatchingSnapshot_ResumesRealTime()
+        {
+            PrepareRealTimeRepairTest();
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(_networkServer);
+
+            await _multiplayerHost.BeginRealTimeRepairAsync();
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Prepare, 0));
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Verify, 1));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Apply && x.State != null)))
+                .MustHaveHappenedOnceExactly();
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Apply, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.RepairAttempts, Is.Zero);
+        }
+
+        [Test]
+        public async Task RealTimeRepair_TwoFailedApplications_FallsBackToTurnBasedAfterPeerAck()
+        {
+            PrepareRealTimeRepairTest();
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(_networkServer);
+
+            await _multiplayerHost.BeginRealTimeRepairAsync();
+            for (var epoch = 1; epoch <= 2; epoch++)
+            {
+                handler.Invoke(42, RepairAck(epoch, RealTimeRepairStage.Prepare, 0));
+                handler.Invoke(42, RepairAck(epoch, RealTimeRepairStage.Verify, 1));
+                handler.Invoke(42, RepairAck(epoch, RealTimeRepairStage.Apply, 1, applied: false));
+            }
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Fallback && x.State != null)))
+                .MustHaveHappenedOnceExactly();
+            handler.Invoke(42, RepairAck(2, RealTimeRepairStage.Fallback, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+        }
+
+        [Test]
+        public void RealTimeAI_HostPublishesEpochAndSequence()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+
+            _multiplayerHost.OnAfterAISelectedAction(new NetworkAIAction { UnitId = "enemy-a", Id = "action-a" });
+            _multiplayerHost.OnAfterAISelectedAction(new NetworkAIAction { UnitId = "enemy-a", Id = "action-b" });
+
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyAIActionSelected>.That.Matches(x => x.RealTimeEpoch == 3 && x.RealTimeSequence == 1)))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyAIActionSelected>.That.Matches(x => x.RealTimeEpoch == 3 && x.RealTimeSequence == 2)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        private void PrepareRealTimeRepairTest()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatState()).Returns(new NetworkCombatState());
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(NetworkConstants.HostPlayerId) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
+        }
+
+        private static ClientRealTimeRepairAck RepairAck(long epoch, RealTimeRepairStage stage, ulong hash, bool applied = true)
+        {
+            return new ClientRealTimeRepairAck
+            {
+                Epoch = epoch,
+                Stage = (int)stage,
+                PlayerId = 42,
+                CanonicalStateHash = hash,
+                Applied = applied
+            };
+        }
+
+        [Test]
         public void LocalHostRealTimeCommand_IsBroadcastWithoutExecutingTwice()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

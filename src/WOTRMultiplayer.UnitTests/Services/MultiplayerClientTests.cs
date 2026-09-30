@@ -326,6 +326,70 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeRepair_VerifyApplyResume_UsesPausedLocalFingerprint()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
+                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
+            var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimeRepair { Epoch = 1, Stage = (int)RealTimeRepairStage.Prepare, Mode = (int)CombatMode.RealTimeWithPause });
+            handler.Invoke(-1, new NotifyRealTimeRepair { Epoch = 1, Stage = (int)RealTimeRepairStage.Verify, Mode = (int)CombatMode.RealTimeWithPause, CanonicalStateHash = hash });
+            handler.Invoke(-1, new NotifyRealTimeRepair
+            {
+                Epoch = 1, Stage = (int)RealTimeRepairStage.Apply,
+                Mode = (int)CombatMode.RealTimeWithPause,
+                CanonicalStateHash = hash,
+                State = new Networking.Messages.Contracts.NetworkCombatState()
+            });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Apply && x.Applied && x.CanonicalStateHash == hash)))
+                .MustHaveHappenedOnceExactly();
+            handler.Invoke(-1, new NotifyRealTimeRepair { Epoch = 1, Stage = (int)RealTimeRepairStage.Resume, Mode = (int)CombatMode.RealTimeWithPause, CanonicalStateHash = hash });
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+        }
+
+        [Test]
+        public void RealTimeAI_ConsumesOnlyCurrentHostChoiceOnce()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(_networkClient);
+            var choice = new NotifyAIActionSelected
+            {
+                RealTimeEpoch = 3,
+                RealTimeSequence = 1,
+                Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "action-a" }
+            };
+
+            handler.Invoke(-1, choice);
+            handler.Invoke(-1, choice);
+            handler.Invoke(-1, new NotifyAIActionSelected
+            {
+                RealTimeEpoch = 2,
+                RealTimeSequence = 2,
+                Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "old-action" }
+            });
+
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out var action), Is.True);
+            Assert.That(action.Id, Is.EqualTo("action-a"));
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out _), Is.False);
+        }
+
+        [Test]
         public void RealTimePauseChange_IgnoresStaleStateAndAppliesNewState()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
