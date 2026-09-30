@@ -22,7 +22,7 @@ This tree is an experimental, local-only derivative of multiplayer 0.4.16. It mu
 .\tools\rtwp-local.ps1 -Action EnableStable
 ```
 
-`Install` creates a timestamped backup of an existing experimental installation. The script refuses to change installed folders while `Wrath.exe` is running. Installation and activation are deliberately locked until a local `local-artifacts/RTWP_RUNTIME_VALIDATED.json` records protocol version 4 and a successful two-instance combat test. `Build` does not touch either installed mod.
+`Install` creates a timestamped backup of an existing experimental installation and stages it disabled when the stable mod is active. The script checks the game directory and all source/destination slots before moving a mod, and refuses changes while `Wrath.exe` is running. Installation and activation are deliberately locked until a local `local-artifacts/RTWP_RUNTIME_VALIDATED.json` records protocol version 4 and a successful two-instance combat test. `Build` does not touch either installed mod.
 
 ## Current milestone
 

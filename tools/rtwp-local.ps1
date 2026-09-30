@@ -35,6 +35,21 @@ function Assert-GameStopped {
     }
 }
 
+function Assert-GameInstallation {
+    if (-not (Test-Path -LiteralPath (Join-Path $GamePath 'Wrath.exe'))) {
+        throw "Dossier du jeu invalide : Wrath.exe est absent de $GamePath"
+    }
+}
+
+function Assert-SafeModPath([string]$path) {
+    $resolvedModsPath = [IO.Path]::GetFullPath($modsPath).TrimEnd('\')
+    $resolvedPath = [IO.Path]::GetFullPath($path)
+    $parent = Split-Path -Parent $resolvedPath
+    if (-not [string]::Equals($parent, $resolvedModsPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Chemin de mod hors du dossier prévu : $resolvedPath"
+    }
+}
+
 function Get-ModInfo([string]$path) {
     $infoPath = Join-Path $path 'Info.json'
     if (-not (Test-Path -LiteralPath $infoPath)) {
@@ -79,25 +94,46 @@ function Backup-Mod([string]$path, [string]$name) {
 function Install-Experimental {
     Assert-RuntimeReady
     Assert-GameStopped
-    Build-Experimental
-    Backup-Mod $experimentalPath 'experimental'
-    if (Test-Path -LiteralPath $experimentalPath) {
-        Remove-Item -LiteralPath $experimentalPath -Recurse
+    Assert-GameInstallation
+    if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $experimentalPath)) {
+        throw 'Installation refusée : les variantes stable et expérimentale sont déjà actives simultanément.'
     }
-    New-Item -ItemType Directory -Path $experimentalPath -Force | Out-Null
-    Copy-Item -Path (Join-Path $buildPath '*') -Destination $experimentalPath -Recurse -Force
-    New-Item -ItemType Directory -Path (Join-Path $experimentalPath 'localization') -Force | Out-Null
-    Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $experimentalPath 'localization') -Force
+    $targetPath = if (Test-Path -LiteralPath $experimentalPath) { $experimentalPath } else { $disabledExperimentalPath }
+    if ((Test-Path -LiteralPath $experimentalPath) -and (Test-Path -LiteralPath $disabledExperimentalPath)) {
+        throw 'Installation refusée : deux dossiers expérimentaux existent déjà.'
+    }
+    Assert-SafeModPath $targetPath
+    Build-Experimental
+    Backup-Mod $targetPath 'experimental'
+    if (Test-Path -LiteralPath $targetPath) {
+        Remove-Item -LiteralPath $targetPath -Recurse
+    }
+    New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
+    Copy-Item -Path (Join-Path $buildPath '*') -Destination $targetPath -Recurse -Force
+    New-Item -ItemType Directory -Path (Join-Path $targetPath 'localization') -Force | Out-Null
+    Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $targetPath 'localization') -Force
 }
 
 function Enable-Stable {
     Assert-GameStopped
+    Assert-GameInstallation
+    Assert-SafeModPath $stablePath
+    Assert-SafeModPath $experimentalPath
+    Assert-SafeModPath $disabledStablePath
+    Assert-SafeModPath $disabledExperimentalPath
+    if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $disabledStablePath)) {
+        throw "Activation stable refusée : les deux dossiers existent déjà : $stablePath et $disabledStablePath"
+    }
+    if ((Test-Path -LiteralPath $experimentalPath) -and (Test-Path -LiteralPath $disabledExperimentalPath)) {
+        throw "Activation stable refusée : les deux dossiers existent déjà : $experimentalPath et $disabledExperimentalPath"
+    }
+    if (-not (Test-Path -LiteralPath $stablePath) -and -not (Test-Path -LiteralPath $disabledStablePath)) {
+        throw "Activation stable refusée : la version stable est absente."
+    }
     if (Test-Path -LiteralPath $experimentalPath) {
-        if (Test-Path -LiteralPath $disabledExperimentalPath) { throw "Le dossier cible existe déjà: $disabledExperimentalPath" }
         Move-Item -LiteralPath $experimentalPath -Destination $disabledExperimentalPath
     }
     if (Test-Path -LiteralPath $disabledStablePath) {
-        if (Test-Path -LiteralPath $stablePath) { throw "Le dossier cible existe déjà: $stablePath" }
         Move-Item -LiteralPath $disabledStablePath -Destination $stablePath
     }
 }
@@ -105,16 +141,25 @@ function Enable-Stable {
 function Enable-Experimental {
     Assert-RuntimeReady
     Assert-GameStopped
+    Assert-GameInstallation
+    Assert-SafeModPath $stablePath
+    Assert-SafeModPath $experimentalPath
+    Assert-SafeModPath $disabledStablePath
+    Assert-SafeModPath $disabledExperimentalPath
+    if (-not (Test-Path -LiteralPath $experimentalPath) -and -not (Test-Path -LiteralPath $disabledExperimentalPath)) {
+        throw "La variante expérimentale n'est pas installée. Lancez d'abord Install."
+    }
+    if ((Test-Path -LiteralPath $experimentalPath) -and (Test-Path -LiteralPath $disabledExperimentalPath)) {
+        throw "Activation expérimentale refusée : les deux dossiers existent déjà : $experimentalPath et $disabledExperimentalPath"
+    }
+    if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $disabledStablePath)) {
+        throw "Activation expérimentale refusée : les deux dossiers existent déjà : $stablePath et $disabledStablePath"
+    }
     if (Test-Path -LiteralPath $stablePath) {
-        if (Test-Path -LiteralPath $disabledStablePath) { throw "Le dossier cible existe déjà: $disabledStablePath" }
         Move-Item -LiteralPath $stablePath -Destination $disabledStablePath
     }
     if (Test-Path -LiteralPath $disabledExperimentalPath) {
-        if (Test-Path -LiteralPath $experimentalPath) { throw "Le dossier cible existe déjà: $experimentalPath" }
         Move-Item -LiteralPath $disabledExperimentalPath -Destination $experimentalPath
-    }
-    if (-not (Test-Path -LiteralPath $experimentalPath)) {
-        throw "La variante expérimentale n'est pas installée. Lancez d'abord Install."
     }
 }
 
