@@ -10,6 +10,8 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 
         public CombatMode? PendingMode { get; set; }
 
+        public CombatMode? PreviousMode { get; set; }
+
         public PausePolicy PausePolicy { get; set; } = PausePolicy.AnyoneConsensusResume;
 
         public CombatSynchronizationPhase Phase { get; set; } = CombatSynchronizationPhase.Stable;

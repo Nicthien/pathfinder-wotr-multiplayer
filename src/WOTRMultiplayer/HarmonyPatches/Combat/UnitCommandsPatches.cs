@@ -170,6 +170,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         private static bool InterceptRealTimePlayerCommand(UnitCommand command)
         {
+            if (!RealTimeCommandExecutionScope.IsActive && Main.Multiplayer.IsRealTimeCombatBarrierActive
+                && command?.CreatedByPlayer == true)
+            {
+                Main.GetLogger<UnitCommandsPatches>().LogWarning("Real-time command was blocked by synchronization barrier. CommandType={CommandType}, UnitId={UnitId}", command.GetType().Name, command.Executor?.UniqueId);
+                return false;
+            }
+
             if (RealTimeCommandExecutionScope.IsActive || !Main.Multiplayer.IsRealTimeClientCombatActive
                 || command?.CreatedByPlayer != true)
             {

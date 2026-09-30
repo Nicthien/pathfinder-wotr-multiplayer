@@ -60,6 +60,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Clicks
                 ApplySpeedLimitInCombat = settings.ApplySpeedLimitInCombat,
                 Position = unit.Position.ToNetworkVector3()
             };
+            if (Main.Multiplayer.IsRealTimeCombatBarrierActive)
+            {
+                Main.GetLogger<ClicksPatches>().LogWarning("Real-time movement was blocked by synchronization barrier. UnitId={UnitId}", unit.UniqueId);
+                return false;
+            }
             if (Main.Multiplayer.IsRealTimeClientCombatActive)
             {
                 if (!Main.Multiplayer.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move, movement: unitMoveTo))

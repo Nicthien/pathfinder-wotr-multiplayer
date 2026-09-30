@@ -74,6 +74,7 @@ namespace WOTRMultiplayer.Services
             }
 
             _state.PendingMode = requestedMode;
+            _state.PreviousMode = _state.Mode;
             _state.Phase = CombatSynchronizationPhase.PreparingModeSwitch;
             _state.Epoch++;
             _state.LastAuthoritativeSequence = 0;
@@ -115,13 +116,55 @@ namespace WOTRMultiplayer.Services
             _state.CanonicalStateHash = canonicalStateHash;
             _state.RepairAttempts = 0;
             _state.ReadyPlayers.Clear();
+            _state.Phase = CombatSynchronizationPhase.Synchronizing;
+        }
+
+        public bool AcknowledgeModeCommit(long playerId, IEnumerable<long> connectedPlayers)
+        {
+            if (_state.Phase != CombatSynchronizationPhase.Synchronizing)
+            {
+                return false;
+            }
+
+            var currentPlayers = new HashSet<long>(connectedPlayers ?? Enumerable.Empty<long>());
+            if (!_state.RequiredPlayers.SetEquals(currentPlayers) || !_state.RequiredPlayers.Contains(playerId))
+            {
+                return false;
+            }
+
+            _state.ReadyPlayers.Add(playerId);
+            return _state.RequiredPlayers.IsSubsetOf(_state.ReadyPlayers);
+        }
+
+        public void CompleteModeCommit()
+        {
+            if (_state.Phase != CombatSynchronizationPhase.Synchronizing
+                || _state.RequiredPlayers.Count == 0
+                || !_state.RequiredPlayers.IsSubsetOf(_state.ReadyPlayers))
+            {
+                throw new InvalidOperationException("Every player must apply the committed combat mode before resuming.");
+            }
+
+            _state.PreviousMode = null;
+            _state.ReadyPlayers.Clear();
             _state.RequiredPlayers.Clear();
             _state.Phase = CombatSynchronizationPhase.Stable;
         }
 
         public void AbortModeSwitch()
         {
+            if (_state.Phase != CombatSynchronizationPhase.PreparingModeSwitch
+                && _state.Phase != CombatSynchronizationPhase.Synchronizing)
+            {
+                throw new InvalidOperationException("No combat-mode switch can be aborted.");
+            }
+
+            if (_state.PreviousMode.HasValue)
+            {
+                _state.Mode = _state.PreviousMode.Value;
+            }
             _state.PendingMode = null;
+            _state.PreviousMode = null;
             _state.ReadyPlayers.Clear();
             _state.RequiredPlayers.Clear();
             _state.Phase = CombatSynchronizationPhase.Stable;

@@ -40,6 +40,10 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         void SetPause(bool isPaused);
 
+        Task SetPauseAsync(bool isPaused);
+
+        Task SetTurnBasedCombatModeAsync(bool enabled);
+
         List<NetworkCharacter> GetPartyPlayers();
 
         bool IsUnitInParty(string unitId);

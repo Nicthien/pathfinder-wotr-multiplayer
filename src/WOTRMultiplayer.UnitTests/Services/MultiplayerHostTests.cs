@@ -215,6 +215,28 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeBarrier_BlocksHostOrderBroadcast()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Phase = CombatSynchronizationPhase.PreparingModeSwitch,
+                    Epoch = 3
+                }
+            };
+
+            Assert.That(_multiplayerHost.IsRealTimeCombatBarrierActive, Is.True);
+            Assert.That(_multiplayerHost.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.Move,
+                movement: new NetworkUnitMoveTo { InitiatorUnitId = "host-unit", Destination = new NetworkVector3() }), Is.False);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatCommandAccepted>._)).MustNotHaveHappened();
+        }
+
+        [Test]
         public void RealTimePause_ConsensusRequiresBothPlayers()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

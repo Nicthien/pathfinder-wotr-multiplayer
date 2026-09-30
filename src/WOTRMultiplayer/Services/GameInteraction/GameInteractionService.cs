@@ -311,6 +311,48 @@ namespace WOTRMultiplayer.Services.GameInteraction
             Game.Instance.IsPaused = false;
         }
 
+        public Task SetPauseAsync(bool isPaused)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    SetPause(isPaused);
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to change pause state. RequestedIsPaused={IsPaused}", isPaused);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
+        public Task SetTurnBasedCombatModeAsync(bool enabled)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    SettingsRoot.Game.TurnBased.EnableTurnBasedMode.SetValueAndConfirm(enabled);
+                    if (SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue() != enabled)
+                    {
+                        throw new InvalidOperationException("The game did not accept the requested combat mode.");
+                    }
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to change turn-based combat mode. Enabled={Enabled}", enabled);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
         public List<NetworkCharacter> GetPartyPlayers()
         {
             // Dungeon restart

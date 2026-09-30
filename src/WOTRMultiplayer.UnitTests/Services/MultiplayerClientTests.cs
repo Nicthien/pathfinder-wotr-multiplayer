@@ -154,6 +154,29 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeCommand_IsNotSentDuringSynchronizationBarrier()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Phase = CombatSynchronizationPhase.PreparingModeSwitch,
+                    Epoch = 6
+                }
+            };
+            _multiplayerClient.Game.Characters.Add(new NetworkCharacter { UnitId = "unit-a", Owner = new NetworkPlayer(42) });
+
+            Assert.That(_multiplayerClient.IsRealTimeCombatActive, Is.True);
+            Assert.That(_multiplayerClient.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move,
+                movement: new NetworkUnitMoveTo { InitiatorUnitId = "unit-a", Destination = new NetworkVector3() }), Is.False);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCombatCommand>._)).MustNotHaveHappened();
+        }
+
+        [Test]
         public void AcceptedRealTimeCommand_IsAppliedOnceAndStaleRepeatIsIgnored()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())

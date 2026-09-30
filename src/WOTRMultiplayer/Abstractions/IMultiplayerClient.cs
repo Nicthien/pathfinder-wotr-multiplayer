@@ -22,6 +22,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool IsRealTimeCombatActive { get; }
 
+        bool IsRealTimeCombatBarrierActive { get; }
+
         bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
 
         bool RequestRealTimePause(bool wantsPause);

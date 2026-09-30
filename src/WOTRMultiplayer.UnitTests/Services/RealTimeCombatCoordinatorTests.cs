@@ -21,6 +21,10 @@ namespace WOTRMultiplayer.UnitTests.Services
             coordinator.CommitModeSwitch(123UL);
             Assert.That(coordinator.State.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
             Assert.That(coordinator.State.CanonicalStateHash, Is.EqualTo(123UL));
+            Assert.That(coordinator.State.BlocksSaving, Is.True);
+            Assert.That(coordinator.AcknowledgeModeCommit(-1, new long[] { -1, 42 }), Is.False);
+            Assert.That(coordinator.AcknowledgeModeCommit(42, new long[] { -1, 42 }), Is.True);
+            coordinator.CompleteModeCommit();
             Assert.That(coordinator.State.BlocksSaving, Is.False);
         }
 
@@ -31,6 +35,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1 });
             coordinator.AcknowledgeBarrier(-1, new long[] { -1 });
             coordinator.CommitModeSwitch(1UL);
+            coordinator.AcknowledgeModeCommit(-1, new long[] { -1 });
+            coordinator.CompleteModeCommit();
             var oldEpoch = coordinator.State.Epoch;
             coordinator.NextAuthoritativeSequence();
             coordinator.BeginRepair();
@@ -126,6 +132,43 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(coordinator.State.Mode, Is.EqualTo(CombatMode.TurnBased));
         }
 
+        [Test]
+        public void ModeSwitch_CannotResumeUntilCommittedModeIsAppliedByBothPlayers()
+        {
+            var coordinator = Create();
+            coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1, 42 });
+            coordinator.AcknowledgeBarrier(-1, new long[] { -1, 42 });
+            coordinator.AcknowledgeBarrier(42, new long[] { -1, 42 });
+            coordinator.CommitModeSwitch(10UL);
+
+            Assert.That(coordinator.AcknowledgeModeCommit(-1, new long[] { -1, 42 }), Is.False);
+            Assert.Throws<InvalidOperationException>(() => coordinator.CompleteModeCommit());
+            Assert.That(coordinator.State.BlocksSaving, Is.True);
+            Assert.That(coordinator.AcknowledgeModeCommit(42, new long[] { -1, 42 }), Is.True);
+            coordinator.CompleteModeCommit();
+            Assert.That(coordinator.State.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+        }
+
+        [Test]
+        public void AbortAfterCommit_RestoresPreviousMode()
+        {
+            var coordinator = Create();
+            coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1 });
+            coordinator.AcknowledgeBarrier(-1, new long[] { -1 });
+            coordinator.CommitModeSwitch(10UL);
+
+            coordinator.AbortModeSwitch();
+
+            Assert.That(coordinator.State.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(coordinator.State.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+        }
+
+        [Test]
+        public void AbortWithoutModeSwitch_IsRejected()
+        {
+            Assert.Throws<InvalidOperationException>(() => Create().AbortModeSwitch());
+        }
+
         private static RealTimeCombatCoordinator Create()
         {
             return new RealTimeCombatCoordinator(new NetworkRealTimeCombatState());
@@ -137,6 +180,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1 });
             coordinator.AcknowledgeBarrier(-1, new long[] { -1 });
             coordinator.CommitModeSwitch(stateHash);
+            coordinator.AcknowledgeModeCommit(-1, new long[] { -1 });
+            coordinator.CompleteModeCommit();
             return coordinator;
         }
     }

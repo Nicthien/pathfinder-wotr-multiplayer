@@ -68,8 +68,10 @@ namespace WOTRMultiplayer.Services
         public bool IsInLobby => IsActive && Status == NetworkLobbyStage.Lobby;
 
         public bool IsRealTimeCombatActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
-            && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
-            && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
+            && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause;
+
+        public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
+            && Game.RealTimeCombat != null && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable;
 
         public void PublishRealTimeCombatSnapshot()
         {
@@ -1944,7 +1946,7 @@ namespace WOTRMultiplayer.Services
 
         public bool PublishLocalRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
-            if (!IsRealTimeCombatActive)
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
             {
                 return false;
             }
@@ -2042,7 +2044,7 @@ namespace WOTRMultiplayer.Services
 
         public bool RequestLocalRealTimePause(bool wantsPause)
         {
-            if (!IsRealTimeCombatActive)
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
             {
                 return false;
             }

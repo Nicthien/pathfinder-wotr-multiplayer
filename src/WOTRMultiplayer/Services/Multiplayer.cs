@@ -100,6 +100,9 @@ namespace WOTRMultiplayer.Services
 
         public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
 
+        public bool IsRealTimeCombatBarrierActive => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsRealTimeCombatBarrierActive)
+            || _multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive;
+
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
             return _multiplayerActorAccessor.Client.SubmitRealTimeCombatCommand(kind, movement, attack, ability);
