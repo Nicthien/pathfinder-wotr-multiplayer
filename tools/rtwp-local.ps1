@@ -16,6 +16,18 @@ $disabledStablePath = Join-Path $modsPath '00_WOTRMultiplayer.disabled'
 $disabledExperimentalPath = Join-Path $modsPath '00_WOTRMultiplayerRTwP.disabled'
 $buildPath = Join-Path $repoPath 'src\WOTRMultiplayer\bin\Release\net481'
 $backupRoot = Join-Path $repoPath 'local-artifacts\backups'
+$runtimeReadyPath = Join-Path $repoPath 'local-artifacts\RTWP_RUNTIME_VALIDATED.json'
+
+function Assert-RuntimeReady {
+    if (-not (Test-Path -LiteralPath $runtimeReadyPath)) {
+        throw 'Installation RTwP bloquée : le moteur de combat temps réel et ses tests en jeu ne sont pas encore validés. Build reste disponible sans toucher au jeu.'
+    }
+
+    $validation = Get-Content -LiteralPath $runtimeReadyPath -Raw | ConvertFrom-Json
+    if ($validation.protocolVersion -ne 1 -or $validation.twoInstanceCombatVerified -ne $true) {
+        throw 'Validation RTwP absente ou incompatible : installation refusée.'
+    }
+}
 
 function Assert-GameStopped {
     if (Get-Process -Name 'Wrath' -ErrorAction SilentlyContinue) {
@@ -64,6 +76,7 @@ function Backup-Mod([string]$path, [string]$name) {
 }
 
 function Install-Experimental {
+    Assert-RuntimeReady
     Assert-GameStopped
     Build-Experimental
     Backup-Mod $experimentalPath 'experimental'
@@ -89,6 +102,7 @@ function Enable-Stable {
 }
 
 function Enable-Experimental {
+    Assert-RuntimeReady
     Assert-GameStopped
     if (Test-Path -LiteralPath $stablePath) {
         if (Test-Path -LiteralPath $disabledStablePath) { throw "Le dossier cible existe déjà: $disabledStablePath" }

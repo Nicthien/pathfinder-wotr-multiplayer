@@ -24,6 +24,8 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 
         public HashSet<long> ReadyPlayers { get; set; } = [];
 
+        public HashSet<long> RequiredPlayers { get; set; } = [];
+
         public bool BlocksSaving => Phase != CombatSynchronizationPhase.Stable;
     }
 }

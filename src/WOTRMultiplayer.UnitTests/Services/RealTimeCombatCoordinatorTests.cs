@@ -57,6 +57,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             var coordinator = CreateRealTime(10UL);
             coordinator.BeginRepair();
             Assert.That(coordinator.CompleteRepair(20UL, 21UL), Is.False);
+            Assert.That(coordinator.State.BlocksSaving, Is.True);
             coordinator.BeginRepair();
             Assert.That(coordinator.CompleteRepair(30UL, 31UL), Is.False);
 
@@ -92,6 +93,30 @@ namespace WOTRMultiplayer.UnitTests.Services
             var coordinator = Create();
             coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1 });
             Assert.Throws<InvalidOperationException>(() => coordinator.BeginRepair());
+        }
+
+        [Test]
+        public void Repair_CannotBeginInTurnBasedMode()
+        {
+            Assert.Throws<InvalidOperationException>(() => Create().BeginRepair());
+        }
+
+        [Test]
+        public void ModeSwitch_RequiresAConnectedPlayer()
+        {
+            Assert.Throws<InvalidOperationException>(() => Create().RequestModeSwitch(CombatMode.RealTimeWithPause, Array.Empty<long>()));
+        }
+
+        [Test]
+        public void ModeSwitch_CannotCommitUntilEveryOriginalPlayerAcknowledges()
+        {
+            var coordinator = Create();
+            coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1, 42 });
+            coordinator.AcknowledgeBarrier(-1, new long[] { -1, 42 });
+
+            Assert.Throws<InvalidOperationException>(() => coordinator.CommitModeSwitch(10UL));
+            Assert.That(coordinator.AcknowledgeBarrier(42, new long[] { -1 }), Is.False);
+            Assert.That(coordinator.State.Mode, Is.EqualTo(CombatMode.TurnBased));
         }
 
         private static RealTimeCombatCoordinator Create()

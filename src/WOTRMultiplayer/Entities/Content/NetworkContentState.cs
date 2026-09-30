@@ -6,6 +6,8 @@ namespace WOTRMultiplayer.Entities.Content
     {
         public string GameVersion { get; set; }
 
+        public int RealTimeProtocolVersion { get; set; } = Combat.RealTime.NetworkRealTimeCombatState.ProtocolVersion;
+
         public List<NetworkDLC> DLCs { get; set; } = [];
 
         public List<NetworkMod> Mods { get; set; } = [];

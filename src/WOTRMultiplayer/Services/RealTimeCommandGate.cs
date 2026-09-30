@@ -18,16 +18,23 @@ namespace WOTRMultiplayer.Services
     {
         private readonly NetworkRealTimeCombatState _state;
         private readonly Dictionary<long, long> _lastSequenceByPlayer = [];
+        private long _trackedEpoch;
 
         public RealTimeCommandGate(NetworkRealTimeCombatState state)
         {
-            _state = state;
+            _state = state ?? throw new System.ArgumentNullException(nameof(state));
+            _trackedEpoch = state.Epoch;
         }
 
         public RealTimeCommandRejection Validate(
             RealTimeCommandEnvelope command,
             IReadOnlyDictionary<string, long> unitOwners)
         {
+            if (command == null || unitOwners == null || command.Sequence <= 0)
+            {
+                return RealTimeCommandRejection.InvalidSequence;
+            }
+
             if (_state.Mode != CombatMode.RealTimeWithPause)
             {
                 return RealTimeCommandRejection.RealTimeModeInactive;
@@ -41,6 +48,12 @@ namespace WOTRMultiplayer.Services
             if (command.Epoch != _state.Epoch)
             {
                 return RealTimeCommandRejection.WrongEpoch;
+            }
+
+            if (_trackedEpoch != _state.Epoch)
+            {
+                _lastSequenceByPlayer.Clear();
+                _trackedEpoch = _state.Epoch;
             }
 
             if (_lastSequenceByPlayer.TryGetValue(command.PlayerId, out var lastSequence)
@@ -66,6 +79,7 @@ namespace WOTRMultiplayer.Services
         public void Reset()
         {
             _lastSequenceByPlayer.Clear();
+            _trackedEpoch = _state.Epoch;
         }
     }
 }

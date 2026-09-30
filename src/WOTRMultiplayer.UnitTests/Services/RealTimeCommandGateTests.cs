@@ -56,6 +56,28 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(result, Is.EqualTo(RealTimeCommandRejection.SynchronizationBarrierActive));
         }
 
+        [Test]
+        public void FirstSequence_InNewEpoch_IsAcceptedWithoutManualReset()
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state);
+            var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
+            gate.Validate(Command(state.Epoch, 9, 42, "unit-a"), owners);
+            state.Epoch++;
+
+            Assert.That(gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), owners), Is.EqualTo(RealTimeCommandRejection.None));
+            Assert.That(gate.Validate(Command(state.Epoch - 1, 10, 42, "unit-a"), owners), Is.EqualTo(RealTimeCommandRejection.WrongEpoch));
+        }
+
+        [Test]
+        public void NonPositiveSequence_IsRejected()
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state);
+
+            Assert.That(gate.Validate(Command(state.Epoch, 0, 42, "unit-a"), new Dictionary<string, long> { ["unit-a"] = 42 }), Is.EqualTo(RealTimeCommandRejection.InvalidSequence));
+        }
+
         private static NetworkRealTimeCombatState RealTimeState()
         {
             return new NetworkRealTimeCombatState

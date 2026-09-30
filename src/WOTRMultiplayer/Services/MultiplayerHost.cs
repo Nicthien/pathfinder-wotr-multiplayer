@@ -19,6 +19,7 @@ using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
 using WOTRMultiplayer.Entities.Content;
 using WOTRMultiplayer.Entities.Dialogs;
@@ -193,6 +194,19 @@ namespace WOTRMultiplayer.Services
 
         public bool Start()
         {
+            var hostContent = Game.Players.FirstOrDefault(p => p.IsHost)?.ContentState;
+            var incompatiblePlayer = Game.Players.FirstOrDefault(p =>
+                p.ContentState.RealTimeProtocolVersion != NetworkRealTimeCombatState.ProtocolVersion
+                || (hostContent != null && !string.Equals(p.ContentState.GameVersion, hostContent.GameVersion, StringComparison.OrdinalIgnoreCase))
+                || p.ContentState.DiscrepantDLCs.Any()
+                || p.ContentState.DiscrepantMods.Any());
+            if (incompatiblePlayer != null)
+            {
+                Logger.LogWarning("Cannot start a lobby with mismatched game content or RTwP protocol. PlayerId={PlayerId}, ProtocolVersion={ProtocolVersion}", incompatiblePlayer.Id, incompatiblePlayer.ContentState.RealTimeProtocolVersion);
+                PlayerNotification.ShowModalMessage(WellKnownKeys.MultiplayerWindow.ExternalServers.Errors.ModConflict.Key);
+                return false;
+            }
+
             Logger.LogInformation("Starting hosted game...");
             SetLobbyStage(NetworkLobbyStage.PreparingToStart);
             Game.LoadedSaveSeed = CreateRandomSeed();

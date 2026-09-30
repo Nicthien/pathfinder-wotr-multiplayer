@@ -15,6 +15,7 @@ using WOTRMultiplayer.Config.Mapping;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Content;
 using WOTRMultiplayer.Entities.Items;
 using WOTRMultiplayer.Entities.Settings;
@@ -107,6 +108,26 @@ namespace WOTRMultiplayer.UnitTests.Services
             // Assert
             A.CallTo(() => _networkServer.HostTcpServer(A<NetworkServerConfiguration>.That.Matches(x => IsSameConfiguration(x, settings))))
                 .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void Start_RejectsDifferentRealTimeProtocolBeforeSaveTransfer()
+        {
+            var startUp = new NetworkGameStartUp { SavePath = Guid.NewGuid().ToString(), IsNewGameSequence = false };
+            A.CallTo(() => _multiplayerSettingsProvider.GetSettings()).Returns(new NetworkMultiplayerSettings());
+            _multiplayerHost.Create(Guid.NewGuid().ToString(), null, null, startUp);
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(-1)
+            {
+                IsHost = true,
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = NetworkRealTimeCombatState.ProtocolVersion }
+            });
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(42)
+            {
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = 0 }
+            });
+
+            Assert.That(_multiplayerHost.Start(), Is.False);
+            Assert.That(_multiplayerHost.Game.Stage, Is.EqualTo(NetworkLobbyStage.Lobby));
         }
 
         [Test]

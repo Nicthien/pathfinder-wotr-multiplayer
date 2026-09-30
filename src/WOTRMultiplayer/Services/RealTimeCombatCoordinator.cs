@@ -28,7 +28,7 @@ namespace WOTRMultiplayer.Services
 
         public bool IsCurrent(long epoch, long sequence)
         {
-            return epoch == _state.Epoch && sequence > _state.LastAuthoritativeSequence;
+            return epoch == _state.Epoch && sequence > 0 && sequence > _state.LastAuthoritativeSequence;
         }
 
         public void RequestModeSwitch(CombatMode requestedMode, IEnumerable<long> connectedPlayers)
@@ -43,11 +43,17 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
+            var players = new HashSet<long>(connectedPlayers ?? Enumerable.Empty<long>());
+            if (players.Count == 0)
+            {
+                throw new InvalidOperationException("A combat-mode switch requires at least one connected player.");
+            }
+
             _state.PendingMode = requestedMode;
             _state.Phase = CombatSynchronizationPhase.PreparingModeSwitch;
             _state.Epoch++;
             _state.LastAuthoritativeSequence = 0;
-            _state.ReadyPlayers = new HashSet<long>(connectedPlayers ?? Enumerable.Empty<long>());
+            _state.RequiredPlayers = players;
             _state.ReadyPlayers.Clear();
         }
 
@@ -58,9 +64,14 @@ namespace WOTRMultiplayer.Services
                 return false;
             }
 
+            var currentPlayers = new HashSet<long>(connectedPlayers ?? Enumerable.Empty<long>());
+            if (!_state.RequiredPlayers.SetEquals(currentPlayers) || !_state.RequiredPlayers.Contains(playerId))
+            {
+                return false;
+            }
+
             _state.ReadyPlayers.Add(playerId);
-            var requiredPlayers = new HashSet<long>(connectedPlayers ?? Enumerable.Empty<long>());
-            return requiredPlayers.IsSubsetOf(_state.ReadyPlayers);
+            return _state.RequiredPlayers.IsSubsetOf(_state.ReadyPlayers);
         }
 
         public void CommitModeSwitch(ulong canonicalStateHash)
@@ -70,11 +81,17 @@ namespace WOTRMultiplayer.Services
                 throw new InvalidOperationException("No combat-mode switch is ready to commit.");
             }
 
+            if (_state.RequiredPlayers.Count == 0 || !_state.RequiredPlayers.IsSubsetOf(_state.ReadyPlayers))
+            {
+                throw new InvalidOperationException("Every player must acknowledge the combat-mode switch.");
+            }
+
             _state.Mode = _state.PendingMode.Value;
             _state.PendingMode = null;
             _state.CanonicalStateHash = canonicalStateHash;
             _state.RepairAttempts = 0;
             _state.ReadyPlayers.Clear();
+            _state.RequiredPlayers.Clear();
             _state.Phase = CombatSynchronizationPhase.Stable;
         }
 
@@ -82,6 +99,7 @@ namespace WOTRMultiplayer.Services
         {
             _state.PendingMode = null;
             _state.ReadyPlayers.Clear();
+            _state.RequiredPlayers.Clear();
             _state.Phase = CombatSynchronizationPhase.Stable;
         }
 
@@ -94,9 +112,10 @@ namespace WOTRMultiplayer.Services
 
         public void BeginRepair()
         {
-            if (_state.Phase != CombatSynchronizationPhase.Stable)
+            if (_state.Mode != CombatMode.RealTimeWithPause ||
+                _state.Phase != CombatSynchronizationPhase.Stable && _state.Phase != CombatSynchronizationPhase.Repairing)
             {
-                throw new InvalidOperationException("Cannot begin repair while another barrier is active.");
+                throw new InvalidOperationException("Cannot begin real-time repair outside a real-time repair barrier.");
             }
 
             _state.Phase = CombatSynchronizationPhase.Repairing;
@@ -126,11 +145,6 @@ namespace WOTRMultiplayer.Services
                 _state.PendingMode = CombatMode.TurnBased;
                 _state.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
             }
-            else
-            {
-                _state.Phase = CombatSynchronizationPhase.Stable;
-            }
-
             return false;
         }
 
