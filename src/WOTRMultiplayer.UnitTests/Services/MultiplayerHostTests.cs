@@ -67,6 +67,21 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.False);
         }
 
+        [Test]
+        public void RunningRealTimeCombat_BlocksSavingUntilTurnBasedOrCombatEnd()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            _multiplayerHost.Game.RealTimeCombat.Mode = CombatMode.TurnBased;
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.False);
+        }
+
         [SetUp]
         public void SetUp()
         {
