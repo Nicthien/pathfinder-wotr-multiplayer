@@ -130,7 +130,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
             };
-            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._, A<System.Collections.Generic.List<NetworkAreaEffect>>._, false))
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
                 .Returns(Task.CompletedTask);
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
@@ -158,8 +158,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
             };
-            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
-                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false))
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
                 .Returns(Task.FromException(new InvalidOperationException("missing unit")));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
 
@@ -170,7 +169,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             });
 
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>.That.Matches(x =>
-                x.Epoch == 2 && x.Sequence == 1 && !x.Applied && x.FailureReason == nameof(InvalidOperationException))))
+                x.Epoch == 2 && x.Sequence == 1 && !x.Applied && x.FailureReason.Contains("missing unit"))))
                 .MustHaveHappenedOnceExactly();
         }
 
@@ -333,8 +332,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
             A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
-            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
-                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._)).Returns(Task.CompletedTask);
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient);
@@ -377,8 +375,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
             };
             A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
-            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
-                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._)).Returns(Task.CompletedTask);
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient);
@@ -410,8 +407,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
             A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(true)).Returns(Task.CompletedTask);
-            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
-                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._)).Returns(Task.CompletedTask);
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient);
@@ -487,8 +483,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
             A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(true)).Returns(Task.CompletedTask);
-            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
-                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._)).Returns(Task.CompletedTask);
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient);

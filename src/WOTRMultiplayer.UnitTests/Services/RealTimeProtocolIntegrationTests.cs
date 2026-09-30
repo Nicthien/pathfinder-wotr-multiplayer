@@ -339,8 +339,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
-            A.CallTo(() => clientCombat.UpdateCombatStateAsync(A<NetworkCombatState>._,
-                A<List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .Returns(Task.CompletedTask);
             var mainThread = A.Fake<IMainThreadAccessor>();
             A.CallTo(() => mainThread.Post(A<Action>._)).Invokes(call => ((Action)call.Arguments[0])());
 

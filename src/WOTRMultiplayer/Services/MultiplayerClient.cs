@@ -1082,7 +1082,7 @@ namespace WOTRMultiplayer.Services
                 Game.RealTimeCombat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
 
                 var state = Mapper.Map<NetworkCombatState>(message.State);
-                await CombatInteraction.UpdateCombatStateAsync(state, [], requiresFullUpdate: false);
+                await CombatInteraction.UpdateRealTimeCombatStateAsync(state);
                 var actual = await CombatInteraction.GetRealTimeCombatStateAsync();
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = actual });
                 Game.RealTimeCombat.LastAuthoritativeSequence = message.Sequence;
@@ -1099,12 +1099,13 @@ namespace WOTRMultiplayer.Services
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Real-time combat snapshot could not be applied. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+                var reason = $"{ex.GetType().Name}:{ex.Message}";
                 Send(new ClientRealTimeStateHash
                 {
                     Epoch = message.Epoch,
                     Sequence = message.Sequence,
                     Applied = false,
-                    FailureReason = ex.GetType().Name
+                    FailureReason = reason.Length > 512 ? reason.Substring(0, 512) : reason
                 });
             }
             finally
@@ -1342,7 +1343,7 @@ namespace WOTRMultiplayer.Services
 
         private async Task<ulong> ApplyRealTimeModeSnapshotAsync(Networking.Messages.Contracts.NetworkCombatState snapshot)
         {
-            await CombatInteraction.UpdateCombatStateAsync(Mapper.Map<NetworkCombatState>(snapshot), [], requiresFullUpdate: false);
+            await CombatInteraction.UpdateRealTimeCombatStateAsync(Mapper.Map<NetworkCombatState>(snapshot));
             var appliedState = await CombatInteraction.GetRealTimeCombatStateAsync();
             return RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = appliedState });
         }

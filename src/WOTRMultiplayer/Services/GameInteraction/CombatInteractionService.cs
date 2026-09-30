@@ -36,6 +36,7 @@ using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Entities.Units.Parts;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.Services.GameInteraction
 {
@@ -342,6 +343,32 @@ namespace WOTRMultiplayer.Services.GameInteraction
             });
 
             return taskCompletion.Task;
+        }
+
+        public Task UpdateRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
+                        id => _gameStateLookupService.GetUnitEntity(id) != null,
+                        area => _gameStateLookupService.GetAreaEffect(area) != null);
+                    if (missing != null)
+                    {
+                        throw new InvalidOperationException(missing);
+                    }
+                    UpdateCombatState(networkCombatState, requiresFullUpdate: false);
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to apply real-time combat checkpoint");
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
         }
 
         public void RunTacticalUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand)
