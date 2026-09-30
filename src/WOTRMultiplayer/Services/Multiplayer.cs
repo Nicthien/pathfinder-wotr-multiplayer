@@ -1916,6 +1916,18 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
+                if (_multiplayerActorAccessor.Host is MultiplayerHost realTimeHost && realTimeHost.IsRealTimeCombatActive)
+                {
+                    realTimeHost.RequestLocalRealTimePause(wantsPause: !isPaused);
+                    return false;
+                }
+
+                if (_multiplayerActorAccessor.Client.IsRealTimeCombatActive)
+                {
+                    _multiplayerActorAccessor.Client.RequestRealTimePause(wantsPause: !isPaused);
+                    return false;
+                }
+
                 if (_multiplayerActorAccessor.Current == null)
                 {
                     return true;

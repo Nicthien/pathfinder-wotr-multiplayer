@@ -181,5 +181,30 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustHaveHappenedOnceExactly();
             Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
         }
+
+        [Test]
+        public void RealTimePauseChange_IgnoresStaleStateAndAppliesNewState()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 7 }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimePauseChanged>(_networkClient);
+            var pause = new NotifyRealTimePauseChanged
+            {
+                Epoch = 7,
+                Sequence = 1,
+                IsPaused = true,
+                Policy = (int)PausePolicy.HostOnly,
+                PausedPlayers = [-1]
+            };
+
+            handler.Invoke(-1, pause);
+            handler.Invoke(-1, pause);
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.IsManualPauseActive, Is.True);
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.PausePolicy, Is.EqualTo(PausePolicy.HostOnly));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
+        }
     }
 }

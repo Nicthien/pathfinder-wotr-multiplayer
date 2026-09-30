@@ -94,27 +94,6 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(coordinator.State.Mode, Is.EqualTo(CombatMode.TurnBased));
         }
 
-        [TestCase(PausePolicy.HostOnly, -1, true)]
-        [TestCase(PausePolicy.HostOnly, 42, false)]
-        [TestCase(PausePolicy.AnyoneConsensusResume, 42, true)]
-        [TestCase(PausePolicy.AnyoneFreeResume, 42, true)]
-        public void PausePolicy_ControlsWhoMayPause(PausePolicy policy, long playerId, bool expected)
-        {
-            var coordinator = Create();
-            coordinator.State.PausePolicy = policy;
-            Assert.That(coordinator.CanPlayerPause(playerId, -1), Is.EqualTo(expected));
-        }
-
-        [Test]
-        public void ConsensusResume_RequiresOtherPlayersToReleasePause()
-        {
-            var coordinator = Create();
-            coordinator.State.PausePolicy = PausePolicy.AnyoneConsensusResume;
-
-            Assert.That(coordinator.CanPlayerResume(42, -1, new long[] { 42, 99 }), Is.False);
-            Assert.That(coordinator.CanPlayerResume(42, -1, new long[] { 42 }), Is.True);
-        }
-
         [Test]
         public void ConcurrentBarrier_IsRejected()
         {

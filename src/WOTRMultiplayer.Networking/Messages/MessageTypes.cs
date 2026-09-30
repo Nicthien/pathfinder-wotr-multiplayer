@@ -300,7 +300,9 @@
             NotifyRealTimeCombatSnapshot,
             ClientRealTimeStateHash,
             ClientRealTimeCombatCommand,
-            NotifyRealTimeCombatCommandAccepted
+            NotifyRealTimeCombatCommandAccepted,
+            ClientRealTimePauseRequested,
+            NotifyRealTimePauseChanged
         }
 
         public static class Mods

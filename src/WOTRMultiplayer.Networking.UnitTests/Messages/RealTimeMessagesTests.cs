@@ -81,5 +81,26 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.ClientSequence, Is.EqualTo(8));
             Assert.That(copy.Attack.TargetUnitId, Is.EqualTo("unit-b"));
         }
+
+        [Test]
+        public void PauseState_RoundTripsVotes()
+        {
+            var source = new NotifyRealTimePauseChanged
+            {
+                Epoch = 2,
+                Sequence = 4,
+                IsPaused = true,
+                Policy = 1,
+                PausedPlayers = [42],
+                ResumeVotes = [-1]
+            };
+
+            var copy = Serializer.DeepClone(source);
+
+            Assert.That(copy.Epoch, Is.EqualTo(2));
+            Assert.That(copy.Sequence, Is.EqualTo(4));
+            Assert.That(copy.PausedPlayers, Is.EquivalentTo(new long[] { 42 }));
+            Assert.That(copy.ResumeVotes, Is.EquivalentTo(new long[] { -1 }));
+        }
     }
 }

@@ -215,6 +215,37 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimePause_ConsensusRequiresBothPlayers()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Epoch = 7,
+                    PausePolicy = PausePolicy.AnyoneConsensusResume
+                }
+            };
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(NetworkConstants.HostPlayerId) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimePauseRequested>(_networkServer);
+
+            handler.Invoke(42, new ClientRealTimePauseRequested { Epoch = 7, RequestSequence = 1, PlayerId = 42, WantsPause = true });
+            handler.Invoke(42, new ClientRealTimePauseRequested { Epoch = 7, RequestSequence = 2, PlayerId = 42, WantsPause = false });
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.IsManualPauseActive, Is.True);
+
+            Assert.That(_multiplayerHost.RequestLocalRealTimePause(wantsPause: false), Is.True);
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.IsManualPauseActive, Is.False);
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedTwiceExactly();
+            A.CallTo(() => _gameInteractionService.SetPause(false)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimePauseChanged>.That.Matches(x => x.Epoch == 7 && x.Sequence == 3 && !x.IsPaused)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void OnNotifyDropItem__CallsGameInteraction()
         {
             // Arrange

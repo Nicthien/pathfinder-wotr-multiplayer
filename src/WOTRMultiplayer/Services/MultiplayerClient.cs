@@ -49,6 +49,8 @@ namespace WOTRMultiplayer.Services
         private readonly object _realTimeCommandSequenceLock = new();
         private long _realTimeCommandEpoch;
         private long _nextRealTimeCommandSequence;
+        private long _realTimePauseRequestEpoch;
+        private long _nextRealTimePauseRequestSequence;
 
         public Action OnNetworkError { get; set; }
 
@@ -130,6 +132,8 @@ namespace WOTRMultiplayer.Services
             {
                 _realTimeCommandEpoch = 0;
                 _nextRealTimeCommandSequence = 0;
+                _realTimePauseRequestEpoch = 0;
+                _nextRealTimePauseRequestSequence = 0;
             }
 
             _networkClient?.Reset();
@@ -165,6 +169,32 @@ namespace WOTRMultiplayer.Services
                     _nextRealTimeCommandSequence = 0;
                 }
                 message.Sequence = ++_nextRealTimeCommandSequence;
+                Send(message);
+            }
+            return true;
+        }
+
+        public bool RequestRealTimePause(bool wantsPause)
+        {
+            if (!IsRealTimeCombatActive)
+            {
+                return false;
+            }
+
+            var message = new ClientRealTimePauseRequested
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                PlayerId = Game.LocalPlayerId,
+                WantsPause = wantsPause
+            };
+            lock (_realTimeCommandSequenceLock)
+            {
+                if (_realTimePauseRequestEpoch != message.Epoch)
+                {
+                    _realTimePauseRequestEpoch = message.Epoch;
+                    _nextRealTimePauseRequestSequence = 0;
+                }
+                message.RequestSequence = ++_nextRealTimePauseRequestSequence;
                 Send(message);
             }
             return true;
@@ -651,6 +681,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyCombatTurnEnded>(OnNotifyCombatTurnEnded)
                .On<NotifyRealTimeCombatSnapshot>(OnNotifyRealTimeCombatSnapshot)
                .On<NotifyRealTimeCombatCommandAccepted>(OnNotifyRealTimeCombatCommandAccepted)
+               .On<NotifyRealTimePauseChanged>(OnNotifyRealTimePauseChanged)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -1081,6 +1112,24 @@ namespace WOTRMultiplayer.Services
             {
                 _realTimeSnapshotGate.Release();
             }
+        }
+
+        private void OnNotifyRealTimePauseChanged(long receivedFrom, NotifyRealTimePauseChanged message)
+        {
+            if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause
+                || message.Epoch != Game.RealTimeCombat.Epoch
+                || message.Sequence <= Game.RealTimeCombat.PauseSequence
+                || message.IsPaused != (message.PausedPlayers?.Count > 0)
+                || !Enum.IsDefined(typeof(PausePolicy), message.Policy))
+            {
+                return;
+            }
+
+            Game.RealTimeCombat.PauseSequence = message.Sequence;
+            Game.RealTimeCombat.PausePolicy = (PausePolicy)message.Policy;
+            Game.RealTimeCombat.PausedPlayers = [.. message.PausedPlayers];
+            Game.RealTimeCombat.ResumeVotes = [.. message.ResumeVotes ?? []];
+            GameInteraction.SetPause(message.IsPaused || Game.ForcedPause != null);
         }
 
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)

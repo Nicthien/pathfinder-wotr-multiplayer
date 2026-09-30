@@ -4,7 +4,7 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 3;
+        public const int ProtocolVersion = 4;
 
         public CombatMode Mode { get; set; } = CombatMode.TurnBased;
 
@@ -25,6 +25,14 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
         public HashSet<long> ReadyPlayers { get; set; } = [];
 
         public HashSet<long> RequiredPlayers { get; set; } = [];
+
+        public HashSet<long> PausedPlayers { get; set; } = [];
+
+        public HashSet<long> ResumeVotes { get; set; } = [];
+
+        public long PauseSequence { get; set; }
+
+        public bool IsManualPauseActive => PausedPlayers.Count > 0;
 
         public bool BlocksSaving => Phase != CombatSynchronizationPhase.Stable;
     }

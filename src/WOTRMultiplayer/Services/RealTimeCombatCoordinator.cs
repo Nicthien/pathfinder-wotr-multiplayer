@@ -187,20 +187,5 @@ namespace WOTRMultiplayer.Services
             _state.Phase = CombatSynchronizationPhase.Stable;
         }
 
-        public bool CanPlayerPause(long playerId, long hostPlayerId)
-        {
-            return _state.PausePolicy != PausePolicy.HostOnly || playerId == hostPlayerId;
-        }
-
-        public bool CanPlayerResume(long playerId, long hostPlayerId, IEnumerable<long> pausedPlayers)
-        {
-            return _state.PausePolicy switch
-            {
-                PausePolicy.HostOnly => playerId == hostPlayerId,
-                PausePolicy.AnyoneFreeResume => true,
-                PausePolicy.AnyoneConsensusResume => (pausedPlayers ?? Enumerable.Empty<long>()).All(x => x == playerId),
-                _ => false,
-            };
-        }
     }
 }

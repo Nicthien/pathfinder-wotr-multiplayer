@@ -51,10 +51,14 @@ namespace WOTRMultiplayer.Services
         private readonly IHashService _hashService;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
         private readonly object _realTimeCommandLock = new();
+        private readonly object _realTimePauseLock = new();
+        private readonly Dictionary<long, long> _lastRealTimePauseRequestByPlayer = [];
         private RealTimeCommandGate _realTimeCommandGate;
         private NetworkRealTimeCombatState _realTimeCommandGateState;
         private long _realTimeLocalCommandEpoch;
         private long _nextRealTimeLocalCommandSequence;
+        private long _realTimePauseRequestEpoch;
+        private long _nextLocalRealTimePauseRequestSequence;
         private DateTime _nextRealTimeSnapshotAt;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
@@ -158,6 +162,12 @@ namespace WOTRMultiplayer.Services
                 _realTimeCommandGateState = null;
                 _realTimeLocalCommandEpoch = 0;
                 _nextRealTimeLocalCommandSequence = 0;
+            }
+            lock (_realTimePauseLock)
+            {
+                _lastRealTimePauseRequestByPlayer.Clear();
+                _realTimePauseRequestEpoch = 0;
+                _nextLocalRealTimePauseRequestSequence = 0;
             }
 
             var settings = SettingsService.GetSettings();
@@ -1757,6 +1767,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientInvalidUnitTurnStartRequested>(OnClientInvalidUnitTurnStartRequested)
                .On<ClientRealTimeStateHash>(OnClientRealTimeStateHash)
                .On<ClientRealTimeCombatCommand>(OnClientRealTimeCombatCommand)
+               .On<ClientRealTimePauseRequested>(OnClientRealTimePauseRequested)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -2026,6 +2037,85 @@ namespace WOTRMultiplayer.Services
                 Attack = message.Attack,
                 Ability = message.Ability
             });
+            return true;
+        }
+
+        public bool RequestLocalRealTimePause(bool wantsPause)
+        {
+            if (!IsRealTimeCombatActive)
+            {
+                return false;
+            }
+
+            long requestSequence;
+            lock (_realTimePauseLock)
+            {
+                if (_realTimePauseRequestEpoch != Game.RealTimeCombat.Epoch)
+                {
+                    _realTimePauseRequestEpoch = Game.RealTimeCombat.Epoch;
+                    _nextLocalRealTimePauseRequestSequence = 0;
+                }
+                requestSequence = ++_nextLocalRealTimePauseRequestSequence;
+            }
+
+            return ApplyRealTimePauseRequest(Game.LocalPlayerId, new ClientRealTimePauseRequested
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                RequestSequence = requestSequence,
+                PlayerId = Game.LocalPlayerId,
+                WantsPause = wantsPause
+            });
+        }
+
+        private void OnClientRealTimePauseRequested(long receivedFrom, ClientRealTimePauseRequested message)
+        {
+            ApplyRealTimePauseRequest(receivedFrom, message);
+        }
+
+        private bool ApplyRealTimePauseRequest(long receivedFrom, ClientRealTimePauseRequested message)
+        {
+            if (Game?.Combat?.Stage != NetworkCombatStage.Running || Game.RealTimeCombat == null
+                || message == null || message.PlayerId != receivedFrom || message.Epoch != Game.RealTimeCombat.Epoch
+                || message.RequestSequence <= 0 || GetPlayer(receivedFrom) == null)
+            {
+                return false;
+            }
+
+            NotifyRealTimePauseChanged notification;
+            lock (_realTimePauseLock)
+            {
+                if (_realTimePauseRequestEpoch != message.Epoch)
+                {
+                    _lastRealTimePauseRequestByPlayer.Clear();
+                    _realTimePauseRequestEpoch = message.Epoch;
+                }
+                if (_lastRealTimePauseRequestByPlayer.TryGetValue(receivedFrom, out var last)
+                    && message.RequestSequence <= last)
+                {
+                    return false;
+                }
+
+                var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
+                if (!new RealTimePauseCoordinator(Game.RealTimeCombat).TryRequest(receivedFrom, Game.LocalPlayerId, message.WantsPause, players))
+                {
+                    Logger.LogDebug("Real-time pause request was denied. PlayerId={PlayerId}, WantsPause={WantsPause}, Policy={Policy}", receivedFrom, message.WantsPause, Game.RealTimeCombat.PausePolicy);
+                    return false;
+                }
+
+                _lastRealTimePauseRequestByPlayer[receivedFrom] = message.RequestSequence;
+                notification = new NotifyRealTimePauseChanged
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Sequence = Game.RealTimeCombat.PauseSequence,
+                    IsPaused = Game.RealTimeCombat.IsManualPauseActive,
+                    Policy = (int)Game.RealTimeCombat.PausePolicy,
+                    PausedPlayers = [.. Game.RealTimeCombat.PausedPlayers],
+                    ResumeVotes = [.. Game.RealTimeCombat.ResumeVotes]
+                };
+            }
+
+            GameInteraction.SetPause(notification.IsPaused || Game.ForcedPause != null);
+            Send(notification);
             return true;
         }
 
