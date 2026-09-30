@@ -301,7 +301,7 @@ namespace WOTRMultiplayer.UI.Controllers
             var actor = _multiplayerActorAccessor.Current as MultiplayerActorBase;
             var state = actor?.Game?.RealTimeCombat;
             return state == null ? string.Empty
-                : $"{actor.Game.Combat?.Stage}:{state.Mode}:{state.PreferredMode}:{state.PreferenceSequence}:{state.Phase}:{state.PausePolicy}:{state.PauseSequence}:{state.Epoch}";
+                : $"{actor.Game.Combat?.Stage}:{state.Mode}:{state.PreferredMode}:{state.PreferenceSequence}:{state.Phase}:{state.PausePolicy}:{state.PauseSequence}:{state.Epoch}:{state.ResponseTimeMs / 10}:{state.MissingSnapshotReplies}";
         }
 
         public void UpdateCharacterOwnerDropdown(NetworkCharacter character, bool silent = false)
@@ -478,6 +478,12 @@ namespace WOTRMultiplayer.UI.Controllers
                 Localized(state.PreferredMode == CombatMode.RealTimeWithPause
                     ? WellKnownKeys.LobbyWindow.RealTime.ModeRealTime.Key
                     : WellKnownKeys.LobbyWindow.RealTime.TurnBased.Key)));
+            if (inCombat && state.Mode == CombatMode.RealTimeWithPause)
+            {
+                AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.NetworkResponse.Key),
+                    state.ResponseTimeMs > 0 ? state.ResponseTimeMs.ToString() : "—",
+                    state.MissingSnapshotReplies));
+            }
 
             if (state.Phase != CombatSynchronizationPhase.Stable)
             {

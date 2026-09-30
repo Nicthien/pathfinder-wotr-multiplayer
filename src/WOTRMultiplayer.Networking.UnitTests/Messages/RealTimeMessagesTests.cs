@@ -16,6 +16,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 Epoch = 7,
                 Sequence = 12,
                 CanonicalStateHash = 987654321UL,
+                ResponseTimeMs = 42,
+                MissingReplies = 3,
                 State = new NetworkCombatState { Units = [new NetworkUnit { Id = "unit-a" }] }
             };
 
@@ -24,6 +26,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.Epoch, Is.EqualTo(7));
             Assert.That(copy.Sequence, Is.EqualTo(12));
             Assert.That(copy.CanonicalStateHash, Is.EqualTo(987654321UL));
+            Assert.That(copy.ResponseTimeMs, Is.EqualTo(42));
+            Assert.That(copy.MissingReplies, Is.EqualTo(3));
             Assert.That(copy.State.Units[0].Id, Is.EqualTo("unit-a"));
         }
 

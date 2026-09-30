@@ -404,6 +404,12 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("networkResponse")]
+            public static class NetworkResponse
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("modeRealTime")]
             public static class ModeRealTime
             {

@@ -102,6 +102,7 @@
                 "combatStatus": "Combat: {0}",
                 "pausePolicy": "Pause policy: {0}",
                 "preferredMode": "Preferred combat mode: {0}",
+                "networkResponse": "Snapshot response: {0} ms; missing replies: {1}",
                 "modeRealTime": "Real time with pause",
                 "turnBased": "Turn based",
                 "synchronizing": "Synchronizing",

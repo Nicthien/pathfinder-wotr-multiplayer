@@ -4,13 +4,17 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 9;
+        public const int ProtocolVersion = 10;
 
         public CombatMode Mode { get; set; } = CombatMode.TurnBased;
 
         public CombatMode PreferredMode { get; set; } = CombatMode.TurnBased;
 
         public long PreferenceSequence { get; set; }
+
+        public int ResponseTimeMs { get; set; }
+
+        public long MissingSnapshotReplies { get; set; }
 
         public CombatMode? PendingMode { get; set; }
 

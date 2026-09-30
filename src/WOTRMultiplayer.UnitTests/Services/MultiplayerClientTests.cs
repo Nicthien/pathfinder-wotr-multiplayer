@@ -139,12 +139,16 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 Epoch = 2,
                 Sequence = 1,
+                ResponseTimeMs = 42,
+                MissingReplies = 3,
                 State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
             });
 
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>.That.Matches(x => x.Epoch == 2 && x.Sequence == 1)))
                 .MustHaveHappenedOnceExactly();
             Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.ResponseTimeMs, Is.EqualTo(42));
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.MissingSnapshotReplies, Is.EqualTo(3));
         }
 
         [Test]

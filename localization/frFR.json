@@ -48,6 +48,7 @@
         "combatStatus": "Combat : {0}",
         "pausePolicy": "Politique de pause : {0}",
         "preferredMode": "Mode préféré pour les combats : {0}",
+        "networkResponse": "Réponse des états : {0} ms ; réponses manquantes : {1}",
         "modeRealTime": "Temps réel avec pause",
         "turnBased": "Tour par tour",
         "synchronizing": "Synchronisation",

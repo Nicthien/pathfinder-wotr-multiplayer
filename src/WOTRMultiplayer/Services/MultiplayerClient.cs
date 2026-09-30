@@ -1078,6 +1078,9 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
+                Game.RealTimeCombat.ResponseTimeMs = Math.Max(0, message.ResponseTimeMs);
+                Game.RealTimeCombat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
+
                 var state = Mapper.Map<NetworkCombatState>(message.State);
                 await CombatInteraction.UpdateCombatStateAsync(state, [], requiresFullUpdate: false);
                 var actual = await CombatInteraction.GetRealTimeCombatStateAsync();

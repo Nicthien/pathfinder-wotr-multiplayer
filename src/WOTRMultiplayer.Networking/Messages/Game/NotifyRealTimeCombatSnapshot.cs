@@ -22,5 +22,13 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 
         [ProtoMember(4)]
         public NetworkCombatState State { get; set; }
+
+        [ProtoMember(5)]
+        [LogMe]
+        public int ResponseTimeMs { get; set; }
+
+        [ProtoMember(6)]
+        [LogMe]
+        public long MissingReplies { get; set; }
     }
 }

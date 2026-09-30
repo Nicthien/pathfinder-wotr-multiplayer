@@ -52,6 +52,7 @@ namespace WOTRMultiplayer.Services
         private readonly IHashService _hashService;
         private readonly IMainThreadAccessor _mainThreadAccessor;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
+        private readonly ConcurrentDictionary<(long Epoch, long Sequence), DateTime> _realTimeSnapshotSentAt = new();
         private readonly object _realTimeCommandLock = new();
         private readonly object _realTimePauseLock = new();
         private readonly Dictionary<long, long> _lastRealTimePauseRequestByPlayer = [];
@@ -124,11 +125,16 @@ namespace WOTRMultiplayer.Services
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             var sequence = coordinator.PublishAuthoritativeSnapshot(hash);
             _realTimeSnapshotHashes[(Game.RealTimeCombat.Epoch, sequence)] = hash;
+            _realTimeSnapshotSentAt[(Game.RealTimeCombat.Epoch, sequence)] = DateTime.UtcNow;
             foreach (var key in _realTimeSnapshotHashes.Keys)
             {
                 if (key.Epoch != Game.RealTimeCombat.Epoch || key.Sequence < sequence - 32)
                 {
                     _realTimeSnapshotHashes.TryRemove(key, out _);
+                    if (_realTimeSnapshotSentAt.TryRemove(key, out _) && key.Epoch == Game.RealTimeCombat.Epoch)
+                    {
+                        Game.RealTimeCombat.MissingSnapshotReplies++;
+                    }
                 }
             }
             Send(new NotifyRealTimeCombatSnapshot
@@ -136,6 +142,8 @@ namespace WOTRMultiplayer.Services
                 Epoch = Game.RealTimeCombat.Epoch,
                 Sequence = sequence,
                 CanonicalStateHash = hash,
+                ResponseTimeMs = Game.RealTimeCombat.ResponseTimeMs,
+                MissingReplies = Game.RealTimeCombat.MissingSnapshotReplies,
                 State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
             });
         }
@@ -550,6 +558,8 @@ namespace WOTRMultiplayer.Services
         {
             Logger.LogInformation("Resetting");
             Game = null;
+            _realTimeSnapshotHashes.Clear();
+            _realTimeSnapshotSentAt.Clear();
 
             _networkHost.Reset();
         }
@@ -2246,6 +2256,14 @@ namespace WOTRMultiplayer.Services
             {
                 Logger.LogDebug("Ignoring stale real-time state hash. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, message.Epoch, message.Sequence);
                 return;
+            }
+
+            if (_realTimeSnapshotSentAt.TryRemove((message.Epoch, message.Sequence), out var sentAt))
+            {
+                var elapsed = Math.Max(0, Math.Min(60_000, (int)(DateTime.UtcNow - sentAt).TotalMilliseconds));
+                Game.RealTimeCombat.ResponseTimeMs = Game.RealTimeCombat.ResponseTimeMs == 0
+                    ? elapsed
+                    : (Game.RealTimeCombat.ResponseTimeMs * 4 + elapsed) / 5;
             }
 
             if (requiresRepair || !message.Applied)

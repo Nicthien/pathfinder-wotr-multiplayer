@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutoMapper;
@@ -28,6 +29,49 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class RealTimeProtocolIntegrationTests
     {
+        [Test]
+        public void TwoActors_SnapshotReply_UpdatesHostResponseTime()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.Game.RealTimeCombat.PreferredMode = CombatMode.RealTimeWithPause;
+            client.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.PublishRealTimeCombatSnapshot();
+
+            var snapshot = (NotifyRealTimeCombatSnapshot)queued.Dequeue();
+            var sentAt = (ConcurrentDictionary<(long Epoch, long Sequence), DateTime>)typeof(MultiplayerHost)
+                .GetField("_realTimeSnapshotSentAt", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(host);
+            sentAt[(snapshot.Epoch, snapshot.Sequence)] = DateTime.UtcNow.AddMilliseconds(-50);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(clientNetwork)(NetworkConstants.HostPlayerId, snapshot);
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeStateHash>(hostNetwork)(42,
+                (ClientRealTimeStateHash)queued.Dequeue());
+
+            Assert.That(host.Game.RealTimeCombat.ResponseTimeMs, Is.GreaterThanOrEqualTo(50));
+            Assert.That(client.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(snapshot.Sequence));
+            Assert.That(sentAt.ContainsKey((snapshot.Epoch, snapshot.Sequence)), Is.False);
+        }
+
+        [Test]
+        public void Host_UnansweredSnapshot_AgesOutAsMissingApplicationReply()
+        {
+            var (host, _, _, _, queued, _) = CreatePair();
+            host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.Game.RealTimeCombat.PreferredMode = CombatMode.RealTimeWithPause;
+            var nextSnapshot = typeof(MultiplayerHost).GetField("_nextRealTimeSnapshotAt",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+            for (var i = 0; i < 34; i++)
+            {
+                nextSnapshot.SetValue(host, DateTime.MinValue);
+                host.PublishRealTimeCombatSnapshot();
+            }
+
+            Assert.That(host.Game.RealTimeCombat.MissingSnapshotReplies, Is.EqualTo(1));
+            var latest = (NotifyRealTimeCombatSnapshot)queued.ToArray()[33];
+            Assert.That(latest.MissingReplies, Is.EqualTo(1));
+        }
+
         [Test]
         public async Task TwoActors_LostAndDuplicatePrepare_ConvergeOnRealTime()
         {
