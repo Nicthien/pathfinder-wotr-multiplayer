@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Combat.Crusades;
 using WOTRMultiplayer.Entities.Units;
 
@@ -60,6 +61,10 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         void AttackUnit(NetworkUnitAttack attack);
 
         void UseAbility(NetworkAbilityUse networkAbilityUse);
+
+        bool ExecuteRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability);
+
+        Task<bool> ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability);
 
         Task<bool> StartCombatAsync(NetworkCombatState networkCombatState);
 

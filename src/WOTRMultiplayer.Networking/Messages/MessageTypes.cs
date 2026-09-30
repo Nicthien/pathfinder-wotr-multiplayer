@@ -302,7 +302,9 @@
             ClientRealTimeCombatCommand,
             NotifyRealTimeCombatCommandAccepted,
             ClientRealTimePauseRequested,
-            NotifyRealTimePauseChanged
+            NotifyRealTimePauseChanged,
+            NotifyRealTimeModeTransition,
+            ClientRealTimeModeTransitionAck
         }
 
         public static class Mods

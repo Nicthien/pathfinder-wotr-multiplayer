@@ -15,6 +15,7 @@ using WOTRMultiplayer.Abstractions.Hashing;
 using WOTRMultiplayer.Abstractions.IO;
 using WOTRMultiplayer.Abstractions.Random;
 using WOTRMultiplayer.Abstractions.Settings;
+using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
@@ -49,6 +50,7 @@ namespace WOTRMultiplayer.Services
     {
         private readonly INetworkHostConnection _networkHost;
         private readonly IHashService _hashService;
+        private readonly IMainThreadAccessor _mainThreadAccessor;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
         private readonly object _realTimeCommandLock = new();
         private readonly object _realTimePauseLock = new();
@@ -60,6 +62,9 @@ namespace WOTRMultiplayer.Services
         private long _realTimePauseRequestEpoch;
         private long _nextLocalRealTimePauseRequestSequence;
         private DateTime _nextRealTimeSnapshotAt;
+        private DateTime _realTimeModeSwitchDeadline;
+        private bool _realTimeModeCommitInProgress;
+        private NotifyRealTimeModeTransition _lastRealTimeAbort;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -77,6 +82,7 @@ namespace WOTRMultiplayer.Services
 
         public void PublishRealTimeCombatSnapshot()
         {
+            CheckRealTimeModeSwitchTimeout();
             if (Game?.Combat?.Stage != NetworkCombatStage.Running
                 || Game.RealTimeCombat.Mode != CombatMode.RealTimeWithPause
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
@@ -108,6 +114,245 @@ namespace WOTRMultiplayer.Services
             });
         }
 
+        public async Task<bool> RequestRealTimeCombatModeAsync(CombatMode mode)
+        {
+            if (!IsActive || Game?.Combat?.Stage != NetworkCombatStage.Running
+                || !Enum.IsDefined(typeof(CombatMode), mode) || Game.RealTimeCombat == null
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                || Game.RealTimeCombat.Mode == mode)
+            {
+                return false;
+            }
+
+            var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
+            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+            coordinator.RequestModeSwitch(mode, players);
+            _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
+            try
+            {
+                await GameInteraction.SetPauseAsync(true);
+                Send(new NotifyRealTimeModeTransition
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Stage = (int)RealTimeModeTransitionStage.Prepare,
+                    Mode = (int)mode
+                });
+                if (coordinator.AcknowledgeBarrier(Game.LocalPlayerId, players))
+                {
+                    await CommitRealTimeModeSwitchAsync();
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to prepare real-time combat mode switch. Epoch={Epoch}, Mode={Mode}", Game.RealTimeCombat.Epoch, mode);
+                await AbortRealTimeModeSwitchAsync();
+                return false;
+            }
+        }
+
+        private async Task CommitRealTimeModeSwitchAsync()
+        {
+            if (_realTimeModeCommitInProgress || Game?.RealTimeCombat?.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+            {
+                return;
+            }
+            _realTimeModeCommitInProgress = true;
+            try
+            {
+                var state = CombatInteraction.GetRealTimeCombatState();
+                var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
+                var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+                coordinator.CommitModeSwitch(hash);
+                await GameInteraction.SetTurnBasedCombatModeAsync(Game.RealTimeCombat.Mode == CombatMode.TurnBased);
+                _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
+                Send(new NotifyRealTimeModeTransition
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Stage = (int)RealTimeModeTransitionStage.Commit,
+                    Mode = (int)Game.RealTimeCombat.Mode,
+                    CanonicalStateHash = hash,
+                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
+                });
+                var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
+                if (coordinator.AcknowledgeModeCommit(Game.LocalPlayerId, players))
+                {
+                    CompleteRealTimeModeSwitch();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to commit real-time combat mode switch. Epoch={Epoch}", Game?.RealTimeCombat?.Epoch);
+                await AbortRealTimeModeSwitchAsync();
+            }
+            finally
+            {
+                _realTimeModeCommitInProgress = false;
+            }
+        }
+
+        private void CompleteRealTimeModeSwitch()
+        {
+            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+            coordinator.CompleteModeCommit();
+            _realTimeModeSwitchDeadline = default;
+            Send(new NotifyRealTimeModeTransition
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Stage = (int)RealTimeModeTransitionStage.Complete,
+                Mode = (int)Game.RealTimeCombat.Mode,
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
+            });
+            GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+        }
+
+        private async Task AbortRealTimeModeSwitchAsync()
+        {
+            if (Game?.RealTimeCombat == null || Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable)
+            {
+                return;
+            }
+            var requiredPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToHashSet();
+            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+            coordinator.AbortModeSwitch();
+            Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
+            Game.RealTimeCombat.RequiredPlayers = requiredPlayers;
+            Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            try
+            {
+                await GameInteraction.SetTurnBasedCombatModeAsync(Game.RealTimeCombat.Mode == CombatMode.TurnBased);
+                var state = CombatInteraction.GetRealTimeCombatState();
+                var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
+                Game.RealTimeCombat.CanonicalStateHash = hash;
+                _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
+                _lastRealTimeAbort = new NotifyRealTimeModeTransition
+                {
+                    Epoch = Game.RealTimeCombat.Epoch,
+                    Stage = (int)RealTimeModeTransitionStage.Abort,
+                    Mode = (int)Game.RealTimeCombat.Mode,
+                    CanonicalStateHash = hash,
+                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
+                };
+                Send(_lastRealTimeAbort);
+                GameInteraction.SetPause(true);
+                TryCompleteRealTimeAbort();
+            }
+            catch (Exception ex)
+            {
+                _realTimeModeSwitchDeadline = default;
+                Logger.LogError(ex, "Combat-mode rollback could not be applied locally; the game remains paused and saving is blocked. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
+                GameInteraction.SetPause(true);
+            }
+        }
+
+        private void CheckRealTimeModeSwitchTimeout()
+        {
+            if (_realTimeModeSwitchDeadline == default || DateTime.UtcNow <= _realTimeModeSwitchDeadline
+                || Game?.RealTimeCombat?.Phase == CombatSynchronizationPhase.Stable)
+            {
+                return;
+            }
+            if (Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing && _lastRealTimeAbort != null)
+            {
+                _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
+                TryCompleteRealTimeAbort();
+                if (Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing)
+                {
+                    Logger.LogWarning("Waiting for peer to apply safe combat-mode abort. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
+                    Send(_lastRealTimeAbort);
+                }
+                return;
+            }
+            _realTimeModeSwitchDeadline = default;
+            _ = AbortRealTimeModeSwitchAsync();
+        }
+
+        private void TryCompleteRealTimeAbort()
+        {
+            if (Game?.RealTimeCombat?.Phase != CombatSynchronizationPhase.Repairing || _lastRealTimeAbort == null)
+            {
+                return;
+            }
+            var currentPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).ToHashSet();
+            if (!currentPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+            {
+                return;
+            }
+            Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Stable;
+            Game.RealTimeCombat.RequiredPlayers.Clear();
+            Game.RealTimeCombat.ReadyPlayers.Clear();
+            _realTimeModeSwitchDeadline = default;
+            _lastRealTimeAbort = null;
+            Send(new NotifyRealTimeModeTransition
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                Stage = (int)RealTimeModeTransitionStage.Complete,
+                Mode = (int)Game.RealTimeCombat.Mode,
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
+            });
+            GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+        }
+
+        private void OnClientRealTimeModeTransitionAck(long receivedFrom, ClientRealTimeModeTransitionAck message)
+        {
+            _mainThreadAccessor.Post(async () =>
+            {
+                try
+                {
+                    if (Game?.RealTimeCombat == null || message == null
+                        || message.PlayerId != receivedFrom || GetPlayer(receivedFrom) == null
+                        || message.Epoch != Game.RealTimeCombat.Epoch)
+                    {
+                        return;
+                    }
+                    var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
+                    var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+                    if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Prepare
+                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.PreparingModeSwitch)
+                    {
+                        if (!message.Applied)
+                        {
+                            await AbortRealTimeModeSwitchAsync();
+                        }
+                        else if (coordinator.AcknowledgeBarrier(receivedFrom, players))
+                        {
+                            await CommitRealTimeModeSwitchAsync();
+                        }
+                    }
+                    else if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Commit
+                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Synchronizing)
+                    {
+                        if (!message.Applied || message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash)
+                        {
+                            Logger.LogWarning("Peer did not apply combat mode checkpoint. PlayerId={PlayerId}, Epoch={Epoch}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, Game.RealTimeCombat.CanonicalStateHash, message.CanonicalStateHash);
+                            await AbortRealTimeModeSwitchAsync();
+                        }
+                        else if (coordinator.AcknowledgeModeCommit(receivedFrom, players))
+                        {
+                            CompleteRealTimeModeSwitch();
+                        }
+                    }
+                    else if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Abort
+                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing)
+                    {
+                        if (message.Applied && message.CanonicalStateHash == Game.RealTimeCombat.CanonicalStateHash)
+                        {
+                            Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
+                            TryCompleteRealTimeAbort();
+                        }
+                        else
+                        {
+                            Logger.LogError("Peer could not reconcile aborted combat mode. PlayerId={PlayerId}, Epoch={Epoch}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, Game.RealTimeCombat.CanonicalStateHash, message.CanonicalStateHash);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error processing combat-mode barrier acknowledgement. PlayerId={PlayerId}, Epoch={Epoch}", receivedFrom, message?.Epoch);
+                }
+            });
+        }
+
         protected override bool HasControlOverUI => true;
 
         public MultiplayerHost(
@@ -124,7 +369,8 @@ namespace WOTRMultiplayer.Services
             INetworkHostConnection networkHost,
             IValueGenerator valueGenerator,
             IHashService hashService,
-            IMapper mapper)
+            IMapper mapper,
+            IMainThreadAccessor mainThreadAccessor)
             : base(logger,
                   mapper,
                   multiplayerSettingsProvider,
@@ -141,6 +387,7 @@ namespace WOTRMultiplayer.Services
         {
             _networkHost = networkHost;
             _hashService = hashService;
+            _mainThreadAccessor = mainThreadAccessor;
 
             SetupNetworkMessageHandlers();
         }
@@ -1772,6 +2019,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimeStateHash>(OnClientRealTimeStateHash)
                .On<ClientRealTimeCombatCommand>(OnClientRealTimeCombatCommand)
                .On<ClientRealTimePauseRequested>(OnClientRealTimePauseRequested)
+               .On<ClientRealTimeModeTransitionAck>(OnClientRealTimeModeTransitionAck)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -1943,7 +2191,8 @@ namespace WOTRMultiplayer.Services
 
         private void OnClientRealTimeCombatCommand(long receivedFrom, ClientRealTimeCombatCommand message)
         {
-            AcceptRealTimeCombatCommand(receivedFrom, message, executeOnHost: true);
+            // Authoritative ordering follows execution on Unity's main thread, not packet arrival.
+            _mainThreadAccessor.Post(() => AcceptRealTimeCombatCommand(receivedFrom, message, executeOnHost: true));
         }
 
         public bool PublishLocalRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
@@ -2011,23 +2260,28 @@ namespace WOTRMultiplayer.Services
                     return false;
                 }
 
-                authoritativeSequence = new RealTimeCombatCoordinator(Game.RealTimeCombat).NextAuthoritativeSequence();
-            }
-
-            if (executeOnHost)
-            {
-                switch ((RealTimeCommandKind)message.Kind)
+                if (executeOnHost)
                 {
-                    case RealTimeCommandKind.Move:
-                        CombatInteraction.MoveUnit(Mapper.Map<NetworkUnitMoveTo>(message.Movement));
-                        break;
-                    case RealTimeCommandKind.Attack:
-                        CombatInteraction.AttackUnit(Mapper.Map<NetworkUnitAttack>(message.Attack));
-                        break;
-                    case RealTimeCommandKind.UseAbility:
-                        CombatInteraction.UseAbility(Mapper.Map<NetworkAbilityUse>(message.Ability));
-                        break;
+                    try
+                    {
+                        if (!CombatInteraction.ExecuteRealTimeCombatCommand(
+                            (RealTimeCommandKind)message.Kind,
+                            message.Movement == null ? null : Mapper.Map<NetworkUnitMoveTo>(message.Movement),
+                            message.Attack == null ? null : Mapper.Map<NetworkUnitAttack>(message.Attack),
+                            message.Ability == null ? null : Mapper.Map<NetworkAbilityUse>(message.Ability)))
+                        {
+                            Logger.LogWarning("Real-time command was rejected by game execution. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, unitId, message.Epoch, message.Sequence);
+                            return false;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Real-time command failed on host. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, unitId, message.Epoch, message.Sequence);
+                        return false;
+                    }
                 }
+
+                authoritativeSequence = new RealTimeCombatCoordinator(Game.RealTimeCombat).NextAuthoritativeSequence();
             }
 
             Send(new NotifyRealTimeCombatCommandAccepted
@@ -2467,6 +2721,7 @@ namespace WOTRMultiplayer.Services
                 TryEnableDialogContinueButton();
 
                 TryEndForcedPause(Game.LocalPlayerId);
+                TryCompleteRealTimeAbort();
             }
         }
 

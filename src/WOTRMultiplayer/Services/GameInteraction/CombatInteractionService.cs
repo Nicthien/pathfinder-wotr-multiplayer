@@ -32,6 +32,7 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Entities.Units.Parts;
 using WOTRMultiplayer.Extensions;
@@ -760,6 +761,63 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 _logger.LogError(ex, "Unable to initiate UseAbility. InitiatorUnitId={InitiatorUnitId}, TargetUnitId={TargetUnitId}, AbilityId={AbilityId}", networkAbilityUse.InitiatorUnitId, networkAbilityUse.Target?.UnitId, networkAbilityUse.Ability.Id);
                 throw;
             }
+        }
+
+        // Called by the host on Unity's main thread. Unlike the legacy helpers, this
+        // reports whether an order actually entered the authoritative command queue.
+        public bool ExecuteRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability)
+        {
+            var unitId = kind switch
+            {
+                RealTimeCommandKind.Move => movement?.InitiatorUnitId,
+                RealTimeCommandKind.Attack => attack?.InitiatorUnitId,
+                RealTimeCommandKind.UseAbility => ability?.InitiatorUnitId,
+                _ => null
+            };
+            var executor = string.IsNullOrWhiteSpace(unitId) ? null : _gameStateLookupService.GetUnitEntity(unitId);
+            if (executor == null || !executor.IsInCombat)
+            {
+                _logger.LogWarning("Rejecting real-time order for missing or non-combat unit. Kind={Kind}, UnitId={UnitId}", kind, unitId);
+                return false;
+            }
+
+            switch (kind)
+            {
+                case RealTimeCommandKind.Move when movement?.Destination != null:
+                    RunUnitMoveToCommand(executor, movement);
+                    return true;
+                case RealTimeCommandKind.Attack when attack != null
+                    && _gameStateLookupService.GetUnitEntity(attack.TargetUnitId) != null:
+                    RunUnitAttackCommand(executor, attack);
+                    return true;
+                case RealTimeCommandKind.UseAbility when ability?.Ability != null
+                    && _gameStateLookupService.FindAbility(executor, ability.Ability) != null
+                    && (string.IsNullOrWhiteSpace(ability.Target?.UnitId)
+                        || _gameStateLookupService.GetUnitEntity(ability.Target.UnitId) != null):
+                    RunUnitAbilityCommand(executor, ability);
+                    return true;
+                default:
+                    _logger.LogWarning("Rejecting unresolvable real-time order. Kind={Kind}, UnitId={UnitId}", kind, unitId);
+                    return false;
+            }
+        }
+
+        public Task<bool> ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    completion.TrySetResult(ExecuteRealTimeCombatCommand(kind, movement, attack, ability));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to apply authoritative real-time command. Kind={Kind}", kind);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
         }
 
         public bool IsRiderActive()
@@ -1504,8 +1562,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 return null;
             }
 
-            var point = networkTargetWrapper.Point.ToUnityVector3();
             var unit = _gameStateLookupService.GetUnitEntity(networkTargetWrapper.UnitId);
+            if (networkTargetWrapper.Point == null && unit == null)
+            {
+                return null;
+            }
+
+            var point = networkTargetWrapper.Point?.ToUnityVector3() ?? unit.Position;
             var wrapper = new TargetWrapper(point, networkTargetWrapper.Orientation, unit);
             return wrapper;
         }

@@ -6,6 +6,7 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 
 namespace WOTRMultiplayer.Playground.Core.Dummies
@@ -28,6 +29,16 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
         public NetworkCombatState GetCombatState()
         {
             return null;
+        }
+
+        public NetworkCombatState GetRealTimeCombatState()
+        {
+            return null;
+        }
+
+        public Task<NetworkCombatState> GetRealTimeCombatStateAsync()
+        {
+            return Task.FromResult<NetworkCombatState>(null);
         }
 
         public void InitializeCrusadeArmyCombat()
@@ -79,6 +90,16 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 
         public void UseAbility(NetworkAbilityUse networkAbilityUse)
         {
+        }
+
+        public bool ExecuteRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability)
+        {
+            return false;
+        }
+
+        public Task<bool> ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability)
+        {
+            return Task.FromResult(false);
         }
 
         public Task<bool> StartCombatAsync(NetworkCombatState networkCombatState)

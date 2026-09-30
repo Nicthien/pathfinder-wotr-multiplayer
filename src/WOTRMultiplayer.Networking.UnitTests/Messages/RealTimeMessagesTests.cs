@@ -102,5 +102,42 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.PausedPlayers, Is.EquivalentTo(new long[] { 42 }));
             Assert.That(copy.ResumeVotes, Is.EquivalentTo(new long[] { -1 }));
         }
+
+        [Test]
+        public void ModeTransition_RoundTripsCheckpointAndStage()
+        {
+            var source = new NotifyRealTimeModeTransition
+            {
+                Epoch = 8,
+                Stage = (int)RealTimeModeTransitionStage.Commit,
+                Mode = 1,
+                CanonicalStateHash = 123456UL,
+                State = new NetworkCombatState { Units = [new NetworkUnit { Id = "unit-a" }] }
+            };
+
+            var copy = Serializer.DeepClone(source);
+
+            Assert.That(copy.Epoch, Is.EqualTo(8));
+            Assert.That(copy.Stage, Is.EqualTo((int)RealTimeModeTransitionStage.Commit));
+            Assert.That(copy.CanonicalStateHash, Is.EqualTo(123456UL));
+            Assert.That(copy.State.Units[0].Id, Is.EqualTo("unit-a"));
+        }
+
+        [Test]
+        public void ModeTransitionAck_RoundTripsFailureAndHash()
+        {
+            var copy = Serializer.DeepClone(new ClientRealTimeModeTransitionAck
+            {
+                Epoch = 8,
+                Stage = (int)RealTimeModeTransitionStage.Abort,
+                PlayerId = 42,
+                Applied = false,
+                CanonicalStateHash = 999UL
+            });
+
+            Assert.That(copy.PlayerId, Is.EqualTo(42));
+            Assert.That(copy.Applied, Is.False);
+            Assert.That(copy.CanonicalStateHash, Is.EqualTo(999UL));
+        }
     }
 }

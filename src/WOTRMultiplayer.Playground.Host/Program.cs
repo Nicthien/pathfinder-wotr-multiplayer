@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Abstractions.Hashing;
 using WOTRMultiplayer.Abstractions.IO;
 using WOTRMultiplayer.Abstractions.Random;
+using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Config.DI;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Networking.Abstractions;
@@ -45,7 +46,8 @@ namespace WOTRMultiplayer.Playground.Host
                 serviceProvider.GetService<INetworkHostConnection>(),
                 serviceProvider.GetService<IValueGenerator>(),
                 serviceProvider.GetService<IHashService>(),
-                serviceProvider.GetService<IMapper>());
+                serviceProvider.GetService<IMapper>(),
+                serviceProvider.GetService<IMainThreadAccessor>());
 
             var saveGamePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 "AppData\\LocalLow\\Owlcat Games\\Pathfinder Wrath Of The Righteous\\Saved Games\\Manual_34_FIRST_COMBAT.zks");
