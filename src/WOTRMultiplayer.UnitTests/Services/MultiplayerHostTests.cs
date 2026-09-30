@@ -50,6 +50,20 @@ namespace WOTRMultiplayer.UnitTests.Services
         private IValueGenerator _valueGenerator;
         private IMapper _mapper;
 
+        [Test]
+        public void RealTimeSynchronizationBarrier_BlocksSaving()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                RealTimeCombat = new NetworkRealTimeCombatState { Phase = CombatSynchronizationPhase.Repairing }
+            };
+
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            _multiplayerHost.Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Stable;
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.False);
+        }
+
         [SetUp]
         public void SetUp()
         {

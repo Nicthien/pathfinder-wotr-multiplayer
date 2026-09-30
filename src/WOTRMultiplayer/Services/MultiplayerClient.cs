@@ -66,6 +66,8 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat != null && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable;
 
+        public bool IsSavingBlockedByCombatSync => IsActive && Game?.RealTimeCombat?.BlocksSaving == true;
+
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
         public bool IsInLobby => IsActive && Status == NetworkLobbyStage.Lobby;

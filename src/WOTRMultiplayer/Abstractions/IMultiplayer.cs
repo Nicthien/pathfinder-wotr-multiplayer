@@ -45,6 +45,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool IsRealTimeCombatBarrierActive { get; }
 
+        bool IsSavingBlockedByCombatSync { get; }
+
         bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
 
         void TerminateMultiplayer();

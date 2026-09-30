@@ -350,6 +350,7 @@
             },
             "combat": {
                 "unitAutokilled": "Auto-killing unit '{0}' ({1}) as it's been killed at {2}",
+                "saveBlockedDuringSynchronization": "Save postponed: multiplayer combat is synchronizing or recovering.",
                 "start": {
                     "desyncedStartup": {
                         "host": "Combat recovery has been initiated due to desynced combat startup sequence.\nReason: {0}",

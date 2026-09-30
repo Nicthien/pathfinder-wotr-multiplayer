@@ -8,7 +8,7 @@
 	<ItemGroup>
 	  <ProjectReference Include="..\WOTRMultiplayer.Localization.Generator\WOTRMultiplayer.Localization.Generator.csproj" />
 	</ItemGroup>
-	<Target Name="PreBuild" BeforeTargets="PreBuildEvent">
-		<Exec Command="$(ProjectDir)..\WOTRMultiplayer.Localization.Generator\bin\$(Configuration)\net481\WOTRMultiplayer.Localization.Generator.exe" />
+	<Target Name="GenerateLocalizationKeys" BeforeTargets="CoreCompile" DependsOnTargets="ResolveProjectReferences">
+		<Exec Command="&quot;$(ProjectDir)..\WOTRMultiplayer.Localization.Generator\bin\$(Configuration)\net481\WOTRMultiplayer.Localization.Generator.exe&quot;" WorkingDirectory="$(ProjectDir)" />
 	</Target>
 </Project>

@@ -1,10 +1,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Build', 'Install', 'EnableStable', 'EnableExperimental', 'Status')]
+    [ValidateSet('Build', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status')]
     [string]$Action,
 
-    [string]$GamePath = 'C:\Jeux\Steam\steamapps\common\Pathfinder Second Adventure'
+    [string]$GamePath = 'C:\Jeux\Steam\steamapps\common\Pathfinder Second Adventure',
+
+    [switch]$AllowUnvalidatedTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +28,12 @@ function Assert-RuntimeReady {
     $validation = Get-Content -LiteralPath $runtimeReadyPath -Raw | ConvertFrom-Json
     if ($validation.protocolVersion -ne 4 -or $validation.twoInstanceCombatVerified -ne $true) {
         throw 'Validation RTwP absente ou incompatible : installation refusée.'
+    }
+}
+
+function Assert-UnvalidatedTestRequested {
+    if (-not $AllowUnvalidatedTest) {
+        throw 'Action réservée aux essais locaux : relancez avec -AllowUnvalidatedTest après avoir vérifié la sauvegarde et fermé le jeu.'
     }
 }
 
@@ -91,14 +99,21 @@ function Backup-Mod([string]$path, [string]$name) {
     Copy-Item -LiteralPath $path -Destination $destination -Recurse
 }
 
-function Install-Experimental {
-    Assert-RuntimeReady
+function Install-Experimental([bool]$testOnly) {
+    if ($testOnly) {
+        Assert-UnvalidatedTestRequested
+    } else {
+        Assert-RuntimeReady
+    }
     Assert-GameStopped
     Assert-GameInstallation
     if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $experimentalPath)) {
         throw 'Installation refusée : les variantes stable et expérimentale sont déjà actives simultanément.'
     }
-    $targetPath = if (Test-Path -LiteralPath $experimentalPath) { $experimentalPath } else { $disabledExperimentalPath }
+    if ($testOnly -and (Test-Path -LiteralPath $experimentalPath)) {
+        throw 'Essai refusé : la variante expérimentale est déjà active. Réactivez au préalable la version stable.'
+    }
+    $targetPath = if ($testOnly) { $disabledExperimentalPath } elseif (Test-Path -LiteralPath $experimentalPath) { $experimentalPath } else { $disabledExperimentalPath }
     if ((Test-Path -LiteralPath $experimentalPath) -and (Test-Path -LiteralPath $disabledExperimentalPath)) {
         throw 'Installation refusée : deux dossiers expérimentaux existent déjà.'
     }
@@ -138,8 +153,13 @@ function Enable-Stable {
     }
 }
 
-function Enable-Experimental {
-    Assert-RuntimeReady
+function Enable-Experimental([bool]$testOnly) {
+    if ($testOnly) {
+        Assert-UnvalidatedTestRequested
+        Write-Warning 'Variante non validée : uniquement pour une session de test sur une copie de sauvegarde. Revenez à EnableStable après le test.'
+    } else {
+        Assert-RuntimeReady
+    }
     Assert-GameStopped
     Assert-GameInstallation
     Assert-SafeModPath $stablePath
@@ -165,9 +185,11 @@ function Enable-Experimental {
 
 switch ($Action) {
     'Build' { Build-Experimental }
-    'Install' { Install-Experimental }
+    'Install' { Install-Experimental $false }
+    'StageTest' { Install-Experimental $true }
     'EnableStable' { Enable-Stable }
-    'EnableExperimental' { Enable-Experimental }
+    'EnableExperimental' { Enable-Experimental $false }
+    'EnableTestExperimental' { Enable-Experimental $true }
     'Status' { Show-Status }
 }
 

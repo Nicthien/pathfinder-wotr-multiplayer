@@ -140,6 +140,7 @@
       },
       "combat": {
         "unitAutokilled": "Mort de l'unité « {0} » ({1}) appliquée automatiquement : elle est morte chez {2}.",
+        "saveBlockedDuringSynchronization": "Sauvegarde reportée : le combat multijoueur est en cours de synchronisation ou de réparation.",
         "start": {
           "desyncedStartup": { "host": "Réparation du démarrage du combat : les états ne correspondent pas.\nCause : {0}", "client": "L'hôte a lancé une réparation du combat.\nCause : {0}" },
           "surpriseOverride": "L'hôte a corrigé l'état du round de surprise : {0} → {1}."

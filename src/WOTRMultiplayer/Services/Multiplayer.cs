@@ -103,6 +103,9 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatBarrierActive => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsRealTimeCombatBarrierActive)
             || _multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive;
 
+        public bool IsSavingBlockedByCombatSync => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsSavingBlockedByCombatSync)
+            || _multiplayerActorAccessor.Client.IsSavingBlockedByCombatSync;
+
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
             return _multiplayerActorAccessor.Client.SubmitRealTimeCombatCommand(kind, movement, attack, ability);

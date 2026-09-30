@@ -1380,6 +1380,12 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("saveBlockedDuringSynchronization")]
+            public static class SaveBlockedDuringSynchronization
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("start")]
             public static class Start
             {
