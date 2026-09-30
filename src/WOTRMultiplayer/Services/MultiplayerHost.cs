@@ -2420,6 +2420,12 @@ namespace WOTRMultiplayer.Services
                     }
                     if (!message.Applied)
                     {
+                        if (_realTimeRepairStage == RealTimeRepairStage.Fallback)
+                        {
+                            Logger.LogError("Peer could not apply the turn-based fallback checkpoint; combat stays paused and saving stays blocked. PlayerId={PlayerId}, Epoch={Epoch}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, Game.RealTimeCombat.CanonicalStateHash, message.CanonicalStateHash);
+                            GameInteraction.SetPause(true);
+                            return;
+                        }
                         await FailRealTimeRepairAttemptAsync(message.CanonicalStateHash);
                         return;
                     }

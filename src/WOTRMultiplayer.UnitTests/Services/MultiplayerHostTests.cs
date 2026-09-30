@@ -428,6 +428,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Fallback && x.State != null)))
                 .MustHaveHappenedOnceExactly();
+            handler.Invoke(42, RepairAck(2, RealTimeRepairStage.Fallback, 0, applied: false));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
             handler.Invoke(42, RepairAck(2, RealTimeRepairStage.Fallback, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
 
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));

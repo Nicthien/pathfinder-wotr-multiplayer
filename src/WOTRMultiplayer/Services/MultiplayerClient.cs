@@ -1085,7 +1085,8 @@ namespace WOTRMultiplayer.Services
                     Epoch = message.Epoch,
                     Sequence = message.Sequence,
                     CanonicalStateHash = hash,
-                    Applied = true
+                    Applied = true,
+                    FailureReason = hash == message.CanonicalStateHash ? null : RealTimeCombatDiff.Summarize(state, actual)
                 });
             }
             catch (Exception ex)
