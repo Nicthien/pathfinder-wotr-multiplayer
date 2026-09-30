@@ -382,6 +382,64 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeModeAbort_AppliesFullCheckpointWhenPrepareWasLost()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.TurnBased, Epoch = 0 }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
+                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
+            var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimeModeTransition
+            {
+                Epoch = 1, Stage = (int)RealTimeModeTransitionStage.Abort,
+                Mode = (int)CombatMode.TurnBased, CanonicalStateHash = hash,
+                State = new Networking.Messages.Contracts.NetworkCombatState()
+            });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Epoch, Is.EqualTo(1));
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Abort && x.Applied))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void RealTimeRepairFallback_AppliesFullCheckpointWhenPrepareWasLost()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 0 }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
+                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false)).Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
+            var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = new NetworkCombatState() });
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimeRepair
+            {
+                Epoch = 2, Stage = (int)RealTimeRepairStage.Fallback,
+                Mode = (int)CombatMode.TurnBased, CanonicalStateHash = hash,
+                State = new Networking.Messages.Contracts.NetworkCombatState()
+            });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Epoch, Is.EqualTo(2));
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Fallback && x.Applied))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void RealTimeAI_ConsumesOnlyCurrentHostChoiceOnce()
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);

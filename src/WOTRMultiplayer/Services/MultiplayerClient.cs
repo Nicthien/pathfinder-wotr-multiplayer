@@ -1215,6 +1215,17 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
+                // The full abort checkpoint must also recover a peer that never received Prepare.
+                if (stage == RealTimeModeTransitionStage.Abort && message.Epoch > state.Epoch
+                    && message.State != null)
+                {
+                    state.Epoch = message.Epoch;
+                    state.LastAuthoritativeSequence = 0;
+                    _realTimeAIActions.Clear();
+                    _realTimeAISequenceEpoch = message.Epoch;
+                    _lastRealTimeAISequence = 0;
+                }
+
                 if (message.Epoch != state.Epoch)
                 {
                     return;
@@ -1334,6 +1345,18 @@ namespace WOTRMultiplayer.Services
                     await GameInteraction.SetPauseAsync(true);
                     SendRealTimeRepairAck(message, true, 0);
                     return;
+                }
+                // A complete fallback checkpoint remains valid if an earlier repair message was lost.
+                if (stage == RealTimeRepairStage.Fallback && message.Epoch > state.Epoch
+                    && state.Mode == CombatMode.RealTimeWithPause && message.State != null)
+                {
+                    state.Epoch = message.Epoch;
+                    state.LastAuthoritativeSequence = 0;
+                    _realTimeAIActions.Clear();
+                    _realTimeAISequenceEpoch = message.Epoch;
+                    _lastRealTimeAISequence = 0;
+                    state.Phase = CombatSynchronizationPhase.Repairing;
+                    await GameInteraction.SetPauseAsync(true);
                 }
                 if (message.Epoch != state.Epoch)
                 {
