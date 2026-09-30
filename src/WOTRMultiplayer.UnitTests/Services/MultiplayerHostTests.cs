@@ -447,6 +447,20 @@ namespace WOTRMultiplayer.UnitTests.Services
         private static IEnumerable<ContentStateTestCase> ModDifferencesTestCases()
         {
             const string modId1 = "mod1";
+            yield return new ContentStateTestCase("host-only voice mods are local and do not block multiplayer")
+            {
+                HostMods = [new NetworkMod { Id = "SpeechMod", IsEnabled = true, Version = "1.3.0" }, new NetworkMod { Id = "WOTR_AIVO", IsEnabled = true, Version = "0.2.0" }],
+                PlayerMods = [],
+                ExpectedDiscrepantMods = []
+            };
+
+            yield return new ContentStateTestCase("client-only voice mods are local and do not block multiplayer")
+            {
+                HostMods = [],
+                PlayerMods = [new Networking.Messages.Contracts.NetworkMod { Id = "speechmod", IsEnabled = true }],
+                ExpectedDiscrepantMods = []
+            };
+
             yield return new ContentStateTestCase("mod is enabled on host, but disabled at player")
             {
                 HostMods = [new NetworkMod { Id = modId1, IsEnabled = true }],

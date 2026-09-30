@@ -1,0 +1,163 @@
+{
+  "wotrmultiplayer": {
+    "sysMessages": {
+      "failedToStoreSave": "Impossible d'écrire la sauvegarde sur le disque.\nVérifiez que le jeu peut écrire à cet emplacement :\n{0}",
+      "failedToTransferSave": "Impossible de transférer la sauvegarde.\nErreur :\n{0}",
+      "failedToReadSave": "Impossible de lire la sauvegarde.\nVérifiez que le jeu peut lire ce fichier :\n{0}",
+      "abnormalSaveGameSize": "Attention !\nLa sauvegarde transférée dépasse la limite de 500 Mio.\nVous avez été déconnecté pour éviter tout problème.",
+      "gamepad": "La manette n'est pas prise en charge"
+    },
+    "mainMenu": { "multiplayer": { "title": "Multijoueur" } },
+    "escMenu": { "multiplayerLobby": { "title": "Salon multijoueur" } },
+    "multiplayerWindow": {
+      "readyButton": { "readyText": "Prêt", "notReadyText": "Pas prêt" },
+      "externalServers": {
+        "serverDropdownTitle": "Partager la partie en ligne", "noneServerName": "Désactivé", "password": { "placeholder": "Mot de passe de la partie" },
+        "errors": {
+          "unableToLoad": "La configuration des serveurs externes est corrompue ou illisible.\nVérifiez ce fichier :\n{0}",
+          "unableToSave": "Impossible d'enregistrer la configuration des serveurs externes.\nVérifiez que le jeu peut écrire dans ce fichier :\n{0}",
+          "unreachableSignalingServer": "Impossible de joindre le serveur de mise en relation\n{0}",
+          "modConflict": "Connexion impossible : les versions du jeu, les DLC, les mods de gameplay ou le protocole multijoueur ne correspondent pas."
+        }
+      },
+      "hostMenu": {
+        "title": "Héberger", "hostButton": { "hostText": "Héberger", "selectSaveText": "Changer de sauvegarde" }, "startButton": "Démarrer",
+        "deactivation": { "hosting": "Vous allez mettre fin à la session multijoueur. Confirmer ?" },
+        "newGame": { "saveSlotGroupName": "Nouvelle campagne", "saveSlotTitle": "Commencer une nouvelle campagne" }
+      },
+      "joinMenu": {
+        "title": "Rejoindre", "joinButton": "Rejoindre", "leaveButton": "Quitter", "connectingText": "Connexion...",
+        "connectionControls": { "title": "Méthode de connexion", "options": { "directConnect": "Connexion directe par IP", "gameCodeConnect": "Code de partie" } },
+        "directConnection": {
+          "serverHistory": {
+            "header": "Historique des connexions", "secondsAgo": "Dernière connexion il y a {0} seconde(s)", "minutesAgo": "Dernière connexion il y a {0} minute(s)",
+            "hoursAgo": "Dernière connexion il y a {0} heure(s)", "daysAgo": "Dernière connexion il y a {0} jour(s)",
+            "errors": { "unableToLoad": "L'historique des connexions est corrompu ou illisible", "unableToSave": "Impossible d'enregistrer l'historique des connexions.\nVérifiez que le jeu peut écrire dans ce fichier :\n{0}" }
+          },
+          "serverAddress": { "placeholder": "Saisir IP:port" }
+        },
+        "gameCodeConnection": {
+          "gameCode": { "placeholder": "Code de partie" }, "password": { "placeholder": "Mot de passe" },
+          "errors": { "emptyCode": "Le code de partie est vide", "invalidCodeFormat": "Le format du code de partie est invalide", "unroutedCode": "Aucun serveur trouvé pour ce code de partie. Vérifiez votre configuration des serveurs :\n{0}" }
+        },
+        "deactivation": { "connected": "Vous allez quitter la session multijoueur. Confirmer ?", "connecting": "Impossible de quitter pendant la connexion.\nVeuillez patienter." }
+      }
+    },
+    "lobbyWindow": {
+      "server": { "title": "Serveur", "external": { "gameCode": { "title": "Code de partie" }, "state": { "connecting": "connexion", "gettingCode": "obtention du code" }, "errors": { "generic": "Erreur" } } },
+      "players": { "title": "Joueurs" }, "characters": { "title": "Personnages" },
+      "tooltips": {
+        "contentDiscrepancy": {
+          "title": "Différence de contenu — {0}",
+          "DLCs": { "title": "Contenus téléchargeables", "reasons": { "missing": "Manquant", "extra": "Supplémentaire" } },
+          "mods": { "title": "Mods", "reasons": { "missing": "Manquant", "extra": "Supplémentaire", "disabled": "Désactivé", "versionMismatch": "Versions différentes" } }
+        },
+        "copyCode": { "title": "Copier" }, "players": { "color": { "header": "Couleur du joueur", "description": "Le choix de couleur sera disponible ultérieurement" } }
+      }
+    },
+    "settings": {
+      "title": "Multijoueur",
+      "general": { "title": "Général", "playerName": { "title": "Nom du joueur", "tooltip": "Nom affiché dans la session multijoueur. Limité à 24 caractères." } },
+      "dialogs": {
+        "title": "Dialogues",
+        "selectedAnswerAnimationDuration": { "title": "Durée de l'animation de la réponse choisie", "tooltip": "Durée de l'animation de la réponse choisie (en secondes).\nLe dialogue reprend à la fin de cette animation." },
+        "nonSelectedAnswerAnimationDuration": { "title": "Durée de l'animation des autres réponses", "tooltip": "Durée de l'animation des réponses non choisies (en secondes)." },
+        "blockedAnswerAnimationDuration": { "title": "Durée de l'animation d'une réponse bloquée", "tooltip": "S'applique lorsque le joueur responsable du dialogue ne peut pas encore choisir de réponse, par exemple si tous les joueurs n'ont pas terminé le chargement." }
+      },
+      "networking": {
+        "title": "Réseau — serveur local", "subsections": { "P2P": "Réseau — pair à pair" },
+        "host": { "title": "Adresse d'écoute", "tooltip": "Laissez ce champ VIDE pour écouter sur toutes les interfaces réseau." },
+        "useIPv6": { "title": "Utiliser IPv6", "tooltip": "Inclure les adresses IPv6 lors de l'écoute sur toutes les interfaces réseau." },
+        "hostPortRangeStart": { "title": "Début de la plage de ports", "tooltip": "La partie utilise le premier port disponible de cette plage. Indiquez la même valeur qu'à la fin de la plage pour imposer un port unique.\nValeurs valides : 1024 à 65535." },
+        "hostPortRangeEnd": { "title": "Fin de la plage de ports", "tooltip": "La partie utilise le premier port disponible de cette plage. Indiquez la même valeur qu'au début de la plage pour imposer un port unique.\nValeurs valides : 1024 à 65535." },
+        "P2P": { "port": { "title": "Port", "tooltip": "Port des connexions pair à pair. Laissez 0 pour choisir automatiquement le premier port disponible." } }
+      },
+      "miscellaneous": {
+        "title": "Divers", "hideServerAddress": { "title": "Masquer l'adresse du serveur", "tooltip": "Masque l'adresse IP dans l'interface pour protéger votre vie privée." },
+        "trackConnectionHistory": { "title": "Conserver l'historique des connexions", "tooltip": "Permet de rejoindre rapidement les parties déjà rejointes avec succès." },
+        "maxConnectionHistoryRecords": { "title": "Nombre maximal de connexions conservées", "tooltip": "Limite le nombre d'entrées enregistrées dans l'historique." }
+      },
+      "hotkeys": {
+        "title": "Raccourcis clavier", "ping": { "title": "Signaler", "tooltip": "Signale rapidement un emplacement, une unité, un objet ou une autre cible aux autres joueurs." },
+        "showLobby": { "title": "Afficher le salon", "tooltip": "Ouvre le salon, également accessible depuis le menu Échap." },
+        "forceUnpause": { "title": "Forcer la reprise", "tooltip": "Supprime toute pause locale. À utiliser uniquement si la pause synchronisée reste bloquée." },
+        "forceCombatEnd": { "title": "Forcer la fin du combat", "tooltip": "Quitte immédiatement l'état de combat. À utiliser seulement si le combat est bloqué, désynchronisé ou ne se termine pas correctement." }
+      },
+      "dangerZone": {
+        "title": "Zone à risque (réservée aux utilisateurs avertis)",
+        "defaultForcedPauseTimeout": { "title": "Délai standard de la pause forcée", "tooltip": "Délai avant la fin d'une pause forcée une fois ses conditions remplies.\nFormat de base : 00:00:00 (heures:minutes:secondes)." },
+        "restEncounterForcedPauseTimeout": { "title": "Délai de la pause forcée lors d'une rencontre de repos", "tooltip": "Délai avant la reprise lorsque la rencontre aléatoire de repos est synchronisée pour tous.\nFormat de base : 00:00:00 (heures:minutes:secondes)." },
+        "restEncounterSyncTimeout": { "title": "Délai maximal de synchronisation des rencontres de repos", "tooltip": "Temps maximal d'attente des données de rencontre aléatoire générées par l'hôte. Les interruptions de dialogue au repos sont également synchronisées." },
+        "networkAwaiterTimeout": { "title": "Délai maximal des requêtes réseau", "tooltip": "Temps au-delà duquel une requête réseau sans réponse est considérée comme échouée." },
+        "enforcedCombatStartDelay": { "title": "Délai avant le démarrage forcé du combat", "tooltip": "Lance automatiquement le combat après ce délai (en secondes) s'il a déjà commencé chez un autre joueur." },
+        "combatTurnDelayForAI": { "title": "Décalage des tours de l'IA", "tooltip": "Les tours de l'IA commencent légèrement plus tard chez les clients afin de recevoir les décisions de l'hôte. Gardez une valeur supérieure à la latence réseau ; augmentez-la si le jeu de l'hôte ralentit pendant les longues sessions." },
+        "playerTurnEndDelay": { "title": "Délai de fin du tour d'un joueur distant", "tooltip": "Attente après la fin du tour d'un joueur distant. Certaines animations de sorts (par exemple l'explosion de feu du cinétiste) peuvent encore jouer alors que le jeu considère le personnage disponible." },
+        "combatPauseCooldown": { "title": "Délai avant de pouvoir mettre le combat en pause", "tooltip": "La pause est indisponible pendant cette durée au début du combat. Réglez sur 00:00:00 pour désactiver ce délai." },
+        "saveGameChunkSize": { "title": "Taille des blocs de sauvegarde", "tooltip": "Taille des blocs transférés sur le réseau (en octets). Des blocs plus petits peuvent stabiliser une connexion fragile ; de plus gros blocs peuvent accélérer le transfert. Une valeur incorrecte peut ralentir ou interrompre la synchronisation." },
+        "localUnitDeathNotificationDelay": { "title": "Délai de notification des morts", "tooltip": "Attente avant de signaler la mort d'une unité aux autres joueurs, pour laisser la même action se produire chez eux. Réglez sur 00:00:00 pour désactiver." },
+        "remoteUnitDeathProcessingDelay": { "title": "Délai de traitement des morts distantes", "tooltip": "Attente avant de traiter la notification de mort reçue d'un autre joueur, pour laisser la même action se produire localement. Réglez sur 00:00:00 pour désactiver." }
+      }
+    },
+    "multiplayerClient": { "errors": {
+      "invalidAddress": "Impossible d'interpréter l'adresse du serveur.\nVérifiez votre saisie.", "invalidPort": "Port invalide.\nValeurs acceptées : de 1 à 65535.",
+      "disconnected": "Vous avez été déconnecté", "genericError": "Une erreur s'est produite", "networkError": "Une erreur réseau s'est produite.\nCode : {0}",
+      "unreachableGameHost": "La partie est indisponible", "gameNotFound": "Partie introuvable ou mot de passe incorrect", "peerToPeerTimeout": "La connexion à l'hôte a expiré"
+    } },
+    "gameNotifications": {
+      "dialogs": { "waitingForOtherPlayers": "Certains joueurs n'ont pas encore vu cette réplique." },
+      "rolls": {
+        "missingDamageRoll": "Impossible d'obtenir le jet de dégâts de l'unité {0}.\nLa partie risque de se désynchroniser.",
+        "discrepantDamageRoll": "Le jet de dégâts reçu pour l'unité {0} contient un nombre de valeurs incorrect. Attendu : {1}, reçu : {2}.\nLa partie risque de se désynchroniser.",
+        "missingHealingRoll": "Impossible d'obtenir le jet de soins de l'unité {0}.\nLa partie risque de se désynchroniser.",
+        "missingRoll": "Impossible d'obtenir le jet « {0} » de l'unité {1}.\nLa partie risque de se désynchroniser."
+      },
+      "rest": { "noCampingPermission": "Seul l'hôte peut installer le camp." },
+      "leveling": {
+        "mythicLeveling": { "completed": "{0} — niveau mythique augmenté", "terminated": "{0} — progression mythique interrompue" },
+        "mercenary": { "completed": "Mercenaire recruté", "terminated": "Recrutement du mercenaire interrompu" },
+        "completed": "{0} — niveau augmenté", "terminated": "{0} — montée de niveau interrompue",
+        "classMismatch": "La classe {0} sélectionnée est introuvable.\nVérifiez que les DLC et les mods de gameplay sont identiques.",
+        "archetypeMismatch": "L'archétype {0} sélectionné est introuvable.\nVérifiez que les DLC et les mods de gameplay sont identiques.",
+        "featureMismatch": "L'aptitude {0} sélectionnée est introuvable.\nVérifiez que les DLC et les mods de gameplay sont identiques."
+      },
+      "session": {
+        "playerJoinedShort": "{0} a rejoint la partie", "playerJoinedFull": "{0} a rejoint la partie. Chargez une sauvegarde pour jouer ensemble.",
+        "playerLeft": "{0} a quitté la partie", "characterOwnerChanged": "{0} contrôle maintenant {1}", "loadingSave": "{0} a lancé le chargement d'une sauvegarde"
+      },
+      "spellBook": {
+        "noSpellSlotPermission": "Seul le propriétaire du personnage peut modifier ses sorts.", "memorizedSpell": "{1} a mémorisé {0}",
+        "forgottenSpell": "{1} a oublié {0}", "removedCustomSpell": "Le sort personnalisé {0} a été retiré du grimoire de {1}.",
+        "removedDuplicateMetamagicSpell": "Le sort métamagique en double {0} a été retiré du grimoire de {1}.",
+        "missingMemorizationSpell": "Impossible de mémoriser un sort pour {0} : le sort {1} est introuvable.",
+        "newMetamagicSpell": "Le sort métamagique {0} a été ajouté au grimoire de {1}.\nMétamagie appliquée : {2}",
+        "newMagicHackSpell": "Le sort de magie pirate {0} a été ajouté au grimoire de {1}."
+      },
+      "forcedPause": {
+        "areaLoading": "Attendez que les autres joueurs terminent le chargement de la zone.",
+        "restRandomEncounterLoading": "Attendez que les autres joueurs terminent le chargement de la rencontre aléatoire.",
+        "manualPause": "Impossible de reprendre tant que tout le monde n'est pas en pause.", "trapDetected": "Attente de la détection du piège par tous les joueurs.",
+        "isLifting": "La pause va bientôt se terminer."
+      },
+      "combat": {
+        "unitAutokilled": "Mort de l'unité « {0} » ({1}) appliquée automatiquement : elle est morte chez {2}.",
+        "start": {
+          "desyncedStartup": { "host": "Réparation du démarrage du combat : les états ne correspondent pas.\nCause : {0}", "client": "L'hôte a lancé une réparation du combat.\nCause : {0}" },
+          "surpriseOverride": "L'hôte a corrigé l'état du round de surprise : {0} → {1}."
+        },
+        "stageChanged": "Étape du combat : {0} → {1}",
+        "buffs": { "removedBuffs": "L'unité {0} a perdu ces effets : {1}", "addedBuffs": "L'unité {0} a reçu ces effets : {1}" },
+        "conditions": { "confusion": "Effet de confusion ({0}) déterminé par {1}" },
+        "turn": {
+          "started": "----- Début du tour : {0}", "ended": "----- Fin du tour : {0}", "delayed": "----- Tour retardé : {0}",
+          "hostOrderDesync": "Le prochain tour du joueur {0} a été corrigé.", "clientOrderDesync": "Le prochain tour a été attribué à l'unité « {0} ».",
+          "invalidUnit": "L'unité {0}, dont c'est le tour, est morte ou introuvable chez {1}. Mort appliquée ou tour réinitialisé."
+        },
+        "areaEffects": { "missing": "L'effet de zone manquant « {0} » ({1}) ne s'est pas déclenché." }
+      },
+      "tacticalCombat": { "disabledAutoCombat": "Le combat automatique est désactivé en multijoueur." },
+      "looting": { "disposedLootbagBugWarning": "Impossible de placer des objets dans un contenant supprimé.", "itemsMismatch": "Objets récupérés introuvables. Vérifiez que les DLC sont identiques.\nObjets : {0}" },
+      "cutscenes": { "skipped": "{0} a passé la cinématique." },
+      "globalMap": { "disabledActionBar": "Les sorts de la carte globale sont réservés à l'hôte.", "loading": "Attente du chargement de tous les joueurs." }
+    }
+  }
+}

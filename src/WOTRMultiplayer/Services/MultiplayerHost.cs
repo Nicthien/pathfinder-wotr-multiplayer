@@ -202,7 +202,15 @@ namespace WOTRMultiplayer.Services
                 || p.ContentState.DiscrepantMods.Any());
             if (incompatiblePlayer != null)
             {
-                Logger.LogWarning("Cannot start a lobby with mismatched game content or RTwP protocol. PlayerId={PlayerId}, ProtocolVersion={ProtocolVersion}", incompatiblePlayer.Id, incompatiblePlayer.ContentState.RealTimeProtocolVersion);
+                Logger.LogWarning(
+                    "Cannot start lobby: incompatible content. PlayerId={PlayerId}, HostGameVersion={HostGameVersion}, ClientGameVersion={ClientGameVersion}, HostProtocol={HostProtocol}, ClientProtocol={ClientProtocol}, DLCs={DLCs}, Mods={Mods}",
+                    incompatiblePlayer.Id,
+                    hostContent?.GameVersion,
+                    incompatiblePlayer.ContentState.GameVersion,
+                    NetworkRealTimeCombatState.ProtocolVersion,
+                    incompatiblePlayer.ContentState.RealTimeProtocolVersion,
+                    string.Join(", ", incompatiblePlayer.ContentState.DiscrepantDLCs.Select(x => $"{x.DLC?.Id}:{x.Reason}")),
+                    string.Join(", ", incompatiblePlayer.ContentState.DiscrepantMods.Select(x => $"{x.Id}:{x.Reason}:host={x.HostVersion}:client={x.Version}")));
                 PlayerNotification.ShowModalMessage(WellKnownKeys.MultiplayerWindow.ExternalServers.Errors.ModConflict.Key);
                 return false;
             }
@@ -1845,7 +1853,19 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
         {
+            if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: true))
+            {
+                Logger.LogWarning("Ignoring stale or invalid turn-end request. ReceivedFrom={ReceivedFrom}, DeclaredPlayerId={PlayerId}, MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}", receivedFrom, message.PlayerId, message.UnitId, Game?.Combat?.Turn?.UnitId);
+                return;
+            }
+
             await WaitForTurnToBeCompletedAsync();
+
+            if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: true))
+            {
+                Logger.LogWarning("Turn changed while completing remote action; stale turn-end request discarded. MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}", message.UnitId, Game?.Combat?.Turn?.UnitId);
+                return;
+            }
 
             lock (ActionLock)
             {
@@ -2304,6 +2324,13 @@ namespace WOTRMultiplayer.Services
             var clientMods = clientState.Mods.ToList();
             foreach (var hostMod in hostState.Mods)
             {
+                if (AudioOnlyModCompatibility.IsLocalAudioMod(hostMod.Id))
+                {
+                    Logger.LogInformation("Ignoring local audio-only mod difference. ModId={ModId}, HostEnabled={HostEnabled}", hostMod.Id, hostMod.IsEnabled);
+                    clientMods.RemoveAll(m => string.Equals(m.Id, hostMod.Id, StringComparison.OrdinalIgnoreCase));
+                    continue;
+                }
+
                 var clientMod = clientMods.FirstOrDefault(m => string.Equals(m.Id, hostMod.Id, StringComparison.OrdinalIgnoreCase));
                 NetworkDiscrepancyReason? reason = null;
                 if (clientMod == null)
@@ -2337,7 +2364,7 @@ namespace WOTRMultiplayer.Services
                 }
             }
 
-            var enabledLeftovers = clientMods.Where(x => x.IsEnabled).Select(x => new NetworkDiscrepantMod(x.Id, x.Type, x.Version, null, NetworkDiscrepancyReason.Extra)).ToList();
+            var enabledLeftovers = clientMods.Where(x => x.IsEnabled && !AudioOnlyModCompatibility.IsLocalAudioMod(x.Id)).Select(x => new NetworkDiscrepantMod(x.Id, x.Type, x.Version, null, NetworkDiscrepancyReason.Extra)).ToList();
             discrepantMods.AddRange(enabledLeftovers);
 
             return discrepantMods;

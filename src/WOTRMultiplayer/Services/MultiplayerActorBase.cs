@@ -3417,20 +3417,23 @@ namespace WOTRMultiplayer.Services
 
         protected async Task<bool> WaitWhileTrue(Func<bool> condition, string warningMessage, TimeSpan? awaiterTimeout = null)
         {
+            var effectiveTimeout = awaiterTimeout ?? TimeSpan.FromSeconds(20);
             if (condition())
             {
-                Logger.LogWarning("{Message}. Timeout={Timeout}", warningMessage, awaiterTimeout);
-                using var timeout = new CancellationTokenSource(awaiterTimeout ?? TimeSpan.FromSeconds(20));
+                Logger.LogInformation("{Message}. Timeout={Timeout}, CombatStage={CombatStage}, TurnUnitId={TurnUnitId}", warningMessage, effectiveTimeout, Game?.Combat?.Stage, Game?.Combat?.Turn?.UnitId);
+                using var timeout = new CancellationTokenSource(effectiveTimeout);
                 while (condition())
                 {
                     await Task.Delay(10);
 
                     if (timeout.IsCancellationRequested)
                     {
-                        Logger.LogWarning($"Awaiter failed due to timeout. WarningText={warningMessage}");
+                        Logger.LogError("Combat wait timed out. Reason={Reason}, Timeout={Timeout}, CombatStage={CombatStage}, TurnUnitId={TurnUnitId}, TurnStage={TurnStage}, Round={Round}", warningMessage, effectiveTimeout, Game?.Combat?.Stage, Game?.Combat?.Turn?.UnitId, Game?.Combat?.Turn?.Stage, Game?.Combat?.Round);
                         return false;
                     }
                 }
+
+                Logger.LogInformation("Combat wait completed. Reason={Reason}, CombatStage={CombatStage}, TurnUnitId={TurnUnitId}", warningMessage, Game?.Combat?.Stage, Game?.Combat?.Turn?.UnitId);
             }
 
             return true;

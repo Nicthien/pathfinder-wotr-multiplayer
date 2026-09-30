@@ -952,12 +952,23 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
         {
+            if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: false))
+            {
+                Logger.LogWarning("Ignoring stale turn-end notification. MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}", message.UnitId, Game?.Combat?.Turn?.UnitId);
+                return;
+            }
+
             if (Game.Combat.Turn.IsAI)
             {
                 return;
             }
 
             await WaitForTurnToBeCompletedAsync();
+            if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: false))
+            {
+                Logger.LogWarning("Turn changed while completing remote action; stale notification discarded. MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}", message.UnitId, Game?.Combat?.Turn?.UnitId);
+                return;
+            }
             CombatInteraction.EndCombatTurn(message.UnitId);
         }
 

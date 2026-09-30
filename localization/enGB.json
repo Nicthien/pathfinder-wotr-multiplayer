@@ -32,7 +32,7 @@
                     "unableToLoad": "External servers configuration is corrupted and cannot be loaded.\nMake sure the following file is either deleted or in the correct format:\n{0}",
                     "unableToSave": "External servers configuration cannot be saved.\nMake sure the game is allowed to write to the following file:\n{0}",
                     "unreachableSignalingServer": "Unable to connect to the matchmaking server\n{0}",
-                    "modConflict": "Can't connect because of an unexpected compatibility issue.\nDisable other mods and try again"
+                    "modConflict": "The game versions, DLCs, gameplay mods or multiplayer protocol do not match. Check the lobby compatibility details and the host log. Local voice mods may differ."
                 }
             },
             "hostMenu": {

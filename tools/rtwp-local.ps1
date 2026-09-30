@@ -60,6 +60,7 @@ function Show-Status {
 }
 
 function Build-Experimental {
+    & (Join-Path $PSScriptRoot 'check-localization.ps1')
     $env:WOTR_PATH = $GamePath
     & dotnet build (Join-Path $repoPath 'src\WOTRMultiplayer.Localization.Generator\WOTRMultiplayer.Localization.Generator.csproj') --configuration Release --verbosity minimal
     if ($LASTEXITCODE -ne 0) { throw 'La génération des traductions a échoué.' }
