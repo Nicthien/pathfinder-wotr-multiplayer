@@ -2,11 +2,11 @@
 
 	<PropertyGroup>
 		<TargetFramework>net481</TargetFramework>
-		<LangVersion>latest</LangVersion>
+		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 
 	<PropertyGroup>
-		<ModFolder>$(WOTR_PATH)\Mods\00_WOTRMultiplayer</ModFolder>
+		<ModFolder>$(WOTR_PATH)\Mods\00_WOTRMultiplayerRTwP</ModFolder>
 		<ModOutputFolder>$(ModFolder)\*</ModOutputFolder>
 		<ModLocalizationFolder>$(ModFolder)\localization\*</ModLocalizationFolder>
 

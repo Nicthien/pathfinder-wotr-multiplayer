@@ -1,13 +1,13 @@
 ﻿{
   "assemblyName": "WOTRMultiplayer.dll",
   "author": "fl01",
-  "displayName": "Multiplayer",
+  "displayName": "Multiplayer RTwP (Local Experimental)",
   "entryMethod": "WOTRMultiplayer.Main.Load",
-  "id": "WOTRMultiplayer",
+  "id": "WOTRMultiplayerRTwP",
   "homePage": "https://github.com/fl01/pathfinder-wotr-multiplayer",
   "repository": "",
   "requirements": [],
   "gameVersion": "2.7.0x",
   "managerVersion": "0.23.0",
-  "version": "0.4.0"
+  "version": "0.4.16.1"
 }
