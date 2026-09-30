@@ -1084,12 +1084,20 @@ namespace WOTRMultiplayer.Services
                 {
                     Epoch = message.Epoch,
                     Sequence = message.Sequence,
-                    CanonicalStateHash = hash
+                    CanonicalStateHash = hash,
+                    Applied = true
                 });
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Real-time combat snapshot could not be applied. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+                Send(new ClientRealTimeStateHash
+                {
+                    Epoch = message.Epoch,
+                    Sequence = message.Sequence,
+                    Applied = false,
+                    FailureReason = ex.GetType().Name
+                });
             }
             finally
             {

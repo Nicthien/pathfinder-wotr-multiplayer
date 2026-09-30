@@ -2206,9 +2206,9 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
-            if (requiresRepair)
+            if (requiresRepair || !message.Applied)
             {
-                Logger.LogWarning("Real-time moving snapshot differs; starting paused verification before treating it as divergence. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash);
+                Logger.LogWarning("Real-time moving snapshot differs or failed to apply; starting paused verification. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, HostHash={HostHash}, ClientHash={ClientHash}, Applied={Applied}, Reason={Reason}", receivedFrom, message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash, message.Applied, message.FailureReason);
                 _ = BeginRealTimeRepairAsync();
             }
         }

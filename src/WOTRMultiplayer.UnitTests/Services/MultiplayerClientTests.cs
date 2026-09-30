@@ -133,6 +133,29 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeSnapshot_FailedApplication_ReportsFailureToHost()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
+            };
+            A.CallTo(() => _combatInteractionService.UpdateCombatStateAsync(A<NetworkCombatState>._,
+                A<System.Collections.Generic.List<NetworkAreaEffect>>._, false))
+                .Returns(Task.FromException(new InvalidOperationException("missing unit")));
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimeCombatSnapshot
+            {
+                Epoch = 2, Sequence = 1,
+                State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
+            });
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>.That.Matches(x =>
+                x.Epoch == 2 && x.Sequence == 1 && !x.Applied && x.FailureReason == nameof(InvalidOperationException))))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void RealTimeCommand_OnlyOwnedUnitIsSentWithIncreasingSequence()
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);

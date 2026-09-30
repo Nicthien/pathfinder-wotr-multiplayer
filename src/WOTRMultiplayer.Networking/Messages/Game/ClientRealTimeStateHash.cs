@@ -18,5 +18,13 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(3)]
         [LogMe]
         public ulong CanonicalStateHash { get; set; }
+
+        [ProtoMember(4)]
+        [LogMe]
+        public bool Applied { get; set; }
+
+        [ProtoMember(5)]
+        [LogMe]
+        public string FailureReason { get; set; }
     }
 }

@@ -170,6 +170,25 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeSnapshot_ClientApplicationFailure_StartsPausedRepair()
+        {
+            PrepareRealTimeRepairTest();
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatState()).Returns(new NetworkCombatState());
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeStateHash>(_networkServer);
+
+            handler.Invoke(42, new ClientRealTimeStateHash
+            {
+                Epoch = 0, Sequence = 1, Applied = false,
+                FailureReason = nameof(InvalidOperationException)
+            });
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Prepare))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void RealTimeCommand_AcceptsOwnedMoveAndRejectsDuplicateAndSpoofedSender()
         {
             A.CallTo(() => _combatInteractionService.ExecuteRealTimeCombatCommand(RealTimeCommandKind.Move,

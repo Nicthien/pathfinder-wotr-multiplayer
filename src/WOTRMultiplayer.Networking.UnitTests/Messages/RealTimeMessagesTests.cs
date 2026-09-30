@@ -30,11 +30,24 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         [Test]
         public void StateHashReply_RoundTrips()
         {
-            var copy = Serializer.DeepClone(new ClientRealTimeStateHash { Epoch = 7, Sequence = 12, CanonicalStateHash = 123UL });
+            var copy = Serializer.DeepClone(new ClientRealTimeStateHash { Epoch = 7, Sequence = 12, CanonicalStateHash = 123UL, Applied = true });
 
             Assert.That(copy.Epoch, Is.EqualTo(7));
             Assert.That(copy.Sequence, Is.EqualTo(12));
             Assert.That(copy.CanonicalStateHash, Is.EqualTo(123UL));
+            Assert.That(copy.Applied, Is.True);
+        }
+
+        [Test]
+        public void StateHashReply_ReportsApplicationFailure()
+        {
+            var copy = Serializer.DeepClone(new ClientRealTimeStateHash
+            {
+                Epoch = 7, Sequence = 12, Applied = false, FailureReason = "InvalidOperationException"
+            });
+
+            Assert.That(copy.Applied, Is.False);
+            Assert.That(copy.FailureReason, Is.EqualTo("InvalidOperationException"));
         }
 
         [Test]
