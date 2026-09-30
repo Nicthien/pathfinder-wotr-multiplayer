@@ -462,16 +462,18 @@ namespace WOTRMultiplayer.UI.Controllers
             }
 
             var inCombat = actor.Game.Combat?.Stage == NetworkCombatStage.Running;
-            var mode = state.Mode == CombatMode.RealTimeWithPause ? "Temps réel avec pause" : "Tour par tour";
+            var mode = state.Mode == CombatMode.RealTimeWithPause
+                ? Localized(WellKnownKeys.LobbyWindow.RealTime.ModeRealTime.Key)
+                : Localized(WellKnownKeys.LobbyWindow.RealTime.TurnBased.Key);
             var phase = state.Phase switch
             {
-                CombatSynchronizationPhase.PreparingModeSwitch or CombatSynchronizationPhase.Synchronizing => "Synchronisation",
-                CombatSynchronizationPhase.Repairing => "Réparation",
-                CombatSynchronizationPhase.FallingBackToTurnBased => "Retour au tour par tour",
-                _ => state.IsManualPauseActive ? "En pause" : mode
+                CombatSynchronizationPhase.PreparingModeSwitch or CombatSynchronizationPhase.Synchronizing => Localized(WellKnownKeys.LobbyWindow.RealTime.Synchronizing.Key),
+                CombatSynchronizationPhase.Repairing => Localized(WellKnownKeys.LobbyWindow.RealTime.Repairing.Key),
+                CombatSynchronizationPhase.FallingBackToTurnBased => Localized(WellKnownKeys.LobbyWindow.RealTime.FallingBack.Key),
+                _ => state.IsManualPauseActive ? Localized(WellKnownKeys.LobbyWindow.RealTime.Paused.Key) : mode
             };
-            AddServerInfo(parent, $"Combat : {phase}");
-            AddServerInfo(parent, $"Politique de pause : {GetPausePolicyLabel(state.PausePolicy)}");
+            AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.CombatStatus.Key), phase));
+            AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.PausePolicy.Key), GetPausePolicyLabel(state.PausePolicy)));
 
             if (!inCombat || state.Phase != CombatSynchronizationPhase.Stable)
             {
@@ -480,12 +482,14 @@ namespace WOTRMultiplayer.UI.Controllers
 
             if (_multiplayerActorAccessor.Host.IsActive)
             {
-                AddCombatButton(parent, state.Mode == CombatMode.TurnBased ? "Passer en temps réel" : "Passer en tour par tour", () =>
+                AddCombatButton(parent, Localized(state.Mode == CombatMode.TurnBased
+                    ? WellKnownKeys.LobbyWindow.RealTime.SwitchToRealTime.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.SwitchToTurnBased.Key), () =>
                 {
                     var nextMode = state.Mode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
                     _ = ChangeModeAndRefreshAsync(nextMode, connectivity);
                 });
-                AddCombatButton(parent, "Changer la politique de pause", () =>
+                AddCombatButton(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.ChangePausePolicy.Key), () =>
                 {
                     var nextPolicy = (PausePolicy)(((int)state.PausePolicy + 1) % 3);
                     if (_multiplayerActorAccessor.Host.SetRealTimePausePolicy(nextPolicy))
@@ -495,14 +499,16 @@ namespace WOTRMultiplayer.UI.Controllers
                 });
                 if (state.Mode == CombatMode.RealTimeWithPause)
                 {
-                    AddCombatButton(parent, "Réparer la synchronisation", () =>
+                    AddCombatButton(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.Repair.Key), () =>
                         _ = RepairAndRefreshAsync(connectivity));
                 }
             }
 
             if (state.Mode == CombatMode.RealTimeWithPause)
             {
-                AddCombatButton(parent, state.IsManualPauseActive ? "Demander la reprise" : "Mettre en pause", () =>
+                AddCombatButton(parent, Localized(state.IsManualPauseActive
+                    ? WellKnownKeys.LobbyWindow.RealTime.RequestResume.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.RequestPause.Key), () =>
                 {
                     var requested = _multiplayerActorAccessor.Host.IsActive
                         ? _multiplayerActorAccessor.Host.RequestLocalRealTimePause(!state.IsManualPauseActive)
@@ -536,11 +542,13 @@ namespace WOTRMultiplayer.UI.Controllers
 
         private static string GetPausePolicyLabel(PausePolicy policy) => policy switch
         {
-            PausePolicy.HostOnly => "Hôte seul",
-            PausePolicy.AnyoneConsensusResume => "Tous peuvent mettre en pause, reprise commune",
-            PausePolicy.AnyoneFreeResume => "Tous peuvent mettre en pause ou reprendre",
-            _ => "Inconnue"
+            PausePolicy.HostOnly => Localized(WellKnownKeys.LobbyWindow.RealTime.HostOnly.Key),
+            PausePolicy.AnyoneConsensusResume => Localized(WellKnownKeys.LobbyWindow.RealTime.ConsensusResume.Key),
+            PausePolicy.AnyoneFreeResume => Localized(WellKnownKeys.LobbyWindow.RealTime.FreeResume.Key),
+            _ => Localized(WellKnownKeys.LobbyWindow.RealTime.Unknown.Key)
         };
+
+        private static string Localized(string key) => new LocalizedString { Key = key };
 
         private Transform FindCharacterContainer(NetworkCharacter character)
         {

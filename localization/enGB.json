@@ -98,6 +98,26 @@
             }
         },
         "lobbyWindow": {
+            "realTime": {
+                "combatStatus": "Combat: {0}",
+                "pausePolicy": "Pause policy: {0}",
+                "modeRealTime": "Real time with pause",
+                "turnBased": "Turn based",
+                "synchronizing": "Synchronizing",
+                "repairing": "Repairing",
+                "fallingBack": "Returning to turn based",
+                "paused": "Paused",
+                "hostOnly": "Host only",
+                "consensusResume": "Anyone can pause, everyone must resume",
+                "freeResume": "Anyone can pause or resume",
+                "unknown": "Unknown",
+                "switchToRealTime": "Switch to real time",
+                "switchToTurnBased": "Switch to turn based",
+                "changePausePolicy": "Change pause policy",
+                "repair": "Repair synchronization",
+                "requestResume": "Request resume",
+                "requestPause": "Pause"
+            },
             "server": {
                 "title": "Server",
                 "external": {

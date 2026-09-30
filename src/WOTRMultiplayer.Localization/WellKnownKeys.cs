@@ -383,6 +383,118 @@ public static class WellKnownKeys
     [Description("lobbyWindow")]
     public static class LobbyWindow
     {
+        [Description("realTime")]
+        public static class RealTime
+        {
+            [Description("combatStatus")]
+            public static class CombatStatus
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("pausePolicy")]
+            public static class PausePolicy
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("modeRealTime")]
+            public static class ModeRealTime
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("turnBased")]
+            public static class TurnBased
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("synchronizing")]
+            public static class Synchronizing
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("repairing")]
+            public static class Repairing
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("fallingBack")]
+            public static class FallingBack
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("paused")]
+            public static class Paused
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("hostOnly")]
+            public static class HostOnly
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("consensusResume")]
+            public static class ConsensusResume
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("freeResume")]
+            public static class FreeResume
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("unknown")]
+            public static class Unknown
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("switchToRealTime")]
+            public static class SwitchToRealTime
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("switchToTurnBased")]
+            public static class SwitchToTurnBased
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("changePausePolicy")]
+            public static class ChangePausePolicy
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("repair")]
+            public static class Repair
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("requestResume")]
+            public static class RequestResume
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("requestPause")]
+            public static class RequestPause
+            {
+                public static string Key { get; set; }
+            }
+        }
+
         [Description("server")]
         public static class Server
         {

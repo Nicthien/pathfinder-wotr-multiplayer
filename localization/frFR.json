@@ -44,6 +44,26 @@
       }
     },
     "lobbyWindow": {
+      "realTime": {
+        "combatStatus": "Combat : {0}",
+        "pausePolicy": "Politique de pause : {0}",
+        "modeRealTime": "Temps réel avec pause",
+        "turnBased": "Tour par tour",
+        "synchronizing": "Synchronisation",
+        "repairing": "Réparation",
+        "fallingBack": "Retour au tour par tour",
+        "paused": "En pause",
+        "hostOnly": "Hôte seul",
+        "consensusResume": "Tous peuvent mettre en pause, reprise commune",
+        "freeResume": "Tous peuvent mettre en pause ou reprendre",
+        "unknown": "Inconnue",
+        "switchToRealTime": "Passer en temps réel",
+        "switchToTurnBased": "Passer en tour par tour",
+        "changePausePolicy": "Changer la politique de pause",
+        "repair": "Réparer la synchronisation",
+        "requestResume": "Demander la reprise",
+        "requestPause": "Mettre en pause"
+      },
       "server": { "title": "Serveur", "external": { "gameCode": { "title": "Code de partie" }, "state": { "connecting": "connexion", "gettingCode": "obtention du code" }, "errors": { "generic": "Erreur" } } },
       "players": { "title": "Joueurs" }, "characters": { "title": "Personnages" },
       "tooltips": {
