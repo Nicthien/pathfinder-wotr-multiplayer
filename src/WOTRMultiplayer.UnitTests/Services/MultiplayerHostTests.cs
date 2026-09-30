@@ -522,6 +522,39 @@ namespace WOTRMultiplayer.UnitTests.Services
                 x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustHaveHappenedOnceExactly();
         }
 
+        [Test]
+        public async Task RealTimeModeBarrier_RetransmitsBeforeSafeAbort()
+        {
+            PrepareRealTimeRepairTest();
+            _multiplayerHost.Game.RealTimeCombat.Mode = CombatMode.TurnBased;
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            var deadline = typeof(MultiplayerHost).GetField("_realTimeModeSwitchDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+            deadline.SetValue(_multiplayerHost, DateTime.UtcNow.AddSeconds(-1));
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.PreparingModeSwitch));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustHaveHappenedTwiceExactly();
+        }
+
+        [Test]
+        public async Task RealTimeRepairBarrier_RetransmitsBeforeCountingFailure()
+        {
+            PrepareRealTimeRepairTest();
+            await _multiplayerHost.BeginRealTimeRepairAsync();
+            var deadline = typeof(MultiplayerHost).GetField("_realTimeRepairDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+            deadline.SetValue(_multiplayerHost, DateTime.UtcNow.AddSeconds(-1));
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.RepairAttempts, Is.EqualTo(1));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Prepare))).MustHaveHappenedTwiceExactly();
+        }
+
         private static ClientRealTimeRepairAck RepairAck(long epoch, RealTimeRepairStage stage, ulong hash, bool applied = true)
         {
             return new ClientRealTimeRepairAck

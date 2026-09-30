@@ -1217,6 +1217,13 @@ namespace WOTRMultiplayer.Services
 
                 if (stage == RealTimeModeTransitionStage.Prepare)
                 {
+                    if (message.Epoch == state.Epoch
+                        && state.Phase == CombatSynchronizationPhase.PreparingModeSwitch
+                        && state.PendingMode == mode)
+                    {
+                        SendRealTimeModeAck(message, true, 0);
+                        return;
+                    }
                     if (message.Epoch <= state.Epoch || state.Phase != CombatSynchronizationPhase.Stable)
                     {
                         return;
@@ -1252,6 +1259,13 @@ namespace WOTRMultiplayer.Services
 
                 if (stage == RealTimeModeTransitionStage.Commit)
                 {
+                    if (state.Phase == CombatSynchronizationPhase.Synchronizing
+                        && state.Mode == mode
+                        && state.CanonicalStateHash == message.CanonicalStateHash)
+                    {
+                        SendRealTimeModeAck(message, true, state.CanonicalStateHash);
+                        return;
+                    }
                     if (state.Phase != CombatSynchronizationPhase.PreparingModeSwitch
                         || state.PendingMode != mode || message.State == null)
                     {
@@ -1349,6 +1363,13 @@ namespace WOTRMultiplayer.Services
                 var stage = (RealTimeRepairStage)message.Stage;
                 if (stage == RealTimeRepairStage.Prepare)
                 {
+                    if (message.Epoch == state.Epoch
+                        && state.Phase == CombatSynchronizationPhase.Repairing
+                        && state.Mode == CombatMode.RealTimeWithPause)
+                    {
+                        SendRealTimeRepairAck(message, true, 0);
+                        return;
+                    }
                     if (message.Epoch <= state.Epoch || state.Mode != CombatMode.RealTimeWithPause
                         || (state.Phase != CombatSynchronizationPhase.Stable
                             && state.Phase != CombatSynchronizationPhase.Repairing))

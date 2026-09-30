@@ -64,9 +64,14 @@ namespace WOTRMultiplayer.Services
         private DateTime _nextRealTimeSnapshotAt;
         private DateTime _realTimeModeSwitchDeadline;
         private bool _realTimeModeCommitInProgress;
+        private NotifyRealTimeModeTransition _lastRealTimeModePrepare;
+        private NotifyRealTimeModeTransition _lastRealTimeModeCommit;
+        private int _realTimeModeRetransmissions;
         private NotifyRealTimeModeTransition _lastRealTimeAbort;
         private DateTime _realTimeRepairDeadline;
         private RealTimeRepairStage? _realTimeRepairStage;
+        private NotifyRealTimeRepair _lastRealTimeRepairMessage;
+        private int _realTimeRepairRetransmissions;
         private NetworkCombatState _realTimeRepairCheckpoint;
         private bool _realTimeRepairHasMismatch;
         private long _realTimeAISequenceEpoch;
@@ -151,15 +156,17 @@ namespace WOTRMultiplayer.Services
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.RequestModeSwitch(mode, players);
             _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
+            _realTimeModeRetransmissions = 0;
             try
             {
                 await GameInteraction.SetPauseAsync(true);
-                Send(new NotifyRealTimeModeTransition
+                _lastRealTimeModePrepare = new NotifyRealTimeModeTransition
                 {
                     Epoch = Game.RealTimeCombat.Epoch,
                     Stage = (int)RealTimeModeTransitionStage.Prepare,
                     Mode = (int)mode
-                });
+                };
+                Send(_lastRealTimeModePrepare);
                 if (coordinator.AcknowledgeBarrier(Game.LocalPlayerId, players))
                 {
                     await CommitRealTimeModeSwitchAsync();
@@ -189,14 +196,16 @@ namespace WOTRMultiplayer.Services
                 coordinator.CommitModeSwitch(hash);
                 await GameInteraction.SetTurnBasedCombatModeAsync(Game.RealTimeCombat.Mode == CombatMode.TurnBased);
                 _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
-                Send(new NotifyRealTimeModeTransition
+                _realTimeModeRetransmissions = 0;
+                _lastRealTimeModeCommit = new NotifyRealTimeModeTransition
                 {
                     Epoch = Game.RealTimeCombat.Epoch,
                     Stage = (int)RealTimeModeTransitionStage.Commit,
                     Mode = (int)Game.RealTimeCombat.Mode,
                     CanonicalStateHash = hash,
                     State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
-                });
+                };
+                Send(_lastRealTimeModeCommit);
                 var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
                 if (coordinator.AcknowledgeModeCommit(Game.LocalPlayerId, players))
                 {
@@ -219,6 +228,8 @@ namespace WOTRMultiplayer.Services
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.CompleteModeCommit();
             _realTimeModeSwitchDeadline = default;
+            _lastRealTimeModePrepare = null;
+            _lastRealTimeModeCommit = null;
             Send(new NotifyRealTimeModeTransition
             {
                 Epoch = Game.RealTimeCombat.Epoch,
@@ -238,6 +249,8 @@ namespace WOTRMultiplayer.Services
             var requiredPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToHashSet();
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.AbortModeSwitch();
+            _lastRealTimeModePrepare = null;
+            _lastRealTimeModeCommit = null;
             Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
             Game.RealTimeCombat.RequiredPlayers = requiredPlayers;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
@@ -284,6 +297,19 @@ namespace WOTRMultiplayer.Services
                     Logger.LogWarning("Waiting for peer to apply safe combat-mode abort. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
                     Send(_lastRealTimeAbort);
                 }
+                return;
+            }
+            var pending = Game.RealTimeCombat.Phase switch
+            {
+                CombatSynchronizationPhase.PreparingModeSwitch => _lastRealTimeModePrepare,
+                CombatSynchronizationPhase.Synchronizing => _lastRealTimeModeCommit,
+                _ => null
+            };
+            if (pending != null && _realTimeModeRetransmissions++ < 2)
+            {
+                _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(10);
+                Logger.LogWarning("Retransmitting combat-mode barrier. Epoch={Epoch}, Stage={Stage}, Attempt={Attempt}", pending.Epoch, pending.Stage, _realTimeModeRetransmissions);
+                Send(pending);
                 return;
             }
             _realTimeModeSwitchDeadline = default;
@@ -2241,15 +2267,17 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+            _realTimeRepairRetransmissions = 0;
             try
             {
                 await GameInteraction.SetPauseAsync(true);
-                Send(new NotifyRealTimeRepair
+                _lastRealTimeRepairMessage = new NotifyRealTimeRepair
                 {
                     Epoch = Game.RealTimeCombat.Epoch,
                     Stage = (int)RealTimeRepairStage.Prepare,
                     Mode = (int)CombatMode.RealTimeWithPause
-                });
+                };
+                Send(_lastRealTimeRepairMessage);
                 if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
                 {
                     StartRealTimeRepairVerification();
@@ -2274,13 +2302,15 @@ namespace WOTRMultiplayer.Services
             _realTimeRepairStage = RealTimeRepairStage.Verify;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
-            Send(new NotifyRealTimeRepair
+            _realTimeRepairRetransmissions = 0;
+            _lastRealTimeRepairMessage = new NotifyRealTimeRepair
             {
                 Epoch = Game.RealTimeCombat.Epoch,
                 Stage = (int)RealTimeRepairStage.Verify,
                 Mode = (int)CombatMode.RealTimeWithPause,
                 CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
-            });
+            };
+            Send(_lastRealTimeRepairMessage);
             if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
             {
                 CompleteRealTimeRepair();
@@ -2292,14 +2322,16 @@ namespace WOTRMultiplayer.Services
             _realTimeRepairStage = RealTimeRepairStage.Apply;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
-            Send(new NotifyRealTimeRepair
+            _realTimeRepairRetransmissions = 0;
+            _lastRealTimeRepairMessage = new NotifyRealTimeRepair
             {
                 Epoch = Game.RealTimeCombat.Epoch,
                 Stage = (int)RealTimeRepairStage.Apply,
                 Mode = (int)CombatMode.RealTimeWithPause,
                 CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
                 State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
-            });
+            };
+            Send(_lastRealTimeRepairMessage);
             if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
             {
                 CompleteRealTimeRepair();
@@ -2317,6 +2349,7 @@ namespace WOTRMultiplayer.Services
         {
             _realTimeRepairStage = null;
             _realTimeRepairDeadline = default;
+            _lastRealTimeRepairMessage = null;
             _realTimeRepairCheckpoint = null;
             Game.RealTimeCombat.RequiredPlayers.Clear();
             Game.RealTimeCombat.ReadyPlayers.Clear();
@@ -2348,12 +2381,14 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
-            Send(new NotifyRealTimeRepair
+            _realTimeRepairRetransmissions = 0;
+            _lastRealTimeRepairMessage = new NotifyRealTimeRepair
             {
                 Epoch = Game.RealTimeCombat.Epoch,
                 Stage = (int)RealTimeRepairStage.Prepare,
                 Mode = (int)CombatMode.RealTimeWithPause
-            });
+            };
+            Send(_lastRealTimeRepairMessage);
             if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
             {
                 StartRealTimeRepairVerification();
@@ -2370,14 +2405,16 @@ namespace WOTRMultiplayer.Services
                 Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
                 _realTimeRepairStage = RealTimeRepairStage.Fallback;
                 _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
-                Send(new NotifyRealTimeRepair
+                _realTimeRepairRetransmissions = 0;
+                _lastRealTimeRepairMessage = new NotifyRealTimeRepair
                 {
                     Epoch = Game.RealTimeCombat.Epoch,
                     Stage = (int)RealTimeRepairStage.Fallback,
                     Mode = (int)CombatMode.TurnBased,
                     CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
                     State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
-                });
+                };
+                Send(_lastRealTimeRepairMessage);
                 if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
                 {
                     CommitRealTimeRepairFallback();
@@ -2407,14 +2444,14 @@ namespace WOTRMultiplayer.Services
             if (_realTimeRepairStage == RealTimeRepairStage.Fallback)
             {
                 Logger.LogWarning("Waiting for peer to acknowledge turn-based fallback. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
-                Send(new NotifyRealTimeRepair
-                {
-                    Epoch = Game.RealTimeCombat.Epoch,
-                    Stage = (int)RealTimeRepairStage.Fallback,
-                    Mode = (int)CombatMode.TurnBased,
-                    CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
-                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
-                });
+                if (_lastRealTimeRepairMessage != null) Send(_lastRealTimeRepairMessage);
+                return;
+            }
+            if (_lastRealTimeRepairMessage != null && _realTimeRepairRetransmissions++ < 2)
+            {
+                _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(10);
+                Logger.LogWarning("Retransmitting real-time repair barrier. Epoch={Epoch}, Stage={Stage}, Attempt={Attempt}", Game.RealTimeCombat.Epoch, _realTimeRepairStage, _realTimeRepairRetransmissions);
+                Send(_lastRealTimeRepairMessage);
                 return;
             }
             Logger.LogWarning("Real-time repair barrier timed out. Epoch={Epoch}, Stage={Stage}", Game.RealTimeCombat.Epoch, _realTimeRepairStage);

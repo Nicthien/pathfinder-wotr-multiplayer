@@ -426,6 +426,54 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeModePrepare_DuplicateIsAcknowledgedWithoutPausingTwice()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.TurnBased }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient);
+            var prepare = new NotifyRealTimeModeTransition
+            {
+                Epoch = 1, Stage = (int)RealTimeModeTransitionStage.Prepare,
+                Mode = (int)CombatMode.RealTimeWithPause
+            };
+
+            handler.Invoke(-1, prepare);
+            handler.Invoke(-1, prepare);
+
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare && x.Applied))).MustHaveHappenedTwiceExactly();
+        }
+
+        [Test]
+        public void RealTimeRepairPrepare_DuplicateIsAcknowledgedWithoutPausingTwice()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient);
+            var prepare = new NotifyRealTimeRepair
+            {
+                Epoch = 1, Stage = (int)RealTimeRepairStage.Prepare,
+                Mode = (int)CombatMode.RealTimeWithPause
+            };
+
+            handler.Invoke(-1, prepare);
+            handler.Invoke(-1, prepare);
+
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Prepare && x.Applied))).MustHaveHappenedTwiceExactly();
+        }
+
+        [Test]
         public void RealTimeRepairFallback_AppliesFullCheckpointWhenPrepareWasLost()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
