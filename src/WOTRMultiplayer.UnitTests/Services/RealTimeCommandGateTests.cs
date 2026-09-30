@@ -15,7 +15,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             var gate = new RealTimeCommandGate(state);
             var command = Command(state.Epoch, 1, 42, "unit-a");
 
-            var result = gate.Validate(command, new Dictionary<string, long> { ["unit-a"] = 42 });
+            var result = gate.Validate(command, 42, new Dictionary<string, long> { ["unit-a"] = 42 });
 
             Assert.That(result, Is.EqualTo(RealTimeCommandRejection.None));
         }
@@ -26,7 +26,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             var state = RealTimeState();
             var gate = new RealTimeCommandGate(state);
 
-            var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), new Dictionary<string, long> { ["unit-a"] = 99 });
+            var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), 42, new Dictionary<string, long> { ["unit-a"] = 99 });
 
             Assert.That(result, Is.EqualTo(RealTimeCommandRejection.UnitOwnedByAnotherPlayer));
         }
@@ -37,9 +37,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             var state = RealTimeState();
             var gate = new RealTimeCommandGate(state);
             var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
-            gate.Validate(Command(state.Epoch, 2, 42, "unit-a"), owners);
+            gate.Validate(Command(state.Epoch, 2, 42, "unit-a"), 42, owners);
 
-            var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), owners);
+            var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), 42, owners);
 
             Assert.That(result, Is.EqualTo(RealTimeCommandRejection.InvalidSequence));
         }
@@ -51,7 +51,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             state.Phase = CombatSynchronizationPhase.Repairing;
             var gate = new RealTimeCommandGate(state);
 
-            var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), new Dictionary<string, long> { ["unit-a"] = 42 });
+            var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), 42, new Dictionary<string, long> { ["unit-a"] = 42 });
 
             Assert.That(result, Is.EqualTo(RealTimeCommandRejection.SynchronizationBarrierActive));
         }
@@ -62,11 +62,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             var state = RealTimeState();
             var gate = new RealTimeCommandGate(state);
             var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
-            gate.Validate(Command(state.Epoch, 9, 42, "unit-a"), owners);
+            gate.Validate(Command(state.Epoch, 9, 42, "unit-a"), 42, owners);
             state.Epoch++;
 
-            Assert.That(gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), owners), Is.EqualTo(RealTimeCommandRejection.None));
-            Assert.That(gate.Validate(Command(state.Epoch - 1, 10, 42, "unit-a"), owners), Is.EqualTo(RealTimeCommandRejection.WrongEpoch));
+            Assert.That(gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
+            Assert.That(gate.Validate(Command(state.Epoch - 1, 10, 42, "unit-a"), 42, owners), Is.EqualTo(RealTimeCommandRejection.WrongEpoch));
         }
 
         [Test]
@@ -75,7 +75,19 @@ namespace WOTRMultiplayer.UnitTests.Services
             var state = RealTimeState();
             var gate = new RealTimeCommandGate(state);
 
-            Assert.That(gate.Validate(Command(state.Epoch, 0, 42, "unit-a"), new Dictionary<string, long> { ["unit-a"] = 42 }), Is.EqualTo(RealTimeCommandRejection.InvalidSequence));
+            Assert.That(gate.Validate(Command(state.Epoch, 0, 42, "unit-a"), 42, new Dictionary<string, long> { ["unit-a"] = 42 }), Is.EqualTo(RealTimeCommandRejection.InvalidSequence));
+        }
+
+        [Test]
+        public void SpoofedPlayerId_IsRejectedWithoutConsumingSequence()
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state);
+            var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
+            var spoofed = Command(state.Epoch, 1, 42, "unit-a");
+
+            Assert.That(gate.Validate(spoofed, 99, owners), Is.EqualTo(RealTimeCommandRejection.SenderMismatch));
+            Assert.That(gate.Validate(spoofed, 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
         }
 
         private static NetworkRealTimeCombatState RealTimeState()

@@ -9,6 +9,7 @@ using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.Dungeon;
 using WOTRMultiplayer.Entities.Equipment;
@@ -39,6 +40,10 @@ namespace WOTRMultiplayer.Abstractions
         void Initialize();
 
         void UpdateRealTimeCombat();
+
+        bool IsRealTimeClientCombatActive { get; }
+
+        bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
 
         void TerminateMultiplayer();
 

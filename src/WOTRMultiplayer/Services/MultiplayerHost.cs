@@ -50,6 +50,11 @@ namespace WOTRMultiplayer.Services
         private readonly INetworkHostConnection _networkHost;
         private readonly IHashService _hashService;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
+        private readonly object _realTimeCommandLock = new();
+        private RealTimeCommandGate _realTimeCommandGate;
+        private NetworkRealTimeCombatState _realTimeCommandGateState;
+        private long _realTimeLocalCommandEpoch;
+        private long _nextRealTimeLocalCommandSequence;
         private DateTime _nextRealTimeSnapshotAt;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
@@ -57,6 +62,10 @@ namespace WOTRMultiplayer.Services
         public bool IsActive => _networkHost.IsActive;
 
         public bool IsInLobby => IsActive && Status == NetworkLobbyStage.Lobby;
+
+        public bool IsRealTimeCombatActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
+            && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
+            && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
 
         public void PublishRealTimeCombatSnapshot()
         {
@@ -143,6 +152,13 @@ namespace WOTRMultiplayer.Services
             };
 
             Game.Characters.AddRange(gameStartUp.Characters);
+            lock (_realTimeCommandLock)
+            {
+                _realTimeCommandGate = null;
+                _realTimeCommandGateState = null;
+                _realTimeLocalCommandEpoch = 0;
+                _nextRealTimeLocalCommandSequence = 0;
+            }
 
             var settings = SettingsService.GetSettings();
 
@@ -1740,6 +1756,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyCombatLocalTurnEnded>(OnNotifyCombatLocalTurnEnded)
                .On<ClientInvalidUnitTurnStartRequested>(OnClientInvalidUnitTurnStartRequested)
                .On<ClientRealTimeStateHash>(OnClientRealTimeStateHash)
+               .On<ClientRealTimeCombatCommand>(OnClientRealTimeCombatCommand)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -1907,6 +1924,109 @@ namespace WOTRMultiplayer.Services
             {
                 Logger.LogWarning("Real-time snapshot hash differs after client application; timing drift is possible until a paused verification barrier. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, message.Sequence, expectedHash, message.CanonicalStateHash);
             }
+        }
+
+        private void OnClientRealTimeCombatCommand(long receivedFrom, ClientRealTimeCombatCommand message)
+        {
+            AcceptRealTimeCombatCommand(receivedFrom, message, executeOnHost: true);
+        }
+
+        public bool PublishLocalRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
+        {
+            if (!IsRealTimeCombatActive)
+            {
+                return false;
+            }
+
+            var message = new ClientRealTimeCombatCommand
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                PlayerId = Game.LocalPlayerId,
+                Kind = (int)kind,
+                Movement = movement == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkUnitMoveTo>(movement),
+                Attack = attack == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkUnitAttack>(attack),
+                Ability = ability == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkAbilityUse>(ability)
+            };
+            lock (_realTimeCommandLock)
+            {
+                if (_realTimeLocalCommandEpoch != message.Epoch)
+                {
+                    _realTimeLocalCommandEpoch = message.Epoch;
+                    _nextRealTimeLocalCommandSequence = 0;
+                }
+                message.Sequence = ++_nextRealTimeLocalCommandSequence;
+            }
+            return AcceptRealTimeCombatCommand(Game.LocalPlayerId, message, executeOnHost: false);
+        }
+
+        private bool AcceptRealTimeCombatCommand(long receivedFrom, ClientRealTimeCombatCommand message, bool executeOnHost)
+        {
+            if (Game?.Combat?.Stage != NetworkCombatStage.Running || Game.RealTimeCombat == null
+                || GetPlayer(receivedFrom) == null || !RealTimeCombatCommandValidator.TryGetUnitId(message, out var unitId))
+            {
+                Logger.LogWarning("Rejecting malformed or out-of-combat real-time command. PlayerId={PlayerId}", receivedFrom);
+                return false;
+            }
+
+            var owners = Game.Characters
+                .Where(x => x?.Owner != null && !string.IsNullOrWhiteSpace(x.UnitId))
+                .GroupBy(x => x.UnitId, StringComparer.Ordinal)
+                .ToDictionary(x => x.Key, x => x.First().Owner.Id, StringComparer.Ordinal);
+            var envelope = new RealTimeCommandEnvelope
+            {
+                Epoch = message.Epoch,
+                Sequence = message.Sequence,
+                PlayerId = message.PlayerId,
+                UnitId = unitId,
+                Kind = (RealTimeCommandKind)message.Kind
+            };
+            long authoritativeSequence;
+            lock (_realTimeCommandLock)
+            {
+                if (!ReferenceEquals(_realTimeCommandGateState, Game.RealTimeCombat))
+                {
+                    _realTimeCommandGateState = Game.RealTimeCombat;
+                    _realTimeCommandGate = new RealTimeCommandGate(_realTimeCommandGateState);
+                }
+
+                var rejection = _realTimeCommandGate.Validate(envelope, receivedFrom, owners);
+                if (rejection != RealTimeCommandRejection.None)
+                {
+                    Logger.LogWarning("Rejecting real-time command. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}, Reason={Reason}", receivedFrom, unitId, message.Epoch, message.Sequence, rejection);
+                    return false;
+                }
+
+                authoritativeSequence = new RealTimeCombatCoordinator(Game.RealTimeCombat).NextAuthoritativeSequence();
+            }
+
+            if (executeOnHost)
+            {
+                switch ((RealTimeCommandKind)message.Kind)
+                {
+                    case RealTimeCommandKind.Move:
+                        CombatInteraction.MoveUnit(Mapper.Map<NetworkUnitMoveTo>(message.Movement));
+                        break;
+                    case RealTimeCommandKind.Attack:
+                        CombatInteraction.AttackUnit(Mapper.Map<NetworkUnitAttack>(message.Attack));
+                        break;
+                    case RealTimeCommandKind.UseAbility:
+                        CombatInteraction.UseAbility(Mapper.Map<NetworkAbilityUse>(message.Ability));
+                        break;
+                }
+            }
+
+            Send(new NotifyRealTimeCombatCommandAccepted
+            {
+                Epoch = message.Epoch,
+                AuthoritativeSequence = authoritativeSequence,
+                PlayerId = receivedFrom,
+                ClientSequence = message.Sequence,
+                Kind = message.Kind,
+                Movement = message.Movement,
+                Attack = message.Attack,
+                Ability = message.Ability
+            });
+            return true;
         }
 
         private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)

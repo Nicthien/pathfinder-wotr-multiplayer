@@ -116,5 +116,70 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustHaveHappenedOnceExactly();
             Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
         }
+
+        [Test]
+        public void RealTimeCommand_OnlyOwnedUnitIsSentWithIncreasingSequence()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            _multiplayerClient.Game.Characters.Add(new NetworkCharacter
+            {
+                UnitId = "unit-a",
+                Owner = new NetworkPlayer(42)
+            });
+            var ownMove = new NetworkUnitMoveTo
+            {
+                InitiatorUnitId = "unit-a",
+                Destination = new NetworkVector3 { X = 1, Y = 2, Z = 3 }
+            };
+            var otherMove = new NetworkUnitMoveTo
+            {
+                InitiatorUnitId = "unit-b",
+                Destination = new NetworkVector3 { X = 1, Y = 2, Z = 3 }
+            };
+
+            Assert.That(_multiplayerClient.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move, movement: otherMove), Is.False);
+            Assert.That(_multiplayerClient.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move, movement: ownMove), Is.True);
+            Assert.That(_multiplayerClient.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move, movement: ownMove), Is.True);
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCombatCommand>.That.Matches(x => x.PlayerId == 42 && x.Epoch == 5 && x.Sequence == 1)))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCombatCommand>.That.Matches(x => x.PlayerId == 42 && x.Epoch == 5 && x.Sequence == 2)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void AcceptedRealTimeCommand_IsAppliedOnceAndStaleRepeatIsIgnored()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(_networkClient);
+            var accepted = new NotifyRealTimeCombatCommandAccepted
+            {
+                Epoch = 5,
+                AuthoritativeSequence = 1,
+                Kind = (int)RealTimeCommandKind.Move,
+                Movement = new Networking.Messages.Contracts.NetworkUnitMoveTo
+                {
+                    InitiatorUnitId = "unit-a",
+                    Destination = new Networking.Messages.Contracts.NetworkVector3(1, 2, 3)
+                }
+            };
+
+            handler.Invoke(-1, accepted);
+            handler.Invoke(-1, accepted);
+
+            A.CallTo(() => _combatInteractionService.MoveUnit(A<NetworkUnitMoveTo>.That.Matches(x => x.InitiatorUnitId == "unit-a")))
+                .MustHaveHappenedOnceExactly();
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
+        }
     }
 }

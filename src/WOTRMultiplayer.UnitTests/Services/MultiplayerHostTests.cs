@@ -150,6 +150,71 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeCommand_AcceptsOwnedMoveAndRejectsDuplicateAndSpoofedSender()
+        {
+            var owner = new NetworkPlayer(42);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            _multiplayerHost.Game.Players.Add(owner);
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(99));
+            _multiplayerHost.Game.Characters.Add(new NetworkCharacter { UnitId = "unit-a", Owner = owner });
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatCommand>(_networkServer);
+            var command = new ClientRealTimeCombatCommand
+            {
+                Epoch = 5,
+                Sequence = 1,
+                PlayerId = 42,
+                Kind = (int)RealTimeCommandKind.Move,
+                Movement = new Networking.Messages.Contracts.NetworkUnitMoveTo
+                {
+                    InitiatorUnitId = "unit-a",
+                    Destination = new Networking.Messages.Contracts.NetworkVector3(1, 2, 3)
+                }
+            };
+
+            handler.Invoke(99, command);
+            A.CallTo(() => _combatInteractionService.MoveUnit(A<NetworkUnitMoveTo>._)).MustNotHaveHappened();
+
+            handler.Invoke(42, command);
+            handler.Invoke(42, command);
+
+            A.CallTo(() => _combatInteractionService.MoveUnit(A<NetworkUnitMoveTo>.That.Matches(x => x.InitiatorUnitId == "unit-a")))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatCommandAccepted>.That.Matches(x => x.Epoch == 5 && x.AuthoritativeSequence == 1 && x.ClientSequence == 1)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void LocalHostRealTimeCommand_IsBroadcastWithoutExecutingTwice()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            var hostPlayer = new NetworkPlayer(NetworkConstants.HostPlayerId);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+            _multiplayerHost.Game.Players.Add(hostPlayer);
+            _multiplayerHost.Game.Characters.Add(new NetworkCharacter { UnitId = "host-unit", Owner = hostPlayer });
+
+            var accepted = _multiplayerHost.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.Move,
+                movement: new NetworkUnitMoveTo
+                {
+                    InitiatorUnitId = "host-unit",
+                    Destination = new NetworkVector3 { X = 4, Y = 5, Z = 6 }
+                });
+
+            Assert.That(accepted, Is.True);
+            A.CallTo(() => _combatInteractionService.MoveUnit(A<NetworkUnitMoveTo>._)).MustNotHaveHappened();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatCommandAccepted>.That.Matches(x => x.PlayerId == NetworkConstants.HostPlayerId && x.AuthoritativeSequence == 1)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void OnNotifyDropItem__CallsGameInteraction()
         {
             // Arrange

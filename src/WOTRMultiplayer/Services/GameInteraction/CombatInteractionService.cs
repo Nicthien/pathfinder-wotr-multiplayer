@@ -1342,7 +1342,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 turn.m_AttackMode = (TurnController.AttackMode)Enum.Parse(typeof(TurnController.AttackMode), networkUnitMoveTo.AttackMode);
             }
 
-            executorUnit.Commands.Run(command);
+            using (RealTimeCommandExecutionScope.Enter())
+            {
+                executorUnit.Commands.Run(command);
+            }
             _logger.LogInformation("Unit MoveTo command has been initiated. UnitId={UnitId}, Destination={Destination}, Path={Path}, MovementLimit={MovementLimit}",
                 networkUnitMoveTo.InitiatorUnitId, networkUnitMoveTo.Destination, networkUnitMoveTo.VectorPath, networkUnitMoveTo.MovementLimit);
         }
@@ -1404,7 +1407,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             _logger.LogInformation("Unit Attack command has been initiated. UnitId={UnitId}, TargetUnitId={TargetUnitId}, ForceFullAttack={ForceFullAttack}, Path={Path}, AttackMode={AttackMode}, MovementLimit={MovementLimit}",
                 executorUnit.UniqueId, networkUnitAttack.TargetUnitId, command.ForceFullAttack, command.ForcedPath?.vectorPath, turn?.m_AttackMode, turn?.CurrentMovementLimit);
-            executorUnit.Commands.Run(command);
+            using (RealTimeCommandExecutionScope.Enter())
+            {
+                executorUnit.Commands.Run(command);
+            }
         }
 
         private void RunUnitAbilityCommand(UnitEntityData executorUnit, NetworkAbilityUse networkAbilityUse)
@@ -1454,7 +1460,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             _logger.LogInformation("Unit UseAbility command has been initiated. UnitId={UnitId}, TargetPoint={TargetPoint}, TargetUnitId={TargetUnitId}, AbilityId={AbilityId}, AbilityName={AbilityName}, Path={Path}, MovementLimit={MovementLimit}",
                 executorUnit.UniqueId, targetWrapper.Point, targetWrapper.Unit?.UniqueId, abilityData.UniqueId, abilityData.NameForAcronym, vectorPath, rawMovementLimit);
-            executorUnit.Commands.Run(command);
+            using (RealTimeCommandExecutionScope.Enter())
+            {
+                executorUnit.Commands.Run(command);
+            }
         }
 
         private void SetCommandPath(List<NetworkVector3> path, UnitCommand command)

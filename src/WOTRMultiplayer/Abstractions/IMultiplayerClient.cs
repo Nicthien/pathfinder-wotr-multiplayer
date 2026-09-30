@@ -1,6 +1,8 @@
 ﻿using System;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Connectivity;
+using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 
 namespace WOTRMultiplayer.Abstractions
 {
@@ -17,5 +19,9 @@ namespace WOTRMultiplayer.Abstractions
         Action<NetworkCharacter> OnCharacterOwnerChanged { get; set; }
 
         void OnBeforeTryRollRestRandomEncounter();
+
+        bool IsRealTimeCombatActive { get; }
+
+        bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
     }
 }

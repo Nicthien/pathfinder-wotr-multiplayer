@@ -46,6 +46,9 @@ namespace WOTRMultiplayer.Services
     {
         private readonly INetworkClientConnection _networkClient;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
+        private readonly object _realTimeCommandSequenceLock = new();
+        private long _realTimeCommandEpoch;
+        private long _nextRealTimeCommandSequence;
 
         public Action OnNetworkError { get; set; }
 
@@ -54,6 +57,10 @@ namespace WOTRMultiplayer.Services
         public bool IsActive => _networkClient.IsActive;
 
         public bool IsConnecting => _networkClient.IsConnecting;
+
+        public bool IsRealTimeCombatActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
+            && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
+            && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -119,7 +126,48 @@ namespace WOTRMultiplayer.Services
 
             Game = null;
 
+            lock (_realTimeCommandSequenceLock)
+            {
+                _realTimeCommandEpoch = 0;
+                _nextRealTimeCommandSequence = 0;
+            }
+
             _networkClient?.Reset();
+        }
+
+        public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
+        {
+            if (!IsRealTimeCombatActive)
+            {
+                return false;
+            }
+
+            var message = new ClientRealTimeCombatCommand
+            {
+                Epoch = Game.RealTimeCombat.Epoch,
+                PlayerId = Game.LocalPlayerId,
+                Kind = (int)kind,
+                Movement = movement == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkUnitMoveTo>(movement),
+                Attack = attack == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkUnitAttack>(attack),
+                Ability = ability == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkAbilityUse>(ability)
+            };
+            if (!RealTimeCombatCommandValidator.TryGetUnitId(message, out var unitId)
+                || !Game.Characters.Any(x => x.UnitId == unitId && x.Owner?.Id == Game.LocalPlayerId))
+            {
+                return false;
+            }
+
+            lock (_realTimeCommandSequenceLock)
+            {
+                if (_realTimeCommandEpoch != message.Epoch)
+                {
+                    _realTimeCommandEpoch = message.Epoch;
+                    _nextRealTimeCommandSequence = 0;
+                }
+                message.Sequence = ++_nextRealTimeCommandSequence;
+                Send(message);
+            }
+            return true;
         }
 
         public override void OnAreaLoaded()
@@ -602,6 +650,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyCombatLocalTurnEnded>(OnNotifyCombatLocalTurnEnded)
                .On<NotifyCombatTurnEnded>(OnNotifyCombatTurnEnded)
                .On<NotifyRealTimeCombatSnapshot>(OnNotifyRealTimeCombatSnapshot)
+               .On<NotifyRealTimeCombatCommandAccepted>(OnNotifyRealTimeCombatCommandAccepted)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -987,6 +1036,46 @@ namespace WOTRMultiplayer.Services
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Real-time combat snapshot could not be applied. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+            }
+            finally
+            {
+                _realTimeSnapshotGate.Release();
+            }
+        }
+
+        private async void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)
+        {
+            await _realTimeSnapshotGate.WaitAsync();
+            try
+            {
+                if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause
+                    || Game.Combat?.Stage != NetworkCombatStage.Running
+                    || !new RealTimeCombatCoordinator(Game.RealTimeCombat).IsCurrent(message.Epoch, message.AuthoritativeSequence))
+                {
+                    return;
+                }
+
+                switch ((RealTimeCommandKind)message.Kind)
+                {
+                    case RealTimeCommandKind.Move when message.Movement != null:
+                        CombatInteraction.MoveUnit(Mapper.Map<NetworkUnitMoveTo>(message.Movement));
+                        break;
+                    case RealTimeCommandKind.Attack when message.Attack != null:
+                        CombatInteraction.AttackUnit(Mapper.Map<NetworkUnitAttack>(message.Attack));
+                        break;
+                    case RealTimeCommandKind.UseAbility when message.Ability != null:
+                        CombatInteraction.UseAbility(Mapper.Map<NetworkAbilityUse>(message.Ability));
+                        break;
+                    default:
+                        Logger.LogWarning("Ignoring malformed authoritative real-time command. Epoch={Epoch}, Sequence={Sequence}, Kind={Kind}", message.Epoch, message.AuthoritativeSequence, message.Kind);
+                        return;
+                }
+
+                Game.RealTimeCombat.LastAuthoritativeSequence = message.AuthoritativeSequence;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to apply authoritative real-time command. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.AuthoritativeSequence);
             }
             finally
             {

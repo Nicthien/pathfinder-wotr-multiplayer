@@ -298,7 +298,9 @@
             NotifyArmyCombatTurnSynchronizationRequired,
             ClientArmyCombatTurnSynchronized,
             NotifyRealTimeCombatSnapshot,
-            ClientRealTimeStateHash
+            ClientRealTimeStateHash,
+            ClientRealTimeCombatCommand,
+            NotifyRealTimeCombatCommandAccepted
         }
 
         public static class Mods

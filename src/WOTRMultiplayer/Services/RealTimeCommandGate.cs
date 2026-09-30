@@ -10,6 +10,7 @@ namespace WOTRMultiplayer.Services
         SynchronizationBarrierActive,
         WrongEpoch,
         InvalidSequence,
+        SenderMismatch,
         UnknownUnit,
         UnitOwnedByAnotherPlayer,
     }
@@ -28,6 +29,7 @@ namespace WOTRMultiplayer.Services
 
         public RealTimeCommandRejection Validate(
             RealTimeCommandEnvelope command,
+            long receivedFrom,
             IReadOnlyDictionary<string, long> unitOwners)
         {
             if (command == null || unitOwners == null || command.Sequence <= 0)
@@ -48,6 +50,11 @@ namespace WOTRMultiplayer.Services
             if (command.Epoch != _state.Epoch)
             {
                 return RealTimeCommandRejection.WrongEpoch;
+            }
+
+            if (command.PlayerId != receivedFrom)
+            {
+                return RealTimeCommandRejection.SenderMismatch;
             }
 
             if (_trackedEpoch != _state.Epoch)
