@@ -345,10 +345,16 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Applied = true, CanonicalStateHash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash
             });
 
-            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Synchronizing));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x => x.Stage == (int)RealTimeModeTransitionStage.Complete)))
                 .MustHaveHappenedOnceExactly();
+            handler.Invoke(42, new ClientRealTimeModeTransitionAck
+            {
+                Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Complete,
+                Applied = true, CanonicalStateHash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash
+            });
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
         }
 
         [Test]
@@ -384,6 +390,12 @@ namespace WOTRMultiplayer.UnitTests.Services
             handler.Invoke(42, new ClientRealTimeModeTransitionAck
             {
                 Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Abort,
+                Applied = true, CanonicalStateHash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash
+            });
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            handler.Invoke(42, new ClientRealTimeModeTransitionAck
+            {
+                Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Complete,
                 Applied = true, CanonicalStateHash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash
             });
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));

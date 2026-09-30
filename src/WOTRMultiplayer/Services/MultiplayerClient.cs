@@ -1315,13 +1315,21 @@ namespace WOTRMultiplayer.Services
                     state.PendingMode = null;
                     state.PreviousMode = null;
                     state.Phase = CombatSynchronizationPhase.Stable;
+                    SendRealTimeModeAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
+                    return;
+                }
+                if (stage == RealTimeModeTransitionStage.Complete
+                    && state.Phase == CombatSynchronizationPhase.Stable
+                    && state.Mode == mode && state.CanonicalStateHash == message.CanonicalStateHash)
+                {
+                    SendRealTimeModeAck(message, true, state.CanonicalStateHash);
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Unable to apply combat-mode transition. Epoch={Epoch}, Stage={Stage}", message?.Epoch, message?.Stage);
-                if (message != null && message.Stage != (int)RealTimeModeTransitionStage.Complete)
+                if (message != null)
                 {
                     SendRealTimeModeAck(message, false, 0);
                 }

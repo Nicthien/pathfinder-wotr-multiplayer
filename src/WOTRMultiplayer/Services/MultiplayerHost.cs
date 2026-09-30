@@ -68,6 +68,8 @@ namespace WOTRMultiplayer.Services
         private bool _realTimeModeCommitInProgress;
         private NotifyRealTimeModeTransition _lastRealTimeModePrepare;
         private NotifyRealTimeModeTransition _lastRealTimeModeCommit;
+        private NotifyRealTimeModeTransition _lastRealTimeModeComplete;
+        private bool _realTimeModeCompleteIsAbort;
         private int _realTimeModeRetransmissions;
         private NotifyRealTimeModeTransition _lastRealTimeAbort;
         private DateTime _realTimeRepairDeadline;
@@ -242,18 +244,59 @@ namespace WOTRMultiplayer.Services
 
         private void CompleteRealTimeModeSwitch()
         {
-            var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
-            coordinator.CompleteModeCommit();
-            _realTimeModeSwitchDeadline = default;
-            _lastRealTimeModePrepare = null;
-            _lastRealTimeModeCommit = null;
-            Send(new NotifyRealTimeModeTransition
+            BeginRealTimeModeCompletion(isAbort: false);
+        }
+
+        private void BeginRealTimeModeCompletion(bool isAbort)
+        {
+            if (_lastRealTimeModeComplete != null)
+            {
+                return;
+            }
+            _realTimeModeCompleteIsAbort = isAbort;
+            Game.RealTimeCombat.RequiredPlayers = GetSyncedPlayers().Select(x => x.Id)
+                .Append(Game.LocalPlayerId).ToHashSet();
+            Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            _lastRealTimeModeComplete = new NotifyRealTimeModeTransition
             {
                 Epoch = Game.RealTimeCombat.Epoch,
                 Stage = (int)RealTimeModeTransitionStage.Complete,
                 Mode = (int)Game.RealTimeCombat.Mode,
                 CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
-            });
+            };
+            _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(10);
+            Send(_lastRealTimeModeComplete);
+            TryFinalizeRealTimeModeCompletion();
+        }
+
+        private void TryFinalizeRealTimeModeCompletion()
+        {
+            if (_lastRealTimeModeComplete == null)
+            {
+                return;
+            }
+            var connectedPlayers = GetSyncedPlayers().Select(x => x.Id)
+                .Append(Game.LocalPlayerId).ToHashSet();
+            Game.RealTimeCombat.RequiredPlayers.IntersectWith(connectedPlayers);
+            if (!Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+            {
+                return;
+            }
+            if (_realTimeModeCompleteIsAbort)
+            {
+                Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Stable;
+                Game.RealTimeCombat.RequiredPlayers.Clear();
+                Game.RealTimeCombat.ReadyPlayers.Clear();
+            }
+            else
+            {
+                new RealTimeCombatCoordinator(Game.RealTimeCombat).CompleteModeCommit();
+            }
+            _realTimeModeSwitchDeadline = default;
+            _lastRealTimeModePrepare = null;
+            _lastRealTimeModeCommit = null;
+            _lastRealTimeModeComplete = null;
+            _lastRealTimeAbort = null;
             GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
         }
 
@@ -305,6 +348,18 @@ namespace WOTRMultiplayer.Services
             {
                 return;
             }
+            if (_lastRealTimeModeComplete != null)
+            {
+                TryFinalizeRealTimeModeCompletion();
+                if (_lastRealTimeModeComplete == null)
+                {
+                    return;
+                }
+                _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(10);
+                Logger.LogWarning("Waiting for peer to acknowledge combat-mode completion. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
+                Send(_lastRealTimeModeComplete);
+                return;
+            }
             if (Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing && _lastRealTimeAbort != null)
             {
                 _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
@@ -344,19 +399,8 @@ namespace WOTRMultiplayer.Services
             {
                 return;
             }
-            Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Stable;
-            Game.RealTimeCombat.RequiredPlayers.Clear();
-            Game.RealTimeCombat.ReadyPlayers.Clear();
-            _realTimeModeSwitchDeadline = default;
             _lastRealTimeAbort = null;
-            Send(new NotifyRealTimeModeTransition
-            {
-                Epoch = Game.RealTimeCombat.Epoch,
-                Stage = (int)RealTimeModeTransitionStage.Complete,
-                Mode = (int)Game.RealTimeCombat.Mode,
-                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
-            });
-            GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+            BeginRealTimeModeCompletion(isAbort: true);
         }
 
         private void OnClientRealTimeModeTransitionAck(long receivedFrom, ClientRealTimeModeTransitionAck message)
@@ -386,7 +430,8 @@ namespace WOTRMultiplayer.Services
                         }
                     }
                     else if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Commit
-                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Synchronizing)
+                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Synchronizing
+                        && _lastRealTimeModeComplete == null)
                     {
                         if (!message.Applied || message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash)
                         {
@@ -399,7 +444,8 @@ namespace WOTRMultiplayer.Services
                         }
                     }
                     else if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Abort
-                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing)
+                        && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing
+                        && _lastRealTimeModeComplete == null)
                     {
                         if (message.Applied && message.CanonicalStateHash == Game.RealTimeCombat.CanonicalStateHash)
                         {
@@ -410,6 +456,14 @@ namespace WOTRMultiplayer.Services
                         {
                             Logger.LogError("Peer could not reconcile aborted combat mode. PlayerId={PlayerId}, Epoch={Epoch}, HostHash={HostHash}, ClientHash={ClientHash}", receivedFrom, message.Epoch, Game.RealTimeCombat.CanonicalStateHash, message.CanonicalStateHash);
                         }
+                    }
+                    else if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Complete
+                        && _lastRealTimeModeComplete != null
+                        && message.Applied && message.CanonicalStateHash == Game.RealTimeCombat.CanonicalStateHash
+                        && Game.RealTimeCombat.RequiredPlayers.Contains(receivedFrom))
+                    {
+                        Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
+                        TryFinalizeRealTimeModeCompletion();
                     }
                 }
                 catch (Exception ex)
@@ -570,6 +624,11 @@ namespace WOTRMultiplayer.Services
             _realTimeSnapshotHashes.Clear();
             _realTimeSnapshotSentAt.Clear();
             _consecutiveMissingRealTimeReplies = 0;
+            _lastRealTimeModePrepare = null;
+            _lastRealTimeModeCommit = null;
+            _lastRealTimeModeComplete = null;
+            _lastRealTimeAbort = null;
+            _realTimeModeSwitchDeadline = default;
 
             _networkHost.Reset();
         }

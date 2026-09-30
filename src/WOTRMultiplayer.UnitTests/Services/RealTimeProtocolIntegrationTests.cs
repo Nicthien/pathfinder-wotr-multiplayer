@@ -146,6 +146,94 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_LostAndDuplicateComplete_HostWaitsUntilClientAcknowledges()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+
+            Assert.That(((NotifyRealTimeModeTransition)queued.Dequeue()).Stage,
+                Is.EqualTo((int)RealTimeModeTransitionStage.Complete)); // Drop first Complete.
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Synchronizing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            typeof(MultiplayerHost).GetField("_realTimeModeSwitchDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(host, DateTime.UtcNow.AddSeconds(-1));
+            host.PublishRealTimeCombatSnapshot();
+
+            var complete = (NotifyRealTimeModeTransition)queued.Dequeue();
+            DeliverToClient(clientNetwork, complete);
+            DeliverToClient(clientNetwork, complete);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(client.Game.RealTimeCombat.Mode));
+        }
+
+        [Test]
+        public async Task TwoActors_LostAbortComplete_RemainsPausedUntilAcknowledged()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+            var commit = (NotifyRealTimeModeTransition)queued.Dequeue();
+            commit.CanonicalStateHash ^= 1UL; // Force the client to reject the checkpoint.
+            DeliverToClient(clientNetwork, commit);
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+            Assert.That(((NotifyRealTimeModeTransition)queued.Peek()).Stage,
+                Is.EqualTo((int)RealTimeModeTransitionStage.Abort));
+            PumpUntilComplete(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            Assert.That(((NotifyRealTimeModeTransition)queued.Dequeue()).Stage,
+                Is.EqualTo((int)RealTimeModeTransitionStage.Complete)); // Drop it.
+            typeof(MultiplayerHost).GetField("_realTimeModeSwitchDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(host, DateTime.UtcNow.AddSeconds(-1));
+            host.PublishRealTimeCombatSnapshot();
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+        }
+
+        [Test]
+        public async Task Host_PeerDisconnectsWhileCompleting_LeavesBarrierInSoloPlay()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+            queued.Dequeue(); // Final Complete cannot be delivered after the peer disconnects.
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Synchronizing));
+            host.Game.Players.RemoveAll(player => player.Id == 42);
+            typeof(MultiplayerHost).GetField("_realTimeModeSwitchDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(host, DateTime.UtcNow.AddSeconds(-1));
+            host.PublishRealTimeCombatSnapshot();
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
+        }
+
+        [Test]
         public async Task TwoActors_LostRepairPrepare_ResynchronizeAndResume()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
@@ -294,6 +382,34 @@ namespace WOTRMultiplayer.UnitTests.Services
                         break;
                 }
             }
+        }
+
+        private static void PumpUntilComplete(Queue<object> queued, INetworkHostConnection hostNetwork,
+            INetworkClientConnection clientNetwork)
+        {
+            for (var count = 0; queued.Count > 0; count++)
+            {
+                Assert.That(count, Is.LessThan(20));
+                if (queued.Peek() is NotifyRealTimeModeTransition nextTransition
+                    && nextTransition.Stage == (int)RealTimeModeTransitionStage.Complete)
+                {
+                    return;
+                }
+                var message = queued.Dequeue();
+                switch (message)
+                {
+                    case NotifyRealTimeModeTransition transition:
+                        DeliverToClient(clientNetwork, transition);
+                        break;
+                    case ClientRealTimeModeTransitionAck ack:
+                        FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42, ack);
+                        break;
+                    default:
+                        Assert.Fail($"Unexpected protocol message: {message.GetType().Name}");
+                        break;
+                }
+            }
+            Assert.Fail("The host did not send a completion checkpoint.");
         }
 
         private static void DeliverToClient(INetworkClientConnection network, NotifyRealTimeModeTransition message) =>
