@@ -16,6 +16,7 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
+using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Networking;
 using WOTRMultiplayer.Networking.Abstractions;
 using WOTRMultiplayer.Networking.Messages.Game;
@@ -30,7 +31,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public async Task TwoActors_LostAndDuplicatePrepare_ConvergeOnRealTime()
         {
-            var (host, client, hostNetwork, clientNetwork, queued) = CreatePair();
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
 
             // Drop the first Prepare, then trigger the host's application-level retry.
@@ -55,7 +56,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public async Task TwoActors_LostAndDuplicateCommit_ConvergeOnRealTime()
         {
-            var (host, client, hostNetwork, clientNetwork, queued) = CreatePair();
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
             DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
             FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
@@ -82,7 +83,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public async Task TwoActors_LostRepairPrepare_ResynchronizeAndResume()
         {
-            var (host, client, hostNetwork, clientNetwork, queued) = CreatePair();
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
             Pump(queued, hostNetwork, clientNetwork);
             Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
@@ -101,8 +102,47 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(host.Game.RealTimeCombat.Epoch, Is.EqualTo(client.Game.RealTimeCombat.Epoch));
         }
 
+        [Test]
+        public async Task TwoActors_DivergentUnit_WithMockedSuccessfulApply_Resumes()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            var calls = 0;
+            A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).ReturnsLazily(() =>
+                Task.FromResult(++calls == 1
+                    ? new NetworkCombatState { Units = [new NetworkUnit { Id = "divergent-unit" }] }
+                    : new NetworkCombatState()));
+
+            await host.BeginRealTimeRepairAsync();
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(calls, Is.EqualTo(2));
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(host.Game.RealTimeCombat.CanonicalStateHash, Is.EqualTo(client.Game.RealTimeCombat.CanonicalStateHash));
+        }
+
+        [Test]
+        public async Task TwoActors_UnrepairableUnit_StaysPausedAndBlocksSaving()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(
+                Task.FromResult(new NetworkCombatState { Units = [new NetworkUnit { Id = "unrepairable-unit" }] }));
+
+            await host.BeginRealTimeRepairAsync();
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            Assert.That(client.IsSavingBlockedByCombatSync, Is.True);
+        }
+
         private static (MultiplayerHost Host, MultiplayerClient Client, INetworkHostConnection HostNetwork,
-            INetworkClientConnection ClientNetwork, Queue<object> Queued) CreatePair()
+            INetworkClientConnection ClientNetwork, Queue<object> Queued, ICombatInteractionService ClientCombat) CreatePair()
         {
             var mapper = new MapperConfiguration(x =>
             {
@@ -159,7 +199,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 LocalPlayerId = 42,
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
             };
-            return (host, client, hostNetwork, clientNetwork, queued);
+            return (host, client, hostNetwork, clientNetwork, queued, clientCombat);
         }
 
         private static void Pump(Queue<object> queued, INetworkHostConnection hostNetwork,
