@@ -52,5 +52,41 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(RealTimeCombatCommandValidator.TryGetUnitId(command, out _), Is.False);
         }
+
+        [Test]
+        public void MalformedPath_IsRejected()
+        {
+            var command = new ClientRealTimeCombatCommand
+            {
+                Kind = (int)RealTimeCommandKind.Attack,
+                Attack = new NetworkUnitAttack
+                {
+                    InitiatorUnitId = "unit-a",
+                    TargetUnitId = "unit-b",
+                    VectorPath = [new NetworkVector3(float.PositiveInfinity, 0, 0)]
+                }
+            };
+
+            Assert.That(RealTimeCombatCommandValidator.TryGetUnitId(command, out _), Is.False);
+        }
+
+        [Test]
+        public void Ability_RequiresResolvableAbilityAndTarget()
+        {
+            var command = new ClientRealTimeCombatCommand
+            {
+                Kind = (int)RealTimeCommandKind.UseAbility,
+                Ability = new NetworkAbilityUse
+                {
+                    InitiatorUnitId = "unit-a",
+                    Ability = new NetworkAbility { Id = "ability-a" },
+                    Target = new NetworkTargetWrapper { UnitId = "unit-b" }
+                }
+            };
+
+            Assert.That(RealTimeCombatCommandValidator.TryGetUnitId(command, out _), Is.True);
+            command.Ability.Ability.Id = null;
+            Assert.That(RealTimeCombatCommandValidator.TryGetUnitId(command, out _), Is.False);
+        }
     }
 }
