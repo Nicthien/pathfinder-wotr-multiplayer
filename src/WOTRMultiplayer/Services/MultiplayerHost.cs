@@ -124,7 +124,11 @@ namespace WOTRMultiplayer.Services
             _nextRealTimeSnapshotAt = DateTime.UtcNow.AddMilliseconds(250);
 
             var state = CombatInteraction.GetRealTimeCombatState();
-            var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
+            var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
+            {
+                Combat = state,
+                ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(Game.RealTimeCombat).ToList()
+            });
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             var sequence = coordinator.PublishAuthoritativeSnapshot(hash);
             _realTimeSnapshotHashes[(Game.RealTimeCombat.Epoch, sequence)] = hash;
@@ -2765,7 +2769,7 @@ namespace WOTRMultiplayer.Services
                 authoritativeSequence = new RealTimeCombatCoordinator(Game.RealTimeCombat).NextAuthoritativeSequence();
             }
 
-            Send(new NotifyRealTimeCombatCommandAccepted
+            var accepted = new NotifyRealTimeCombatCommandAccepted
             {
                 Epoch = message.Epoch,
                 AuthoritativeSequence = authoritativeSequence,
@@ -2775,7 +2779,9 @@ namespace WOTRMultiplayer.Services
                 Movement = message.Movement,
                 Attack = message.Attack,
                 Ability = message.Ability
-            });
+            };
+            RealTimeAcceptedOrderLedger.Record(Game.RealTimeCombat, accepted);
+            Send(accepted);
             return true;
         }
 

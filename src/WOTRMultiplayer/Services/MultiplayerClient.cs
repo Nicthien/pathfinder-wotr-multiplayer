@@ -1084,7 +1084,11 @@ namespace WOTRMultiplayer.Services
                 var state = Mapper.Map<NetworkCombatState>(message.State);
                 await CombatInteraction.UpdateRealTimeCombatStateAsync(state);
                 var actual = await CombatInteraction.GetRealTimeCombatStateAsync();
-                var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = actual });
+                var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
+                {
+                    Combat = actual,
+                    ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(Game.RealTimeCombat).ToList()
+                });
                 Game.RealTimeCombat.LastAuthoritativeSequence = message.Sequence;
                 Game.RealTimeCombat.CanonicalStateHash = message.CanonicalStateHash;
                 Send(new ClientRealTimeStateHash
@@ -1152,6 +1156,7 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
                 Game.RealTimeCombat.LastAuthoritativeSequence = message.AuthoritativeSequence;
+                RealTimeAcceptedOrderLedger.Record(Game.RealTimeCombat, message);
             }
             catch (Exception ex)
             {

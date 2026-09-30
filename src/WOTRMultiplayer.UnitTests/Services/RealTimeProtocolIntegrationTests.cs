@@ -119,6 +119,38 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_SimultaneousMovesAndAttack_KeepAuthoritativeOrder()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            var hostPlayer = host.Game.Players.Find(player => player.Id == NetworkConstants.HostPlayerId);
+            var guestPlayer = host.Game.Players.Find(player => player.Id == 42);
+            host.Game.Characters.Add(new NetworkCharacter { UnitId = "host-unit", Owner = hostPlayer });
+            host.Game.Characters.Add(new NetworkCharacter { UnitId = "guest-unit", Owner = guestPlayer });
+            client.Game.Characters.Add(new NetworkCharacter { UnitId = "guest-unit", Owner = guestPlayer });
+
+            Assert.That(host.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.Move,
+                movement: new NetworkUnitMoveTo { InitiatorUnitId = "host-unit", Destination = new NetworkVector3(1, 0, 0) }), Is.True);
+            Assert.That(client.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move,
+                movement: new NetworkUnitMoveTo { InitiatorUnitId = "guest-unit", Destination = new NetworkVector3(2, 0, 0) }), Is.True);
+            Assert.That(client.SubmitRealTimeCombatCommand(RealTimeCommandKind.Attack,
+                attack: new NetworkUnitAttack { InitiatorUnitId = "guest-unit", TargetUnitId = "host-unit" }), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(3));
+            Assert.That(client.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(3));
+            A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                A<NetworkUnitMoveTo>._, null, null)).MustHaveHappenedTwiceExactly();
+            A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Attack,
+                null, A<NetworkUnitAttack>._, null)).MustHaveHappenedOnceExactly();
+            host.PublishRealTimeCombatSnapshot();
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.CanonicalStateHash,
+                Is.EqualTo(client.Game.RealTimeCombat.CanonicalStateHash));
+        }
+
+        [Test]
         public async Task TwoActors_LostAndDuplicateCommit_ConvergeOnRealTime()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
@@ -338,9 +370,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => hostGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
+            A.CallTo(() => hostCombat.ExecuteRealTimeCombatCommand(A<RealTimeCommandKind>._,
+                A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._)).Returns(true);
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
                 .Returns(Task.CompletedTask);
+            A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
+                A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))
+                .Returns(Task.FromResult(true));
             var mainThread = A.Fake<IMainThreadAccessor>();
             A.CallTo(() => mainThread.Post(A<Action>._)).Invokes(call => ((Action)call.Arguments[0])());
 
@@ -403,6 +440,18 @@ namespace WOTRMultiplayer.UnitTests.Services
                         break;
                     case ClientRealTimeRepairAck repairAck:
                         FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(hostNetwork)(42, repairAck);
+                        break;
+                    case ClientRealTimeCombatCommand command:
+                        FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatCommand>(hostNetwork)(42, command);
+                        break;
+                    case NotifyRealTimeCombatCommandAccepted accepted:
+                        FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(clientNetwork)(NetworkConstants.HostPlayerId, accepted);
+                        break;
+                    case NotifyRealTimeCombatSnapshot snapshot:
+                        FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(clientNetwork)(NetworkConstants.HostPlayerId, snapshot);
+                        break;
+                    case ClientRealTimeStateHash stateHash:
+                        FakeUtils.GetNetworkReceiverHandler<ClientRealTimeStateHash>(hostNetwork)(42, stateHash);
                         break;
                     default:
                         Assert.Fail($"Unexpected protocol message: {message.GetType().Name}");
