@@ -306,7 +306,8 @@
             NotifyRealTimeModeTransition,
             ClientRealTimeModeTransitionAck,
             NotifyRealTimeRepair,
-            ClientRealTimeRepairAck
+            ClientRealTimeRepairAck,
+            NotifyRealTimeCombatPreference
         }
 
         public static class Mods

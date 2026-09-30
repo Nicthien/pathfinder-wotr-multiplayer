@@ -466,7 +466,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 LocalPlayerId = NetworkConstants.HostPlayerId,
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
-                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, PreferredMode = CombatMode.RealTimeWithPause }
             };
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(NetworkConstants.HostPlayerId) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
@@ -486,6 +486,25 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimePauseChanged>.That.Matches(x =>
                 x.Epoch == 4 && x.Sequence == 1 && x.Policy == (int)PausePolicy.AnyoneFreeResume)))
                 .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void PreferredRealTimeMode_IsPublishedAndAutomaticallyPreparedOncePerCombat()
+        {
+            PrepareRealTimeRepairTest();
+            _multiplayerHost.Game.RealTimeCombat.Mode = CombatMode.TurnBased;
+
+            Assert.That(_multiplayerHost.SetPreferredRealTimeCombatMode(CombatMode.RealTimeWithPause), Is.True);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatPreference>.That.Matches(x =>
+                x.Sequence == 1 && x.PreferredMode == (int)CombatMode.RealTimeWithPause)))
+                .MustHaveHappenedOnceExactly();
+
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+            _multiplayerHost.PublishRealTimeCombatSnapshot();
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.PreparingModeSwitch));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustHaveHappenedOnceExactly();
         }
 
         private static ClientRealTimeRepairAck RepairAck(long epoch, RealTimeRepairStage stage, ulong hash, bool applied = true)

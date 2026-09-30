@@ -71,6 +71,7 @@ namespace WOTRMultiplayer.Services
         private bool _realTimeRepairHasMismatch;
         private long _realTimeAISequenceEpoch;
         private long _nextRealTimeAISequence;
+        private NetworkCombat _autoModeAttemptCombat;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -90,6 +91,16 @@ namespace WOTRMultiplayer.Services
         {
             CheckRealTimeModeSwitchTimeout();
             CheckRealTimeRepairTimeout();
+            if (Game?.Combat?.Stage == NetworkCombatStage.Running
+                && Game.RealTimeCombat != null
+                && Game.RealTimeCombat.PreferredMode != Game.RealTimeCombat.Mode
+                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                && !ReferenceEquals(_autoModeAttemptCombat, Game.Combat)
+                && GetSyncedPlayers().Any())
+            {
+                _autoModeAttemptCombat = Game.Combat;
+                _ = RequestRealTimeCombatModeAsync(Game.RealTimeCombat.PreferredMode);
+            }
             if (Game?.Combat?.Stage != NetworkCombatStage.Running
                 || Game.RealTimeCombat.Mode != CombatMode.RealTimeWithPause
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
@@ -130,6 +141,8 @@ namespace WOTRMultiplayer.Services
             {
                 return false;
             }
+
+            _autoModeAttemptCombat = Game.Combat;
 
             var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
@@ -2641,10 +2654,39 @@ namespace WOTRMultiplayer.Services
                     PausedPlayers = [.. Game.RealTimeCombat.PausedPlayers],
                     ResumeVotes = []
                 });
+                SendRealTimePreference();
             }
 
             Logger.LogInformation("Real-time pause policy changed. Policy={Policy}, Epoch={Epoch}", policy, Game.RealTimeCombat.Epoch);
             return true;
+        }
+
+        public bool SetPreferredRealTimeCombatMode(CombatMode mode)
+        {
+            if (!IsActive || Game?.RealTimeCombat == null
+                || !Enum.IsDefined(typeof(CombatMode), mode)
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+            {
+                return false;
+            }
+
+            Game.RealTimeCombat.PreferredMode = mode;
+            SendRealTimePreference();
+            Logger.LogInformation("Preferred combat mode changed. Mode={Mode}", mode);
+            return true;
+        }
+
+        private void SendRealTimePreference(long? playerId = null)
+        {
+            var state = Game.RealTimeCombat;
+            var message = new NotifyRealTimeCombatPreference
+            {
+                Sequence = ++state.PreferenceSequence,
+                PreferredMode = (int)state.PreferredMode,
+                PausePolicy = (int)state.PausePolicy
+            };
+            if (playerId.HasValue) Send(playerId.Value, message);
+            else Send(message);
         }
 
         private void OnClientRealTimePauseRequested(long receivedFrom, ClientRealTimePauseRequested message)
@@ -3116,6 +3158,11 @@ namespace WOTRMultiplayer.Services
                         Characters = Mapper.Map<List<Networking.Messages.Contracts.NetworkCharacter>>(Game.Characters)
                     };
                     Send(playerId, lobbyCharactersChanged);
+
+                    if (existingPlayer.ContentState.RealTimeProtocolVersion == NetworkRealTimeCombatState.ProtocolVersion)
+                    {
+                        SendRealTimePreference(playerId);
+                    }
 
                     InvokeOnPlayersChanged();
 

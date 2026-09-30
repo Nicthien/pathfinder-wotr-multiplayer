@@ -101,6 +101,7 @@
             "realTime": {
                 "combatStatus": "Combat: {0}",
                 "pausePolicy": "Pause policy: {0}",
+                "preferredMode": "Preferred combat mode: {0}",
                 "modeRealTime": "Real time with pause",
                 "turnBased": "Turn based",
                 "synchronizing": "Synchronizing",
@@ -113,6 +114,8 @@
                 "unknown": "Unknown",
                 "switchToRealTime": "Switch to real time",
                 "switchToTurnBased": "Switch to turn based",
+                "preferRealTime": "Prefer real time for new combats",
+                "preferTurnBased": "Prefer turn based for new combats",
                 "changePausePolicy": "Change pause policy",
                 "repair": "Repair synchronization",
                 "requestResume": "Request resume",

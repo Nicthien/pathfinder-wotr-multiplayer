@@ -47,6 +47,7 @@
       "realTime": {
         "combatStatus": "Combat : {0}",
         "pausePolicy": "Politique de pause : {0}",
+        "preferredMode": "Mode préféré pour les combats : {0}",
         "modeRealTime": "Temps réel avec pause",
         "turnBased": "Tour par tour",
         "synchronizing": "Synchronisation",
@@ -59,6 +60,8 @@
         "unknown": "Inconnue",
         "switchToRealTime": "Passer en temps réel",
         "switchToTurnBased": "Passer en tour par tour",
+        "preferRealTime": "Préférer le temps réel pour les prochains combats",
+        "preferTurnBased": "Préférer le tour par tour pour les prochains combats",
         "changePausePolicy": "Changer la politique de pause",
         "repair": "Réparer la synchronisation",
         "requestResume": "Demander la reprise",

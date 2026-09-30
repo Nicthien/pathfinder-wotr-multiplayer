@@ -490,6 +490,27 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void PreferredRealTimeMode_UsesLatestHostPreference()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp());
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatPreference>(_networkClient);
+
+            handler.Invoke(-1, new NotifyRealTimeCombatPreference
+            {
+                Sequence = 2, PreferredMode = (int)CombatMode.RealTimeWithPause,
+                PausePolicy = (int)PausePolicy.AnyoneFreeResume
+            });
+            handler.Invoke(-1, new NotifyRealTimeCombatPreference
+            {
+                Sequence = 1, PreferredMode = (int)CombatMode.TurnBased,
+                PausePolicy = (int)PausePolicy.HostOnly
+            });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.PreferredMode, Is.EqualTo(CombatMode.RealTimeWithPause));
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.PausePolicy, Is.EqualTo(PausePolicy.AnyoneFreeResume));
+        }
+
+        [Test]
         public void RealTimePauseChange_IgnoresStaleStateAndAppliesNewState()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())

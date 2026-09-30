@@ -398,6 +398,12 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("preferredMode")]
+            public static class PreferredMode
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("modeRealTime")]
             public static class ModeRealTime
             {
@@ -466,6 +472,18 @@ public static class WellKnownKeys
 
             [Description("switchToTurnBased")]
             public static class SwitchToTurnBased
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("preferRealTime")]
+            public static class PreferRealTime
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("preferTurnBased")]
+            public static class PreferTurnBased
             {
                 public static string Key { get; set; }
             }

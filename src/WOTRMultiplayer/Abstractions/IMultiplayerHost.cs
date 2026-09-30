@@ -25,6 +25,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool SetRealTimePausePolicy(PausePolicy policy);
 
+        bool SetPreferredRealTimeCombatMode(CombatMode mode);
+
         void Create(string gameId, string gamePassword, ExternalServer externalServer, NetworkGameStartUp gameStartUp);
 
         void ChangeHostedStartingPoint(string gameId, NetworkGameStartUp gameStartUp);

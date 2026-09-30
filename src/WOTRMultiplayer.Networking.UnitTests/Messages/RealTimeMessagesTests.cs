@@ -51,6 +51,19 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         }
 
         [Test]
+        public void CombatPreference_RoundTrips()
+        {
+            var copy = Serializer.DeepClone(new NotifyRealTimeCombatPreference
+            {
+                Sequence = 3, PreferredMode = 1, PausePolicy = 2
+            });
+
+            Assert.That(copy.Sequence, Is.EqualTo(3));
+            Assert.That(copy.PreferredMode, Is.EqualTo(1));
+            Assert.That(copy.PausePolicy, Is.EqualTo(2));
+        }
+
+        [Test]
         public void ClientCommand_RoundTripsMovePayload()
         {
             var source = new ClientRealTimeCombatCommand

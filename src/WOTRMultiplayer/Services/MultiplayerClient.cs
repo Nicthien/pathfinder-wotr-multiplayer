@@ -705,6 +705,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimePauseChanged>(OnNotifyRealTimePauseChanged)
                .On<NotifyRealTimeModeTransition>(OnNotifyRealTimeModeTransition)
                .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
+               .On<NotifyRealTimeCombatPreference>(OnNotifyRealTimeCombatPreference)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -1174,6 +1175,21 @@ namespace WOTRMultiplayer.Services
             {
                 GameInteraction.SetPause(message.IsPaused || Game.ForcedPause != null);
             }
+        }
+
+        private void OnNotifyRealTimeCombatPreference(long receivedFrom, NotifyRealTimeCombatPreference message)
+        {
+            if (Game?.RealTimeCombat == null || message == null
+                || message.Sequence <= Game.RealTimeCombat.PreferenceSequence
+                || !Enum.IsDefined(typeof(CombatMode), message.PreferredMode)
+                || !Enum.IsDefined(typeof(PausePolicy), message.PausePolicy))
+            {
+                return;
+            }
+
+            Game.RealTimeCombat.PreferenceSequence = message.Sequence;
+            Game.RealTimeCombat.PreferredMode = (CombatMode)message.PreferredMode;
+            Game.RealTimeCombat.PausePolicy = (PausePolicy)message.PausePolicy;
         }
 
         private async void OnNotifyRealTimeModeTransition(long receivedFrom, NotifyRealTimeModeTransition message)

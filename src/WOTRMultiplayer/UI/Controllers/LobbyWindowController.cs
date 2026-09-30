@@ -301,7 +301,7 @@ namespace WOTRMultiplayer.UI.Controllers
             var actor = _multiplayerActorAccessor.Current as MultiplayerActorBase;
             var state = actor?.Game?.RealTimeCombat;
             return state == null ? string.Empty
-                : $"{actor.Game.Combat?.Stage}:{state.Mode}:{state.Phase}:{state.PausePolicy}:{state.PauseSequence}:{state.Epoch}";
+                : $"{actor.Game.Combat?.Stage}:{state.Mode}:{state.PreferredMode}:{state.PreferenceSequence}:{state.Phase}:{state.PausePolicy}:{state.PauseSequence}:{state.Epoch}";
         }
 
         public void UpdateCharacterOwnerDropdown(NetworkCharacter character, bool silent = false)
@@ -474,20 +474,37 @@ namespace WOTRMultiplayer.UI.Controllers
             };
             AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.CombatStatus.Key), phase));
             AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.PausePolicy.Key), GetPausePolicyLabel(state.PausePolicy)));
+            AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.PreferredMode.Key),
+                Localized(state.PreferredMode == CombatMode.RealTimeWithPause
+                    ? WellKnownKeys.LobbyWindow.RealTime.ModeRealTime.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.TurnBased.Key)));
 
-            if (!inCombat || state.Phase != CombatSynchronizationPhase.Stable)
+            if (state.Phase != CombatSynchronizationPhase.Stable)
             {
                 return;
             }
 
             if (_multiplayerActorAccessor.Host.IsActive)
             {
-                AddCombatButton(parent, Localized(state.Mode == CombatMode.TurnBased
-                    ? WellKnownKeys.LobbyWindow.RealTime.SwitchToRealTime.Key
-                    : WellKnownKeys.LobbyWindow.RealTime.SwitchToTurnBased.Key), () =>
+                if (inCombat)
                 {
-                    var nextMode = state.Mode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
-                    _ = ChangeModeAndRefreshAsync(nextMode, connectivity);
+                    AddCombatButton(parent, Localized(state.Mode == CombatMode.TurnBased
+                        ? WellKnownKeys.LobbyWindow.RealTime.SwitchToRealTime.Key
+                        : WellKnownKeys.LobbyWindow.RealTime.SwitchToTurnBased.Key), () =>
+                    {
+                        var nextMode = state.Mode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
+                        _ = ChangeModeAndRefreshAsync(nextMode, connectivity);
+                    });
+                }
+                AddCombatButton(parent, Localized(state.PreferredMode == CombatMode.TurnBased
+                    ? WellKnownKeys.LobbyWindow.RealTime.PreferRealTime.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.PreferTurnBased.Key), () =>
+                {
+                    var nextMode = state.PreferredMode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
+                    if (_multiplayerActorAccessor.Host.SetPreferredRealTimeCombatMode(nextMode))
+                    {
+                        UpdateServerInfo(connectivity);
+                    }
                 });
                 AddCombatButton(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.ChangePausePolicy.Key), () =>
                 {
@@ -497,14 +514,14 @@ namespace WOTRMultiplayer.UI.Controllers
                         UpdateServerInfo(connectivity);
                     }
                 });
-                if (state.Mode == CombatMode.RealTimeWithPause)
+                if (inCombat && state.Mode == CombatMode.RealTimeWithPause)
                 {
                     AddCombatButton(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.Repair.Key), () =>
                         _ = RepairAndRefreshAsync(connectivity));
                 }
             }
 
-            if (state.Mode == CombatMode.RealTimeWithPause)
+            if (inCombat && state.Mode == CombatMode.RealTimeWithPause)
             {
                 AddCombatButton(parent, Localized(state.IsManualPauseActive
                     ? WellKnownKeys.LobbyWindow.RealTime.RequestResume.Key
