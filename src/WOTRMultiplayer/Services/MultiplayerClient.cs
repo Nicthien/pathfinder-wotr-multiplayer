@@ -1448,13 +1448,22 @@ namespace WOTRMultiplayer.Services
                     state.Mode = (CombatMode)message.Mode;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     state.Phase = CombatSynchronizationPhase.Stable;
+                    SendRealTimeRepairAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
+                    return;
+                }
+                if (stage == RealTimeRepairStage.Resume
+                    && state.Phase == CombatSynchronizationPhase.Stable
+                    && state.Mode == (CombatMode)message.Mode
+                    && state.CanonicalStateHash == message.CanonicalStateHash)
+                {
+                    SendRealTimeRepairAck(message, true, state.CanonicalStateHash);
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Unable to apply real-time combat repair. Epoch={Epoch}, Stage={Stage}", message?.Epoch, message?.Stage);
-                if (message != null && message.Stage != (int)RealTimeRepairStage.Resume)
+                if (message != null)
                 {
                     SendRealTimeRepairAck(message, false, 0);
                 }

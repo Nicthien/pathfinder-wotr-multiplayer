@@ -413,6 +413,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             var hash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash;
             handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Verify, hash));
 
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Resume, hash));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Apply)))
@@ -434,6 +436,8 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustHaveHappenedOnceExactly();
             handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Apply, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
 
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Resume, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.RepairAttempts, Is.Zero);
         }
@@ -461,6 +465,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             handler.Invoke(42, RepairAck(2, RealTimeRepairStage.Fallback, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
 
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            handler.Invoke(42, RepairAck(2, RealTimeRepairStage.Resume, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
         }
 

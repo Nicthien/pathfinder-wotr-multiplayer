@@ -256,6 +256,33 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_LostAndDuplicateRepairResume_HostWaitsForAcknowledgement()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            await host.BeginRealTimeRepairAsync();
+            PumpUntilRepairResume(queued, hostNetwork, clientNetwork);
+
+            Assert.That(((NotifyRealTimeRepair)queued.Dequeue()).Stage,
+                Is.EqualTo((int)RealTimeRepairStage.Resume)); // Drop first Resume.
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            typeof(MultiplayerHost).GetField("_realTimeRepairDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(host, DateTime.UtcNow.AddSeconds(-1));
+            host.PublishRealTimeCombatSnapshot();
+
+            var resume = (NotifyRealTimeRepair)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(clientNetwork)(NetworkConstants.HostPlayerId, resume);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(clientNetwork)(NetworkConstants.HostPlayerId, resume);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+        }
+
+        [Test]
         public async Task TwoActors_DivergentUnit_WithMockedSuccessfulApply_Resumes()
         {
             var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
@@ -410,6 +437,34 @@ namespace WOTRMultiplayer.UnitTests.Services
                 }
             }
             Assert.Fail("The host did not send a completion checkpoint.");
+        }
+
+        private static void PumpUntilRepairResume(Queue<object> queued, INetworkHostConnection hostNetwork,
+            INetworkClientConnection clientNetwork)
+        {
+            for (var count = 0; queued.Count > 0; count++)
+            {
+                Assert.That(count, Is.LessThan(20));
+                if (queued.Peek() is NotifyRealTimeRepair nextRepair
+                    && nextRepair.Stage == (int)RealTimeRepairStage.Resume)
+                {
+                    return;
+                }
+                var message = queued.Dequeue();
+                switch (message)
+                {
+                    case NotifyRealTimeRepair repair:
+                        FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(clientNetwork)(NetworkConstants.HostPlayerId, repair);
+                        break;
+                    case ClientRealTimeRepairAck ack:
+                        FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(hostNetwork)(42, ack);
+                        break;
+                    default:
+                        Assert.Fail($"Unexpected protocol message: {message.GetType().Name}");
+                        break;
+                }
+            }
+            Assert.Fail("The host did not send a repair Resume message.");
         }
 
         private static void DeliverToClient(INetworkClientConnection network, NotifyRealTimeModeTransition message) =>
