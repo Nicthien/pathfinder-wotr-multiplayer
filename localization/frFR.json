@@ -17,7 +17,7 @@
           "unableToLoad": "La configuration des serveurs externes est corrompue ou illisible.\nVérifiez ce fichier :\n{0}",
           "unableToSave": "Impossible d'enregistrer la configuration des serveurs externes.\nVérifiez que le jeu peut écrire dans ce fichier :\n{0}",
           "unreachableSignalingServer": "Impossible de joindre le serveur de mise en relation\n{0}",
-          "modConflict": "Connexion impossible : les versions du jeu, les DLC, les mods de gameplay ou le protocole multijoueur ne correspondent pas."
+          "modConflict": "Connexion impossible : les versions du jeu, les DLC, les mods de gameplay ou le protocole multijoueur ne correspondent pas. Les mods de doublage locaux peuvent différer."
         }
       },
       "hostMenu": {
