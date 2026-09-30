@@ -53,6 +53,7 @@ namespace WOTRMultiplayer.Services
         private readonly IMainThreadAccessor _mainThreadAccessor;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), DateTime> _realTimeSnapshotSentAt = new();
+        private int _consecutiveMissingRealTimeReplies;
         private readonly object _realTimeCommandLock = new();
         private readonly object _realTimePauseLock = new();
         private readonly Dictionary<long, long> _lastRealTimePauseRequestByPlayer = [];
@@ -134,6 +135,7 @@ namespace WOTRMultiplayer.Services
                     if (_realTimeSnapshotSentAt.TryRemove(key, out _) && key.Epoch == Game.RealTimeCombat.Epoch)
                     {
                         Game.RealTimeCombat.MissingSnapshotReplies++;
+                        _consecutiveMissingRealTimeReplies++;
                     }
                 }
             }
@@ -146,6 +148,12 @@ namespace WOTRMultiplayer.Services
                 MissingReplies = Game.RealTimeCombat.MissingSnapshotReplies,
                 State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
             });
+            if (_consecutiveMissingRealTimeReplies >= 3)
+            {
+                Logger.LogWarning("Three consecutive real-time snapshot replies expired; pausing for verification. Epoch={Epoch}, Sequence={Sequence}", Game.RealTimeCombat.Epoch, sequence);
+                _consecutiveMissingRealTimeReplies = 0;
+                _ = BeginRealTimeRepairAsync();
+            }
         }
 
         public async Task<bool> RequestRealTimeCombatModeAsync(CombatMode mode)
@@ -163,6 +171,7 @@ namespace WOTRMultiplayer.Services
             var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.RequestModeSwitch(mode, players);
+            _consecutiveMissingRealTimeReplies = 0;
             _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
             _realTimeModeRetransmissions = 0;
             try
@@ -560,6 +569,7 @@ namespace WOTRMultiplayer.Services
             Game = null;
             _realTimeSnapshotHashes.Clear();
             _realTimeSnapshotSentAt.Clear();
+            _consecutiveMissingRealTimeReplies = 0;
 
             _networkHost.Reset();
         }
@@ -2260,6 +2270,7 @@ namespace WOTRMultiplayer.Services
 
             if (_realTimeSnapshotSentAt.TryRemove((message.Epoch, message.Sequence), out var sentAt))
             {
+                _consecutiveMissingRealTimeReplies = 0;
                 var elapsed = Math.Max(0, Math.Min(60_000, (int)(DateTime.UtcNow - sentAt).TotalMilliseconds));
                 Game.RealTimeCombat.ResponseTimeMs = Game.RealTimeCombat.ResponseTimeMs == 0
                     ? elapsed
@@ -2281,6 +2292,7 @@ namespace WOTRMultiplayer.Services
             }
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.BeginRepair();
+            _consecutiveMissingRealTimeReplies = 0;
             Game.RealTimeCombat.RequiredPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).ToHashSet();
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
@@ -2396,6 +2408,7 @@ namespace WOTRMultiplayer.Services
                 return;
             }
             new RealTimeCombatCoordinator(Game.RealTimeCombat).BeginRepair();
+            _consecutiveMissingRealTimeReplies = 0;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);

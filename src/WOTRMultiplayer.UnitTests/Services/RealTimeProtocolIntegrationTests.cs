@@ -73,6 +73,27 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void Host_ThreeExpiredReplies_PausesAndStartsAutomaticVerification()
+        {
+            var (host, _, _, _, queued, _) = CreatePair();
+            host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.Game.RealTimeCombat.PreferredMode = CombatMode.RealTimeWithPause;
+            var nextSnapshot = typeof(MultiplayerHost).GetField("_nextRealTimeSnapshotAt",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+            for (var i = 0; i < 36; i++)
+            {
+                nextSnapshot.SetValue(host, DateTime.MinValue);
+                host.PublishRealTimeCombatSnapshot();
+            }
+
+            Assert.That(host.Game.RealTimeCombat.MissingSnapshotReplies, Is.EqualTo(3));
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            Assert.That(queued.ToArray()[36], Is.TypeOf<NotifyRealTimeRepair>());
+        }
+
+        [Test]
         public async Task TwoActors_LostAndDuplicatePrepare_ConvergeOnRealTime()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
