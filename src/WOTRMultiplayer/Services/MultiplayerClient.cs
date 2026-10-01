@@ -1380,6 +1380,8 @@ namespace WOTRMultiplayer.Services
                     state.PendingMode = null;
                     state.PreviousMode = null;
                     state.Phase = CombatSynchronizationPhase.Stable;
+                    if (mode == CombatMode.TurnBased)
+                        _disconnectedDuringRealTimeCombat = false;
                     SendRealTimeModeAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
                     return;
@@ -1524,6 +1526,8 @@ namespace WOTRMultiplayer.Services
                     state.Mode = (CombatMode)message.Mode;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     state.Phase = CombatSynchronizationPhase.Stable;
+                    if (state.Mode == CombatMode.TurnBased)
+                        _disconnectedDuringRealTimeCombat = false;
                     SendRealTimeRepairAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
                     return;

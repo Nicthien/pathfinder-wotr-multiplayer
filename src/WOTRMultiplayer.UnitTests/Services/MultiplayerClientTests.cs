@@ -90,6 +90,37 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void VerifiedTurnBasedRepair_ClearsDisconnectSaveLatch()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Phase = CombatSynchronizationPhase.Repairing,
+                    Epoch = 8
+                }
+            };
+            _networkClient.OnError(new NetworkError(NetworkErrorType.Disconnected));
+            Assert.That(_multiplayerClient.IsSavingBlockedAfterRealTimeDisconnect, Is.True);
+            _multiplayerClient.Game.RealTimeCombat.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient)(
+                NetworkConstants.HostPlayerId, new NotifyRealTimeRepair
+                {
+                    Epoch = 8,
+                    Stage = (int)RealTimeRepairStage.Resume,
+                    Mode = (int)CombatMode.TurnBased,
+                    CanonicalStateHash = 47
+                });
+
+            Assert.That(_multiplayerClient.IsSavingBlockedAfterRealTimeDisconnect, Is.False);
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.False);
+        }
+
+        [Test]
         public void RealTimeDiceRoll_UsesHostResultAndStillAdvancesLocalGenerator()
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);
