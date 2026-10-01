@@ -450,6 +450,109 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void CombatModeSwitch_ReplacedSessionDuringPauseDoesNotAcknowledgeOldPrepare()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
+            };
+            var replacement = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).ReturnsLazily(() =>
+            {
+                _multiplayerClient.Game = replacement;
+                return Task.CompletedTask;
+            });
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient)(-1,
+                new NotifyRealTimeModeTransition
+                {
+                    Epoch = 1, Stage = (int)RealTimeModeTransitionStage.Prepare,
+                    Mode = (int)CombatMode.RealTimeWithPause
+                });
+
+            Assert.That(_multiplayerClient.Game, Is.SameAs(replacement));
+            Assert.That(replacement.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>._))
+                .MustNotHaveHappened();
+        }
+
+        [Test]
+        public void RealTimeRepair_ReplacedSessionDuringPauseDoesNotAcknowledgeOldPrepare()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            var replacement = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).ReturnsLazily(() =>
+            {
+                _multiplayerClient.Game = replacement;
+                return Task.CompletedTask;
+            });
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient)(-1,
+                new NotifyRealTimeRepair
+                {
+                    Epoch = 1, Stage = (int)RealTimeRepairStage.Prepare,
+                    Mode = (int)CombatMode.RealTimeWithPause
+                });
+
+            Assert.That(_multiplayerClient.Game, Is.SameAs(replacement));
+            Assert.That(replacement.RealTimeCombat.Epoch, Is.Zero);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>._))
+                .MustNotHaveHappened();
+        }
+
+        [Test]
+        public void RealTimeRepair_ReplacedSessionDuringVerificationDoesNotAcknowledgeOldState()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause, Epoch = 1,
+                    Phase = CombatSynchronizationPhase.Repairing
+                }
+            };
+            var replacement = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).ReturnsLazily(() =>
+            {
+                _multiplayerClient.Game = replacement;
+                return Task.FromResult(new NetworkCombatState());
+            });
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient)(-1,
+                new NotifyRealTimeRepair
+                {
+                    Epoch = 1, Stage = (int)RealTimeRepairStage.Verify,
+                    Mode = (int)CombatMode.RealTimeWithPause
+                });
+
+            Assert.That(_multiplayerClient.Game, Is.SameAs(replacement));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>._))
+                .MustNotHaveHappened();
+        }
+
+        [Test]
         public void RealTimeRepair_VerifyApplyResume_UsesPausedLocalFingerprint()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())

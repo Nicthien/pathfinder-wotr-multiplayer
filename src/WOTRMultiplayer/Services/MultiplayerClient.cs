@@ -1364,7 +1364,8 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
-                var state = Game.RealTimeCombat;
+                var session = Game;
+                var state = session.RealTimeCombat;
                 var stage = (RealTimeModeTransitionStage)message.Stage;
                 var mode = (CombatMode)message.Mode;
                 if (message.Epoch < state.Epoch)
@@ -1394,6 +1395,9 @@ namespace WOTRMultiplayer.Services
                     _lastRealTimeAISequence = 0;
                     state.Phase = CombatSynchronizationPhase.PreparingModeSwitch;
                     await GameInteraction.SetPauseAsync(true);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                        return;
                     SendRealTimeModeAck(message, true, 0);
                     return;
                 }
@@ -1429,6 +1433,9 @@ namespace WOTRMultiplayer.Services
                         return;
                     }
                     var actualHash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                        return;
                     if (actualHash != message.CanonicalStateHash)
                     {
                         Logger.LogWarning("Combat-mode commit checkpoint differs. Epoch={Epoch}, HostHash={HostHash}, ClientHash={ClientHash}", message.Epoch, message.CanonicalStateHash, actualHash);
@@ -1436,6 +1443,9 @@ namespace WOTRMultiplayer.Services
                         return;
                     }
                     await GameInteraction.SetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                        return;
                     state.Mode = mode;
                     state.CanonicalStateHash = actualHash;
                     state.Phase = CombatSynchronizationPhase.Synchronizing;
@@ -1451,8 +1461,17 @@ namespace WOTRMultiplayer.Services
                     }
                     state.Phase = CombatSynchronizationPhase.Repairing;
                     await GameInteraction.SetPauseAsync(true);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                     var actualHash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                     await GameInteraction.SetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                     state.Mode = mode;
                     state.PendingMode = null;
                     state.PreviousMode = null;
@@ -1514,6 +1533,13 @@ namespace WOTRMultiplayer.Services
             return RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = appliedState });
         }
 
+        private bool IsCurrentRealTimeMessage(NetworkGame session, NetworkRealTimeCombatState state, long epoch)
+        {
+            return ReferenceEquals(Game, session)
+                && ReferenceEquals(session.RealTimeCombat, state)
+                && state.Epoch == epoch;
+        }
+
         private void SendRealTimeModeAck(NotifyRealTimeModeTransition message, bool applied, ulong hash)
         {
             Send(new ClientRealTimeModeTransitionAck
@@ -1538,7 +1564,8 @@ namespace WOTRMultiplayer.Services
                 {
                     return;
                 }
-                var state = Game.RealTimeCombat;
+                var session = Game;
+                var state = session.RealTimeCombat;
                 var stage = (RealTimeRepairStage)message.Stage;
                 if (stage == RealTimeRepairStage.Prepare)
                 {
@@ -1563,6 +1590,9 @@ namespace WOTRMultiplayer.Services
                     _lastRealTimeAISequence = 0;
                     state.Phase = CombatSynchronizationPhase.Repairing;
                     await GameInteraction.SetPauseAsync(true);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                     SendRealTimeRepairAck(message, true, 0);
                     return;
                 }
@@ -1577,6 +1607,9 @@ namespace WOTRMultiplayer.Services
                     _lastRealTimeAISequence = 0;
                     state.Phase = CombatSynchronizationPhase.Repairing;
                     await GameInteraction.SetPauseAsync(true);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                 }
                 if (message.Epoch != state.Epoch)
                 {
@@ -1586,6 +1619,9 @@ namespace WOTRMultiplayer.Services
                     && state.Phase == CombatSynchronizationPhase.Repairing)
                 {
                     var local = await CombatInteraction.GetRealTimeCombatStateAsync();
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                     var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = local });
                     var expected = message.State == null ? null : Mapper.Map<NetworkCombatState>(message.State);
                     var temporalMismatch = expected == null ? "missing-verify-checkpoint"
@@ -1600,6 +1636,9 @@ namespace WOTRMultiplayer.Services
                     && state.Phase == CombatSynchronizationPhase.Repairing && message.State != null)
                 {
                     var hash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        return;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash);
                     return;
@@ -1611,7 +1650,13 @@ namespace WOTRMultiplayer.Services
                 {
                     state.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
                     var hash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased)
+                        return;
                     await GameInteraction.SetTurnBasedCombatModeAsync(true);
+                    if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                        || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased)
+                        return;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash);
                     return;
