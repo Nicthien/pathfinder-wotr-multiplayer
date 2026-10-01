@@ -195,6 +195,41 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void ExtraLocalCombatEntities_AreRejectedBeforeMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [CompleteUnit("hero")],
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3()
+                }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true, localCombatUnitIds: ["hero", "summon"],
+                localAreaIds: ["cloud", "new-cloud"]),
+                Is.EqualTo("extra-area:new-cloud,extra-unit:summon"));
+        }
+
+        [Test]
+        public void LocalEntityIds_MatchCheckpointWithoutCaseSensitivity()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [CompleteUnit("hero")],
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3()
+                }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true, localCombatUnitIds: ["HERO"], localAreaIds: ["CLOUD"]),
+                Is.Null);
+        }
+
+        [Test]
         public void InvalidCoordinatesAndOrientation_AreRejectedBeforeMutation()
         {
             var hero = CompleteUnit("hero");

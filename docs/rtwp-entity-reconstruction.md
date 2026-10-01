@@ -15,3 +15,5 @@ The game's `Kingmaker.EntitySystem.Persistence.JsonUtility.UnitSerialization.Ser
 ## Required implementation boundary
 
 Before allowing repair to create a missing unit or area, capture the host's complete creation context at the original spawn event, transfer it with epoch and entity ID, and validate the referenced scene, blueprint and caster on the client. Creation must run only inside a paused repair barrier, suppress duplicate rule effects, verify the canonical checkpoint hash, and roll back the newly created entity if application fails. Until an in-game two-instance test proves this lifecycle, missing entities must continue to fail preflight and keep saving blocked during unsuccessful fallback.
+
+The client also checks the reverse direction before applying a checkpoint: any local combat unit or area absent from the host checkpoint is reported as `extra-unit` or `extra-area`. Removing those entities automatically is not yet safe, because doing so may fire gameplay events or destroy state needed for rollback. A mismatch remains a repair/fallback failure rather than a partially applied checkpoint.

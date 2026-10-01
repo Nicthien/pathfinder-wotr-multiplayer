@@ -15,7 +15,9 @@ namespace WOTRMultiplayer.Services
             Func<string, string> getUnitBlueprintId = null,
             Func<NetworkAreaEffect, string> getAreaBlueprintId = null,
             Func<string, string> getUnitSceneName = null,
-            Func<NetworkAreaEffect, string> getAreaSceneName = null)
+            Func<NetworkAreaEffect, string> getAreaSceneName = null,
+            IEnumerable<string> localCombatUnitIds = null,
+            IEnumerable<string> localAreaIds = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -102,6 +104,20 @@ namespace WOTRMultiplayer.Services
                     {
                         missing.Add($"missing-area-unit:{area.Id}:{unitId ?? "<null>"}");
                     }
+                }
+            }
+            if (localCombatUnitIds != null && checkpoint.Units != null)
+            {
+                foreach (var id in localCombatUnitIds)
+                {
+                    if (id != null && !unitIds.Contains(id)) missing.Add($"extra-unit:{id}");
+                }
+            }
+            if (localAreaIds != null && checkpoint.AreaEffects != null)
+            {
+                foreach (var id in localAreaIds)
+                {
+                    if (id != null && !areaIds.Contains(id)) missing.Add($"extra-area:{id}");
                 }
             }
             if (missing.Count == 0)

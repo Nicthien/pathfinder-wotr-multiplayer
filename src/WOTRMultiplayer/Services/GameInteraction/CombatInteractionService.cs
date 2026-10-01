@@ -364,6 +364,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         throw new InvalidOperationException(missing);
                     }
+                    // Only enumerate live combat entities after basic validation. This also
+                    // keeps missing-entity failures independent of an initialized game world.
+                    var localCombatState = GetRealTimeCombatState();
+                    var extra = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
+                        id => _gameStateLookupService.GetUnitEntity(id) != null,
+                        area => _gameStateLookupService.GetAreaEffect(area) != null,
+                        localCombatUnitIds: localCombatState.Units.Select(unit => unit.Id),
+                        localAreaIds: localCombatState.AreaEffects.Select(area => area.Id));
+                    if (extra != null)
+                    {
+                        throw new InvalidOperationException(extra);
+                    }
                     UpdateCombatState(networkCombatState, requiresFullUpdate: false);
                     completion.TrySetResult(true);
                 }
