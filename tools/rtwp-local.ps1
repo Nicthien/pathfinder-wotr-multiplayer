@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Build', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status')]
+    [ValidateSet('Build', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status', 'CollectDiagnostics')]
     [string]$Action,
 
     [string]$GamePath = 'C:\Jeux\Steam\steamapps\common\Pathfinder Second Adventure',
 
-    [switch]$AllowUnvalidatedTest
+    [switch]$AllowUnvalidatedTest,
+
+    [string]$SavePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,6 +113,51 @@ function Show-Status {
     if ((Test-Path -LiteralPath $legacyDisabledStablePath) -or (Test-Path -LiteralPath $legacyDisabledExperimentalPath)) {
         throw 'Un dossier .disabled reste dans Mods et sera quand même chargé par Unity Mod Manager. Fermez le jeu puis activez un des deux modes pour le migrer.'
     }
+}
+
+function Collect-Diagnostics {
+    $logPath = Join-Path $env:USERPROFILE 'AppData\LocalLow\Owlcat Games\Pathfinder Wrath Of The Righteous'
+    $saveHash = $null
+    if ($SavePath) {
+        $resolvedSave = [IO.Path]::GetFullPath($SavePath)
+        if (-not (Test-Path -LiteralPath $resolvedSave -PathType Leaf)) {
+            throw "Sauvegarde introuvable : $resolvedSave"
+        }
+        $saveHash = (Get-FileHash -LiteralPath $resolvedSave -Algorithm SHA256).Hash
+    }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $destination = Join-Path $repoPath "local-artifacts\diagnostics\$stamp"
+    if (Test-Path -LiteralPath $destination) {
+        throw "Un diagnostic existe déjà pour cette seconde : $destination"
+    }
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+
+    $copiedLogs = @()
+    foreach ($name in @('Player.log', 'GameLog.txt', 'GameLogFull.txt', 'combatLog.txt')) {
+        $source = Join-Path $logPath $name
+        if (Test-Path -LiteralPath $source -PathType Leaf) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $destination $name)
+            $copiedLogs += $name
+        }
+    }
+
+    $report = [ordered]@{
+        capturedAt = (Get-Date).ToString('o')
+        gamePath = [IO.Path]::GetFullPath($GamePath)
+        gameRunning = [bool](Get-Process -Name 'Wrath' -ErrorAction SilentlyContinue)
+        stable = Get-ModInfo $stablePath
+        experimental = Get-ModInfo $experimentalPath
+        disabledStable = Get-ModInfo $disabledStablePath
+        disabledExperimental = Get-ModInfo $disabledExperimentalPath
+        logs = $copiedLogs
+        savePath = if ($SavePath) { $resolvedSave } else { $null }
+        saveSha256 = $saveHash
+        note = 'Local diagnostic only. Logs may contain names, paths or IP addresses; review before sharing.'
+    }
+    $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $destination 'manifest.json') -Encoding UTF8
+    Write-Output "Diagnostic local : $destination"
+    Write-Output "Journaux copiés : $($copiedLogs -join ', ')"
+    if ($saveHash) { Write-Output "Empreinte SHA-256 de la sauvegarde (sans copie) : $saveHash" }
 }
 
 function Build-Experimental {
@@ -225,8 +272,9 @@ switch ($Action) {
     'EnableExperimental' { Enable-Experimental $false }
     'EnableTestExperimental' { Enable-Experimental $true }
     'Status' { Show-Status }
+    'CollectDiagnostics' { Collect-Diagnostics }
 }
 
-if ($Action -ne 'Status') {
+if ($Action -notin @('Status', 'CollectDiagnostics')) {
     Show-Status
 }

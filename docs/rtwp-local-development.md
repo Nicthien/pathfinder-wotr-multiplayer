@@ -22,9 +22,12 @@ This tree is an experimental, local-only derivative of multiplayer 0.4.16. It mu
 .\tools\rtwp-local.ps1 -Action Install
 .\tools\rtwp-local.ps1 -Action EnableExperimental
 .\tools\rtwp-local.ps1 -Action EnableStable
+.\tools\rtwp-local.ps1 -Action CollectDiagnostics -SavePath 'C:\chemin\vers\une-sauvegarde.zks'
 ```
 
 `Install` creates a timestamped backup of an existing experimental installation and stages it outside the game's `Mods` folder when the stable mod is active. Unity Mod Manager loads any mod folder inside `Mods`, even if its name ends in `.disabled`; inactive slots therefore live in `local-artifacts/mod-slots`. The script migrates older `.disabled` folders out of `Mods` with the game closed, checks the game directory and all source/destination slots before moving a mod, and refuses changes while `Wrath.exe` is running. Normal installation and activation remain locked until a local `local-artifacts/RTWP_RUNTIME_VALIDATED.json` records protocol version 25 and a successful two-instance combat test. For development only, `StageTest` stages an unvalidated build outside `Mods`; `EnableTestExperimental` requires the explicit `-AllowUnvalidatedTest` flag and switches away from the stable mod. Run such tests on a copy of a save, then use `EnableStable`. Neither action creates the validation marker. `Build` does not touch either installed mod.
+
+`CollectDiagnostics` copies only the current local game logs into a timestamped directory under `local-artifacts/diagnostics` and records active/disabled mod identities. The optional `-SavePath` records a SHA-256 hash but never copies or edits the save. No data is uploaded. Logs can contain local paths, player names and IP addresses, so review them before sharing. This action is read-only with respect to the game and may be run while it is open.
 
 ## Current milestone
 
@@ -86,3 +89,5 @@ The queued transport also injects a moving snapshot and an accepted order while 
 The inverse case is tested as well: when the mocked client continues to report a divergent unit after every host checkpoint, both actors remain in the fallback phase with saving blocked. That protects the save, but is explicitly not the campaign-ready recovery path; reconstructing the missing game entity remains open.
 
 Three consecutive snapshot replies aging out (a window of 32 snapshots, normally about eight seconds) now make the host pause and start the same verification barrier. An acknowledged snapshot resets the consecutive counter. This is an application-level liveness guard, not a claim that TCP packets were lost.
+
+On 2026-10-01, a local visible-game smoke of protocol 25 loaded an existing `Prologue_Labyrinth` save with the experimental mod and `WOTR_AIVO` enabled. The multiplayer lobby hosted and started with one player, displayed four owned characters, and its in-game F2 page changed the preferred mode to `Temps réel avec pause` and cycled the pause policy. `Player.log` recorded area loading and both preference broadcasts. No combat or second peer was exercised. The game was closed via its own unsaved-progress confirmation; the source save's SHA-256 still matched a byte-identical backup. The original Unity Mod Manager parameters were restored byte-for-byte and the stable 0.4.16 slot re-enabled. A `CameraRig.OnDisable` null reference appeared while the game was quitting; its attribution is unknown and it did not prevent process exit. This smoke does not satisfy the two-instance combat validation gate.
