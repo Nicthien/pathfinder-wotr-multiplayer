@@ -28,7 +28,8 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Id = "cloud", BlueprintId = "area-blueprint", CasterUnitId = "caster",
                     OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability",
                     CreationGameTimeTicks = 123456, DurationTicks = 60000000,
-                    SceneName = "combat-scene"
+                    SceneName = "combat-scene", TargetUnitId = "summon",
+                    TargetOrientation = 1.5f, IsAttachedToUnit = true
                 }]
             };
 
@@ -50,6 +51,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(restored.AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(123456));
             Assert.That(restored.AreaEffects[0].DurationTicks, Is.EqualTo(60000000));
             Assert.That(restored.AreaEffects[0].SceneName, Is.EqualTo("combat-scene"));
+            Assert.That(restored.AreaEffects[0].TargetUnitId, Is.EqualTo("summon"));
+            Assert.That(restored.AreaEffects[0].TargetOrientation, Is.EqualTo(1.5f));
+            Assert.That(restored.AreaEffects[0].IsAttachedToUnit, Is.True);
         }
     }
 }

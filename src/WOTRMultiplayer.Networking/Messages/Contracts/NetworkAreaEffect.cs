@@ -42,6 +42,18 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(12)]
         public string SceneName { get; set; }
 
+        [ProtoMember(13)]
+        public string TargetUnitId { get; set; }
+
+        [ProtoMember(14)]
+        public NetworkVector3 TargetPoint { get; set; }
+
+        [ProtoMember(15)]
+        public float? TargetOrientation { get; set; }
+
+        [ProtoMember(16)]
+        public bool IsAttachedToUnit { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

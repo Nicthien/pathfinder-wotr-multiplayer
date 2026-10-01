@@ -20,7 +20,8 @@ namespace WOTRMultiplayer.Services
             IEnumerable<string> localCombatUnitIds = null,
             IEnumerable<string> localAreaIds = null,
             Func<string, IEnumerable<NetworkBuff>> getLocalBuffs = null,
-            Func<NetworkBuff, bool> canRecreateBuff = null)
+            Func<NetworkBuff, bool> canRecreateBuff = null,
+            Func<NetworkAreaEffect, NetworkAreaEffect> getLocalArea = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -110,9 +111,30 @@ namespace WOTRMultiplayer.Services
                     if (hasAreaView != null && !hasAreaView(area))
                         missing.Add($"invalid-area:{area.Id}:view");
                     if (!IsFinite(area.Position)) missing.Add($"invalid-area:{area.Id}:position");
+                    if (area.TargetPoint != null && !IsFinite(area.TargetPoint))
+                        missing.Add($"invalid-area:{area.Id}:target-point");
+                    if (area.TargetOrientation.HasValue &&
+                        (float.IsNaN(area.TargetOrientation.Value) || float.IsInfinity(area.TargetOrientation.Value)))
+                        missing.Add($"invalid-area:{area.Id}:target-orientation");
+                    if (getLocalArea != null)
+                    {
+                        var local = getLocalArea(area);
+                        if (local == null || !string.Equals(area.CasterUnitId, local.CasterUnitId, StringComparison.Ordinal)
+                            || !string.Equals(area.OwnerUnitId, local.OwnerUnitId, StringComparison.Ordinal)
+                            || !string.Equals(area.SourceAbilityBlueprintId, local.SourceAbilityBlueprintId,
+                                StringComparison.OrdinalIgnoreCase))
+                            missing.Add($"invalid-area:{area.Id}:context");
+                        if (local == null || !string.Equals(area.TargetUnitId, local.TargetUnitId, StringComparison.Ordinal)
+                            || !SameTargetPoint(area.TargetPoint, local.TargetPoint)
+                            || !SameTargetOrientation(area.TargetOrientation, local.TargetOrientation)
+                            || area.IsAttachedToUnit != local.IsAttachedToUnit)
+                            missing.Add($"invalid-area:{area.Id}:target");
+                    }
                     if (area.UnitsInside == null) missing.Add($"invalid-area:{area.Id}:occupants");
                 }
                 if (area?.Id == null) { continue; }
+                if (area.TargetUnitId != null && !hasUnit(area.TargetUnitId))
+                    missing.Add($"missing-area-target:{area.Id}:{area.TargetUnitId}");
                 foreach (var unitId in area.UnitsInside ?? [])
                 {
                     if (unitId == null || !hasUnit(unitId))
@@ -151,5 +173,19 @@ namespace WOTRMultiplayer.Services
             && !float.IsNaN(value.X) && !float.IsInfinity(value.X)
             && !float.IsNaN(value.Y) && !float.IsInfinity(value.Y)
             && !float.IsNaN(value.Z) && !float.IsInfinity(value.Z);
+
+        private static bool SameTargetPoint(NetworkVector3 first, NetworkVector3 second) =>
+            first == null ? second == null : second != null && IsFinite(first) && IsFinite(second)
+            && Quantize(first.X) == Quantize(second.X)
+            && Quantize(first.Y) == Quantize(second.Y)
+            && Quantize(first.Z) == Quantize(second.Z);
+
+        private static long Quantize(float value) => checked((long)Math.Round(value * 1000d,
+            MidpointRounding.AwayFromZero));
+
+        private static bool SameTargetOrientation(float? first, float? second) =>
+            first.HasValue ? second.HasValue && !float.IsNaN(first.Value) && !float.IsInfinity(first.Value)
+                && !float.IsNaN(second.Value) && !float.IsInfinity(second.Value)
+                && Quantize(first.Value) == Quantize(second.Value) : !second.HasValue;
     }
 }

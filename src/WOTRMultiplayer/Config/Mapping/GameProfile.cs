@@ -369,6 +369,12 @@ namespace WOTRMultiplayer.Config.Mapping
                 OwnerUnitId = areaEffectEntityData.Context?.MaybeOwner?.UniqueId,
                 SourceAbilityBlueprintId = areaEffectEntityData.Context?.SourceAbility?.AssetGuid.ToString(),
                 SceneName = areaEffectEntityData.HoldingState?.SceneName,
+                TargetUnitId = areaEffectEntityData.m_Target?.IsUnit == true
+                    ? areaEffectEntityData.m_Target.UnitRef.Id : null,
+                TargetPoint = areaEffectEntityData.m_Target != null && !areaEffectEntityData.m_Target.IsUnit
+                    ? areaEffectEntityData.m_Target.m_Point.ToNetworkVector3() : null,
+                TargetOrientation = areaEffectEntityData.m_Target?.m_Orientation,
+                IsAttachedToUnit = areaEffectEntityData.m_OnUnit,
                 CreationGameTimeTicks = areaEffectEntityData.m_CreationTime.Ticks,
                 DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
                 Name = areaEffectEntityData.Blueprint.name,

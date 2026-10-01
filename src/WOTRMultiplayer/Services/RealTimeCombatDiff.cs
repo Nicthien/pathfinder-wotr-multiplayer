@@ -107,6 +107,11 @@ namespace WOTRMultiplayer.Services
                 causes.Add("context");
             if (!string.Equals(expected.SceneName, actual.SceneName, StringComparison.Ordinal))
                 causes.Add("scene");
+            if (!string.Equals(expected.TargetUnitId, actual.TargetUnitId, StringComparison.Ordinal)
+                || !SameVector(expected.TargetPoint, actual.TargetPoint)
+                || !SameNullableFloat(expected.TargetOrientation, actual.TargetOrientation)
+                || expected.IsAttachedToUnit != actual.IsAttachedToUnit)
+                causes.Add("target");
             if (!SameVector(expected.Position, actual.Position)) causes.Add("position");
             if (expected.Type != actual.Type) causes.Add("type");
             if (!(expected.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal)
@@ -180,6 +185,9 @@ namespace WOTRMultiplayer.Services
             WOTRMultiplayer.Entities.NetworkVector3 right) => left == null && right == null
             || left != null && right != null
             && SameFloat(left.X, right.X) && SameFloat(left.Y, right.Y) && SameFloat(left.Z, right.Z);
+
+        private static bool SameNullableFloat(float? left, float? right) =>
+            left.HasValue ? right.HasValue && SameFloat(left.Value, right.Value) : !right.HasValue;
 
         private static bool SameFloat(float left, float right)
         {

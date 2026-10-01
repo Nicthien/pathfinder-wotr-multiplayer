@@ -78,6 +78,22 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void AreaTargetDivergence_ChangesHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var target = Sample();
+            target.Combat.AreaEffects[0].TargetUnitId = "target-unit";
+            var point = Sample();
+            point.Combat.AreaEffects[0].TargetPoint = new NetworkVector3(1, 2, 3);
+            var attached = Sample();
+            attached.Combat.AreaEffects[0].IsAttachedToUnit = true;
+
+            Assert.That(RealTimeCombatHasher.Compute(target), Is.Not.EqualTo(baseline));
+            Assert.That(RealTimeCombatHasher.Compute(point), Is.Not.EqualTo(baseline));
+            Assert.That(RealTimeCombatHasher.Compute(attached), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
         public void SummonOriginDivergence_ChangesHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

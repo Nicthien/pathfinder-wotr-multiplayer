@@ -31,7 +31,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                         Id = "area-a", BlueprintId = "area-blueprint", CasterUnitId = "caster",
                         OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability",
                         CreationGameTimeTicks = 123456, DurationTicks = 60000000,
-                        SceneName = "combat-scene"
+                        SceneName = "combat-scene", TargetUnitId = "unit-a",
+                        TargetOrientation = 1.5f, IsAttachedToUnit = true
                     }]
                 }
             };
@@ -58,6 +59,9 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.State.AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(123456));
             Assert.That(copy.State.AreaEffects[0].DurationTicks, Is.EqualTo(60000000));
             Assert.That(copy.State.AreaEffects[0].SceneName, Is.EqualTo("combat-scene"));
+            Assert.That(copy.State.AreaEffects[0].TargetUnitId, Is.EqualTo("unit-a"));
+            Assert.That(copy.State.AreaEffects[0].TargetOrientation, Is.EqualTo(1.5f));
+            Assert.That(copy.State.AreaEffects[0].IsAttachedToUnit, Is.True);
         }
 
         [Test]

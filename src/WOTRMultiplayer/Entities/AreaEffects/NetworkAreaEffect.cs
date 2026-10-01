@@ -16,6 +16,14 @@ namespace WOTRMultiplayer.Entities.AreaEffects
 
         public string SceneName { get; set; }
 
+        public string TargetUnitId { get; set; }
+
+        public NetworkVector3 TargetPoint { get; set; }
+
+        public float? TargetOrientation { get; set; }
+
+        public bool IsAttachedToUnit { get; set; }
+
         public long CreationGameTimeTicks { get; set; }
 
         public long? DurationTicks { get; set; }

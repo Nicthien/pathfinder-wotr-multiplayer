@@ -24,6 +24,55 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void WrongExistingAreaTarget_IsRejectedBeforeMutation()
+        {
+            var area = new NetworkAreaEffect
+            {
+                Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3(),
+                TargetUnitId = "hero", IsAttachedToUnit = true
+            };
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [CompleteUnit("hero")], AreaEffects = [area]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                id => id == "hero", _ => true,
+                getLocalArea: _ => new NetworkAreaEffect { TargetUnitId = "other" }),
+                Is.EqualTo("invalid-area:cloud:target"));
+        }
+
+        [Test]
+        public void WrongExistingAreaContext_IsRejectedBeforeMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3(),
+                    CasterUnitId = "host-caster"
+                }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true,
+                getLocalArea: _ => new NetworkAreaEffect { CasterUnitId = "client-caster" }),
+                Is.EqualTo("invalid-area:cloud:context"));
+        }
+
+        [Test]
+        public void MissingAreaTarget_IsRejectedBeforeMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", TargetUnitId = "summon" }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => false, _ => false), Is.EqualTo("missing-area-target:cloud:summon,missing-area:cloud"));
+        }
+
+        [Test]
         public void MissingSummonAndArea_AreReportedBeforeCheckpointIsApplied()
         {
             var checkpoint = new NetworkCombatState
