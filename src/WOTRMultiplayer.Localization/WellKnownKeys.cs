@@ -601,6 +601,34 @@ public static class WellKnownKeys
                     public static string Key { get; set; }
                 }
 
+                [Description("compatibility")]
+                public static class Compatibility
+                {
+                    [Description("title")]
+                    public static class Title
+                    {
+                        public static string Key { get; set; }
+                    }
+
+                    [Description("gameVersion")]
+                    public static class GameVersion
+                    {
+                        public static string Key { get; set; }
+                    }
+
+                    [Description("protocolVersion")]
+                    public static class ProtocolVersion
+                    {
+                        public static string Key { get; set; }
+                    }
+
+                    [Description("buildFingerprint")]
+                    public static class BuildFingerprint
+                    {
+                        public static string Key { get; set; }
+                    }
+                }
+
                 [Description("DLCs")]
                 public static class DLCs
                 {

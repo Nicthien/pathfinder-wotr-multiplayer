@@ -73,6 +73,12 @@
       "tooltips": {
         "contentDiscrepancy": {
           "title": "Différence de contenu — {0}",
+          "compatibility": {
+            "title": "Compatibilité multijoueur",
+            "gameVersion": "Version du jeu : hôte {0}, autre PC {1}",
+            "protocolVersion": "Protocole temps réel : hôte {0}, autre PC {1}",
+            "buildFingerprint": "Le paquet multijoueur diffère. Installez la même version de test locale sur les deux PC."
+          },
           "DLCs": { "title": "Contenus téléchargeables", "reasons": { "missing": "Manquant", "extra": "Supplémentaire" } },
           "mods": { "title": "Mods", "reasons": { "missing": "Manquant", "extra": "Supplémentaire", "disabled": "Désactivé", "versionMismatch": "Versions différentes" } }
         },

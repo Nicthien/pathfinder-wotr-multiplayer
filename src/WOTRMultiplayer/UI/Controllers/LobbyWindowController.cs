@@ -27,6 +27,7 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
+using WOTRMultiplayer.Entities.Content;
 using WOTRMultiplayer.Extensions;
 using WOTRMultiplayer.Services.Settings;
 using WOTRMultiplayer.Services;
@@ -189,9 +190,10 @@ namespace WOTRMultiplayer.UI.Controllers
                 _logger.LogInformation("Updating player list. PlayersCount={PlayersCount}", players.Count);
                 DisposeDisposables();
                 PlayersSectionContent.CleanupAllChildren();
+                var hostContent = players.FirstOrDefault(p => p.IsHost)?.ContentState;
                 foreach (var player in players)
                 {
-                    CreatePlayerObject(player);
+                    CreatePlayerObject(player, hostContent);
                 }
 
                 UpdateCharacterOwnerDropdown(players);
@@ -588,8 +590,11 @@ namespace WOTRMultiplayer.UI.Controllers
             return null;
         }
 
-        private void CreatePlayerObject(NetworkPlayer player)
+        private void CreatePlayerObject(NetworkPlayer player, NetworkContentState hostContent)
         {
+            player.ContentState ??= new NetworkContentState();
+            player.ContentState.DiscrepantMods ??= [];
+            player.ContentState.DiscrepantDLCs ??= [];
             var playerContainerObject = _uiFactory.CreateDefaultGameObject(PlayersSectionContent.transform);
             playerContainerObject.name = PlayerContainerObjectName;
             var horizontal = playerContainerObject.AddComponent<HorizontalLayoutGroup>();
@@ -622,11 +627,15 @@ namespace WOTRMultiplayer.UI.Controllers
                 CreatePlayerIcon("UI_journal_iconok_new2", playerContainerObject.transform, UIFactory.LobbyPlayerObjectHeight, null);
             }
 
-            if (player.ContentState.DiscrepantMods.Any() || player.ContentState.DiscrepantDLCs.Any())
+            var realTimeMismatch = RealTimeContentCompatibility.Compare(hostContent, player.ContentState);
+            if (realTimeMismatch != RealTimeContentMismatch.None
+                || player.ContentState.DiscrepantMods.Any() || player.ContentState.DiscrepantDLCs.Any())
             {
-                var isMultiplayerModDifferent = player.ContentState.DiscrepantMods.Any(x => string.Equals(x.Id, _unityModManagerSettings.ModId, StringComparison.OrdinalIgnoreCase));
+                var isMultiplayerModDifferent = realTimeMismatch != RealTimeContentMismatch.None
+                    || player.ContentState.DiscrepantMods.Any(x => string.Equals(x.Id, _unityModManagerSettings.ModId, StringComparison.OrdinalIgnoreCase));
                 var icon = isMultiplayerModDifferent ? "UI_QuestNotification_StampRed" : "UI_QuestNotification_StampYellow";
-                CreatePlayerIcon(icon, playerContainerObject.transform, UIFactory.LobbyPlayerObjectHeight, new ContentDiscrepancyTooltipTemplate(player));
+                CreatePlayerIcon(icon, playerContainerObject.transform, UIFactory.LobbyPlayerObjectHeight,
+                    new ContentDiscrepancyTooltipTemplate(player, hostContent, realTimeMismatch));
             }
         }
 

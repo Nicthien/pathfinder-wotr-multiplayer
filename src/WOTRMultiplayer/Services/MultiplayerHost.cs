@@ -774,26 +774,22 @@ namespace WOTRMultiplayer.Services
         {
             var hostContent = Game.Players.FirstOrDefault(p => p.IsHost)?.ContentState;
             var incompatiblePlayer = Game.Players.FirstOrDefault(p =>
-                p.ContentState.RealTimeProtocolVersion != NetworkRealTimeCombatState.ProtocolVersion
-                || (hostContent != null && !string.Equals(p.ContentState.GameVersion, hostContent.GameVersion, StringComparison.OrdinalIgnoreCase))
-                || string.IsNullOrWhiteSpace(p.ContentState.RealTimeBuildFingerprint)
-                || (hostContent != null && !string.Equals(p.ContentState.RealTimeBuildFingerprint,
-                    hostContent.RealTimeBuildFingerprint, StringComparison.OrdinalIgnoreCase))
-                || p.ContentState.DiscrepantDLCs.Any()
-                || p.ContentState.DiscrepantMods.Any());
+                RealTimeContentCompatibility.Compare(hostContent, p.ContentState) != RealTimeContentMismatch.None
+                || p.ContentState?.DiscrepantDLCs?.Any() == true
+                || p.ContentState?.DiscrepantMods?.Any() == true);
             if (incompatiblePlayer != null)
             {
                 Logger.LogWarning(
                     "Cannot start lobby: incompatible content. PlayerId={PlayerId}, HostGameVersion={HostGameVersion}, ClientGameVersion={ClientGameVersion}, HostProtocol={HostProtocol}, ClientProtocol={ClientProtocol}, HostBuild={HostBuild}, ClientBuild={ClientBuild}, DLCs={DLCs}, Mods={Mods}",
                     incompatiblePlayer.Id,
                     hostContent?.GameVersion,
-                    incompatiblePlayer.ContentState.GameVersion,
+                    incompatiblePlayer.ContentState?.GameVersion,
                     NetworkRealTimeCombatState.ProtocolVersion,
-                    incompatiblePlayer.ContentState.RealTimeProtocolVersion,
+                    incompatiblePlayer.ContentState?.RealTimeProtocolVersion,
                     hostContent?.RealTimeBuildFingerprint,
-                    incompatiblePlayer.ContentState.RealTimeBuildFingerprint,
-                    string.Join(", ", incompatiblePlayer.ContentState.DiscrepantDLCs.Select(x => $"{x.DLC?.Id}:{x.Reason}")),
-                    string.Join(", ", incompatiblePlayer.ContentState.DiscrepantMods.Select(x => $"{x.Id}:{x.Reason}:host={x.HostVersion}:client={x.Version}")));
+                    incompatiblePlayer.ContentState?.RealTimeBuildFingerprint,
+                    string.Join(", ", incompatiblePlayer.ContentState?.DiscrepantDLCs?.Select(x => $"{x.DLC?.Id}:{x.Reason}") ?? []),
+                    string.Join(", ", incompatiblePlayer.ContentState?.DiscrepantMods?.Select(x => $"{x.Id}:{x.Reason}:host={x.HostVersion}:client={x.Version}") ?? []));
                 PlayerNotification.ShowModalMessage(WellKnownKeys.MultiplayerWindow.ExternalServers.Errors.ModConflict.Key);
                 return false;
             }
@@ -3608,14 +3604,21 @@ namespace WOTRMultiplayer.Services
                     }
 
                     existingPlayer.Name = message.PlayerName;
-                    existingPlayer.ContentState = Mapper.Map<NetworkContentState>(message.ContentState);
+                    existingPlayer.ContentState = message.ContentState == null
+                        ? new NetworkContentState()
+                        : Mapper.Map<NetworkContentState>(message.ContentState);
+                    existingPlayer.ContentState.DLCs ??= [];
+                    existingPlayer.ContentState.Mods ??= [];
 
                     existingPlayer.Color = GetPlayerColor(existingPlayer.Name);
 
                     var host = GetHost();
                     existingPlayer.ContentState.DiscrepantDLCs = CompareDLCs(host.ContentState, existingPlayer.ContentState);
                     existingPlayer.ContentState.DiscrepantMods = CompareMods(host.ContentState, existingPlayer.ContentState);
-                    Logger.LogInformation("Player content has been checked. PlayerId={PlayerId}, DiscrepantDLCs={DiscrepantDLCs}, DiscrepantMods={DiscrepantMods}", existingPlayer.Id, existingPlayer.ContentState.DiscrepantDLCs.Count, existingPlayer.ContentState.DiscrepantMods.Count);
+                    var realTimeMismatch = RealTimeContentCompatibility.Compare(host.ContentState, existingPlayer.ContentState);
+                    Logger.LogInformation("Player content has been checked on connection. PlayerId={PlayerId}, RealTimeMismatch={RealTimeMismatch}, DiscrepantDLCs={DiscrepantDLCs}, DiscrepantMods={DiscrepantMods}",
+                        existingPlayer.Id, realTimeMismatch, existingPlayer.ContentState.DiscrepantDLCs.Count,
+                        existingPlayer.ContentState.DiscrepantMods.Count);
 
                     var playersChanged = CreateNotifyLobbyPlayersChanged();
                     Send(playersChanged);

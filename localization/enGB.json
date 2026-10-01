@@ -146,6 +146,12 @@
             "tooltips": {
                 "contentDiscrepancy": {
                     "title": "Content difference - {0}",
+                    "compatibility": {
+                        "title": "Multiplayer compatibility",
+                        "gameVersion": "Game version: host {0}, player {1}",
+                        "protocolVersion": "Real-time protocol: host {0}, player {1}",
+                        "buildFingerprint": "Multiplayer package differs. Install the same local test build on both PCs."
+                    },
                     "DLCs": {
                         "title": "Downloadable content",
                         "reasons": {

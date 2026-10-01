@@ -179,11 +179,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(-1)
             {
                 IsHost = true,
-                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = NetworkRealTimeCombatState.ProtocolVersion }
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = NetworkRealTimeCombatState.ProtocolVersion, RealTimeBuildFingerprint = "same-build" }
             });
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(42)
             {
-                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = 0 }
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = 0, RealTimeBuildFingerprint = "same-build" }
             });
 
             Assert.That(_multiplayerHost.Start(), Is.False);
@@ -199,11 +199,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(-1)
             {
                 IsHost = true,
-                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeBuildFingerprint = "host-build" }
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = NetworkRealTimeCombatState.ProtocolVersion, RealTimeBuildFingerprint = "host-build" }
             });
             _multiplayerHost.Game.Players.Add(new NetworkPlayer(42)
             {
-                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeBuildFingerprint = "other-build" }
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeProtocolVersion = NetworkRealTimeCombatState.ProtocolVersion, RealTimeBuildFingerprint = "other-build" }
             });
 
             Assert.That(_multiplayerHost.Start(), Is.False);
@@ -1081,6 +1081,36 @@ namespace WOTRMultiplayer.UnitTests.Services
             // Assert
             Assert.That(player.ContentState.DiscrepantDLCs, Has.Count.EqualTo(0));
             Assert.That(player.ContentState.DiscrepantMods, Has.Count.EqualTo(0));
+        }
+
+        [Test]
+        public void ClientGameServerConnectionConfirmed_MissingContentCannotStartOrTransferSave()
+        {
+            var startUp = new NetworkGameStartUp { SavePath = Guid.NewGuid().ToString(), IsNewGameSequence = false };
+            A.CallTo(() => _multiplayerSettingsProvider.GetSettings()).Returns(new NetworkMultiplayerSettings());
+            _multiplayerHost.Create(Guid.NewGuid().ToString(), null, null, startUp);
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(NetworkConstants.HostPlayerId)
+            {
+                IsHost = true,
+                ContentState = new NetworkContentState
+                {
+                    GameVersion = "2.7",
+                    RealTimeProtocolVersion = NetworkRealTimeCombatState.ProtocolVersion,
+                    RealTimeBuildFingerprint = "host-build"
+                }
+            });
+            var player = new NetworkPlayer(42);
+            _multiplayerHost.Game.Players.Add(player);
+
+            FakeUtils.GetNetworkReceiverHandler<ClientGameServerConnectionConfirmed>(_networkServer)(42,
+                new ClientGameServerConnectionConfirmed { PlayerName = "Client", ContentState = null });
+
+            Assert.That(player.ContentState, Is.Not.Null);
+            Assert.That(RealTimeContentCompatibility.Compare(
+                _multiplayerHost.Game.Players.First(p => p.IsHost).ContentState, player.ContentState),
+                Is.Not.EqualTo(RealTimeContentMismatch.None));
+            Assert.That(_multiplayerHost.Start(), Is.False);
+            A.CallTo(() => _fileSystemService.GetRawFileContent(A<string>._)).MustNotHaveHappened();
         }
 
         [TestCaseSource(nameof(DlcDifferencesTestCases))]
