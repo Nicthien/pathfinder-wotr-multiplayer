@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
@@ -52,8 +53,7 @@ namespace WOTRMultiplayer.Services
                 else if (Hash(new NetworkCombatState { AreaEffects = [hostArea] })
                     != Hash(new NetworkCombatState { AreaEffects = [clientArea] }))
                 {
-                    differences.Add(string.Equals(hostArea.BlueprintId, clientArea.BlueprintId,
-                        StringComparison.OrdinalIgnoreCase) ? $"area:{id}" : $"area:{id}:blueprint");
+                    differences.Add(DescribeAreaDifference(id, hostArea, clientArea));
                 }
             }
 
@@ -72,6 +72,20 @@ namespace WOTRMultiplayer.Services
 
         private static ulong Hash(NetworkCombatState state) =>
             RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
+
+        private static string DescribeAreaDifference(string id,
+            NetworkAreaEffect expected, NetworkAreaEffect actual)
+        {
+            var causes = new List<string>();
+            if (!string.Equals(expected.BlueprintId, actual.BlueprintId, StringComparison.OrdinalIgnoreCase))
+                causes.Add("blueprint");
+            if (!string.Equals(expected.CasterUnitId, actual.CasterUnitId, StringComparison.Ordinal)
+                || !string.Equals(expected.OwnerUnitId, actual.OwnerUnitId, StringComparison.Ordinal)
+                || !string.Equals(expected.SourceAbilityBlueprintId, actual.SourceAbilityBlueprintId,
+                    StringComparison.OrdinalIgnoreCase))
+                causes.Add("context");
+            return causes.Count == 0 ? $"area:{id}" : $"area:{id}:{string.Join("+", causes)}";
+        }
 
         private static string DescribeUnitDifference(string id, NetworkUnit expected, NetworkUnit actual)
         {

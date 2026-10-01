@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(3); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(4); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -61,6 +61,9 @@ namespace WOTRMultiplayer.Services
                 {
                     WriteString(writer, area?.Id);
                     WriteString(writer, area?.BlueprintId);
+                    WriteString(writer, area?.CasterUnitId);
+                    WriteString(writer, area?.OwnerUnitId);
+                    WriteString(writer, area?.SourceAbilityBlueprintId);
                     WriteVector(writer, area?.Position);
                     writer.Write((int)(area?.Type ?? 0));
                     var inside = (area?.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal).ToList();

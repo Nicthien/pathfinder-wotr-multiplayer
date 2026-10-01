@@ -68,6 +68,16 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void AreaEffectContextDivergence_ChangesHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var changed = Sample();
+            changed.Combat.AreaEffects[0].CasterUnitId = "different-caster";
+
+            Assert.That(RealTimeCombatHasher.Compute(changed), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
         public void AreaAndActiveOrderDivergence_ChangeHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

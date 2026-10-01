@@ -21,7 +21,11 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 State = new NetworkCombatState
                 {
                     Units = [new NetworkUnit { Id = "unit-a", BlueprintId = "unit-blueprint" }],
-                    AreaEffects = [new NetworkAreaEffect { Id = "area-a", BlueprintId = "area-blueprint" }]
+                    AreaEffects = [new NetworkAreaEffect
+                    {
+                        Id = "area-a", BlueprintId = "area-blueprint", CasterUnitId = "caster",
+                        OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability"
+                    }]
                 }
             };
 
@@ -35,6 +39,9 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.State.Units[0].Id, Is.EqualTo("unit-a"));
             Assert.That(copy.State.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
             Assert.That(copy.State.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
+            Assert.That(copy.State.AreaEffects[0].CasterUnitId, Is.EqualTo("caster"));
+            Assert.That(copy.State.AreaEffects[0].OwnerUnitId, Is.EqualTo("owner"));
+            Assert.That(copy.State.AreaEffects[0].SourceAbilityBlueprintId, Is.EqualTo("source-ability"));
         }
 
         [Test]

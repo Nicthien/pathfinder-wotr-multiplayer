@@ -365,6 +365,9 @@ namespace WOTRMultiplayer.Config.Mapping
             {
                 Id = areaEffectEntityData.UniqueId,
                 BlueprintId = areaEffectEntityData.Blueprint.AssetGuid.ToString(),
+                CasterUnitId = areaEffectEntityData.Context?.MaybeCaster?.UniqueId,
+                OwnerUnitId = areaEffectEntityData.Context?.MaybeOwner?.UniqueId,
+                SourceAbilityBlueprintId = areaEffectEntityData.Context?.SourceAbility?.AssetGuid.ToString(),
                 Name = areaEffectEntityData.Blueprint.name,
                 Position = areaEffectEntityData.m_Position.ToNetworkVector3(),
                 UnitsInside = [.. areaEffectEntityData.m_UnitsInside.Select(x => x.Reference.UniqueId)],

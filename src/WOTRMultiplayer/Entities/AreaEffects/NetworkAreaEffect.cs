@@ -8,6 +8,12 @@ namespace WOTRMultiplayer.Entities.AreaEffects
 
         public string BlueprintId { get; set; }
 
+        public string CasterUnitId { get; set; }
+
+        public string OwnerUnitId { get; set; }
+
+        public string SourceAbilityBlueprintId { get; set; }
+
         public string Name { get; set; }
 
         public NetworkVector3 Position { get; set; }

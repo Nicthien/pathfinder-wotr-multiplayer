@@ -18,7 +18,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             var source = new NetworkCombatState
             {
                 Units = [new NetworkUnit { Id = "summon", BlueprintId = "unit-blueprint" }],
-                AreaEffects = [new NetworkAreaEffect { Id = "cloud", BlueprintId = "area-blueprint" }]
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud", BlueprintId = "area-blueprint", CasterUnitId = "caster",
+                    OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability"
+                }]
             };
 
             var wire = mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(source);
@@ -28,6 +32,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(wire.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
             Assert.That(restored.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
             Assert.That(restored.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
+            Assert.That(wire.AreaEffects[0].CasterUnitId, Is.EqualTo("caster"));
+            Assert.That(restored.AreaEffects[0].OwnerUnitId, Is.EqualTo("owner"));
+            Assert.That(restored.AreaEffects[0].SourceAbilityBlueprintId, Is.EqualTo("source-ability"));
         }
     }
 }

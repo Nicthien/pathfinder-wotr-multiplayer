@@ -67,5 +67,20 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatDiff.Summarize(host, client),
                 Is.EqualTo("unit:summon:blueprint,area:cloud:blueprint"));
         }
+
+        [Test]
+        public void Summarize_IdentifiesAreaContextMismatch()
+        {
+            var host = new NetworkCombatState
+            {
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", CasterUnitId = "host-caster" }]
+            };
+            var client = new NetworkCombatState
+            {
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", CasterUnitId = "client-caster" }]
+            };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("area:cloud:context"));
+        }
     }
 }
