@@ -368,7 +368,9 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public void RealTimeCommand_FailedHostExecution_IsNeverBroadcast()
         {
-            var owner = new NetworkPlayer(42);
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            var owner = new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed };
             _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
             {
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
@@ -395,6 +397,10 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A<NetworkUnitMoveTo>._, null, null)).MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatCommandAccepted>._)).MustNotHaveHappened();
             Assert.That(_multiplayerHost.Game.RealTimeCombat.LastAuthoritativeSequence, Is.Zero);
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Prepare))).MustHaveHappenedOnceExactly();
         }
 
         [Test]

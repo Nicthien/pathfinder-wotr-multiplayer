@@ -3082,12 +3082,14 @@ namespace WOTRMultiplayer.Services
                             message.Ability == null ? null : Mapper.Map<NetworkAbilityUse>(message.Ability)))
                         {
                             Logger.LogWarning("Real-time command was rejected by game execution. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, unitId, message.Epoch, message.Sequence);
+                            TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch);
                             return false;
                         }
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Real-time command failed on host. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, unitId, message.Epoch, message.Sequence);
+                        TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch);
                         return false;
                     }
                 }
