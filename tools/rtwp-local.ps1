@@ -117,6 +117,29 @@ function Show-Status {
 
 function Collect-Diagnostics {
     $logPath = Join-Path $env:USERPROFILE 'AppData\LocalLow\Owlcat Games\Pathfinder Wrath Of The Righteous'
+    $gameExe = Join-Path $GamePath 'Wrath.exe'
+    $gameExeHash = if (Test-Path -LiteralPath $gameExe -PathType Leaf) {
+        (Get-FileHash -LiteralPath $gameExe -Algorithm SHA256).Hash
+    } else { $null }
+    $activeMods = @(
+        if (Test-Path -LiteralPath $modsPath -PathType Container) {
+            foreach ($folder in Get-ChildItem -LiteralPath $modsPath -Directory | Sort-Object Name) {
+                $info = Get-ModInfo $folder.FullName
+                if ($info) {
+                    [ordered]@{ folder = $folder.Name; id = $info.id; version = $info.version }
+                }
+            }
+        }
+    )
+    $paramsPath = Join-Path $GamePath 'Wrath_Data\Managed\UnityModManager\Params.xml'
+    $modPreferences = @(
+        if (Test-Path -LiteralPath $paramsPath -PathType Leaf) {
+            [xml]$params = Get-Content -LiteralPath $paramsPath -Raw
+            foreach ($mod in $params.SelectNodes('/Param/ModParams/Mod')) {
+                [ordered]@{ id = $mod.GetAttribute('Id'); enabled = $mod.GetAttribute('Enabled') -eq 'true' }
+            }
+        }
+    )
     $saveHash = $null
     if ($SavePath) {
         $resolvedSave = [IO.Path]::GetFullPath($SavePath)
@@ -144,7 +167,10 @@ function Collect-Diagnostics {
     $report = [ordered]@{
         capturedAt = (Get-Date).ToString('o')
         gamePath = [IO.Path]::GetFullPath($GamePath)
+        gameExeSha256 = $gameExeHash
         gameRunning = [bool](Get-Process -Name 'Wrath' -ErrorAction SilentlyContinue)
+        activeModFolders = $activeMods
+        unityModManagerPreferences = $modPreferences
         stable = Get-ModInfo $stablePath
         experimental = Get-ModInfo $experimentalPath
         disabledStable = Get-ModInfo $disabledStablePath
