@@ -42,6 +42,37 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void NegativeLevelsAndBuffOriginDivergence_ChangeHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var drained = Sample();
+            drained.Combat.Units[0].BuffCollection.NegativeLevels.Add(
+                new NetworkUnitNegativeLevelsData { Count = 1 });
+            var differentCaster = Sample();
+            differentCaster.Combat.Units[0].BuffCollection.Buffs[0].SourceAbilityCasterId = "other-caster";
+
+            Assert.That(RealTimeCombatHasher.Compute(drained), Is.Not.EqualTo(baseline));
+            Assert.That(RealTimeCombatHasher.Compute(differentCaster), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
+        public void NegativeLevelOrdering_DoesNotAffectHash()
+        {
+            var first = Sample();
+            first.Combat.Units[0].BuffCollection.NegativeLevels.Add(
+                new NetworkUnitNegativeLevelsData { Count = 1 });
+            first.Combat.Units[0].BuffCollection.NegativeLevels.Add(
+                new NetworkUnitNegativeLevelsData { Count = 2 });
+            var second = Sample();
+            second.Combat.Units[0].BuffCollection.NegativeLevels.Add(
+                new NetworkUnitNegativeLevelsData { Count = 2 });
+            second.Combat.Units[0].BuffCollection.NegativeLevels.Add(
+                new NetworkUnitNegativeLevelsData { Count = 1 });
+
+            Assert.That(RealTimeCombatHasher.Compute(second), Is.EqualTo(RealTimeCombatHasher.Compute(first)));
+        }
+
+        [Test]
         public void NonLethalDamageDivergence_ChangesHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

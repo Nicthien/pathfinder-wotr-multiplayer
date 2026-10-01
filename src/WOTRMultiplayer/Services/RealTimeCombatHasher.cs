@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(7); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(8); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -58,6 +58,22 @@ namespace WOTRMultiplayer.Services
                         WriteString(writer, buff?.CasterId);
                         writer.Write(buff?.Rank ?? 0);
                         writer.Write(buff?.IsPermanent ?? false);
+                        writer.Write(buff?.IsHidden ?? false);
+                        WriteString(writer, buff?.SourceAbilityCasterId);
+                        WriteString(writer, buff?.SourceAbility?.BlueprintId);
+                    }
+
+                    var negativeLevels = (unit?.BuffCollection?.NegativeLevels ?? [])
+                        .OrderBy(x => x?.Count)
+                        .ThenBy(x => x?.SavingThrowType)
+                        .ThenBy(x => x?.EnergyDrainType)
+                        .ToList();
+                    writer.Write(negativeLevels.Count);
+                    foreach (var level in negativeLevels)
+                    {
+                        writer.Write(level?.Count ?? 0);
+                        writer.Write(level == null ? 0 : (int)level.SavingThrowType);
+                        writer.Write(level == null ? 0 : (int)level.EnergyDrainType);
                     }
                 }
 
