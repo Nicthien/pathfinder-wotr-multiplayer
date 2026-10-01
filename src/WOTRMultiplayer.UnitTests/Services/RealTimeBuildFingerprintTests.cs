@@ -30,6 +30,30 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void ChangedShippedDependencyOrModMetadataChangesFingerprint()
+        {
+            var first = CreateFixture();
+            var second = CreateFixture();
+            try
+            {
+                Assert.That(RealTimeBuildFingerprint.Compute(first),
+                    Is.EqualTo(RealTimeBuildFingerprint.Compute(second)));
+                File.WriteAllText(Path.Combine(second, "AutoMapper.dll"), "different dependency");
+                Assert.That(RealTimeBuildFingerprint.Compute(first),
+                    Is.Not.EqualTo(RealTimeBuildFingerprint.Compute(second)));
+                File.WriteAllText(Path.Combine(second, "AutoMapper.dll"), "AutoMapper.dll");
+                File.WriteAllText(Path.Combine(second, "Info.json"), "different metadata");
+                Assert.That(RealTimeBuildFingerprint.Compute(first),
+                    Is.Not.EqualTo(RealTimeBuildFingerprint.Compute(second)));
+            }
+            finally
+            {
+                DeleteFixture(first);
+                DeleteFixture(second);
+            }
+        }
+
+        [Test]
         public void MissingRequiredPayloadFailsClosed()
         {
             var folder = CreateFixture();
@@ -49,8 +73,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             var folder = Path.Combine(Path.GetTempPath(), "wotr-rtwp-build-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Path.Combine(folder, "localization"));
             foreach (var name in new[] { "WOTRMultiplayer.dll", "WOTRMultiplayer.Networking.dll",
-                         "WOTRMultiplayer.Localization.dll" })
+                         "WOTRMultiplayer.Localization.dll", "AutoMapper.dll" })
                 File.WriteAllText(Path.Combine(folder, name), name);
+            File.WriteAllText(Path.Combine(folder, "Info.json"), "metadata");
             File.WriteAllText(Path.Combine(folder, "localization", "enGB.json"), "english");
             File.WriteAllText(Path.Combine(folder, "localization", "frFR.json"), "francais");
             return folder;
@@ -59,8 +84,9 @@ namespace WOTRMultiplayer.UnitTests.Services
         private static void DeleteFixture(string folder)
         {
             foreach (var name in new[] { "WOTRMultiplayer.dll", "WOTRMultiplayer.Networking.dll",
-                         "WOTRMultiplayer.Localization.dll" })
+                         "WOTRMultiplayer.Localization.dll", "AutoMapper.dll" })
                 File.Delete(Path.Combine(folder, name));
+            File.Delete(Path.Combine(folder, "Info.json"));
             File.Delete(Path.Combine(folder, "localization", "enGB.json"));
             File.Delete(Path.Combine(folder, "localization", "frFR.json"));
             Directory.Delete(Path.Combine(folder, "localization"));

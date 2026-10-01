@@ -111,10 +111,10 @@ function Get-ExperimentalFingerprint([string]$path, [string]$catalogRoot = $path
         'WOTRMultiplayer.dll',
         'WOTRMultiplayer.Networking.dll',
         'WOTRMultiplayer.Localization.dll',
+        'Info.json',
         'localization\enGB.json',
         'localization\frFR.json'
     )
-    $manifest = [Text.StringBuilder]::new()
     foreach ($relative in $required) {
         $file = if ($relative.StartsWith('localization\', [StringComparison]::Ordinal)) {
             Join-Path $catalogRoot $relative
@@ -122,6 +122,21 @@ function Get-ExperimentalFingerprint([string]$path, [string]$catalogRoot = $path
             Join-Path $path $relative
         }
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
+    }
+    $manifest = [Text.StringBuilder]::new()
+    $dllFiles = [IO.Directory]::GetFiles($path, '*.dll', [IO.SearchOption]::TopDirectoryOnly)
+    [Array]::Sort($dllFiles, [StringComparer]::Ordinal)
+    foreach ($file in $dllFiles) {
+        $relative = [IO.Path]::GetFileName($file)
+        [void]$manifest.Append($relative).Append(':').Append(
+            (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash).Append("`n")
+    }
+    foreach ($relative in @('Info.json', 'localization\enGB.json', 'localization\frFR.json')) {
+        $file = if ($relative.StartsWith('localization\', [StringComparison]::Ordinal)) {
+            Join-Path $catalogRoot $relative
+        } else {
+            Join-Path $path $relative
+        }
         $normalized = $relative.Replace('\', '/')
         [void]$manifest.Append($normalized).Append(':').Append(
             (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash).Append("`n")
