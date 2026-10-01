@@ -15,6 +15,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             coordinator.RequestModeSwitch(CombatMode.RealTimeWithPause, new long[] { -1, 42 });
 
             Assert.That(coordinator.State.BlocksSaving, Is.True);
+            Assert.That(coordinator.IsCurrent(coordinator.State.Epoch, 1), Is.False);
             Assert.That(coordinator.AcknowledgeBarrier(-1, new long[] { -1, 42 }), Is.False);
             Assert.That(coordinator.AcknowledgeBarrier(42, new long[] { -1, 42 }), Is.True);
 
@@ -22,10 +23,12 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(coordinator.State.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
             Assert.That(coordinator.State.CanonicalStateHash, Is.EqualTo(123UL));
             Assert.That(coordinator.State.BlocksSaving, Is.True);
+            Assert.That(coordinator.IsCurrent(coordinator.State.Epoch, 1), Is.False);
             Assert.That(coordinator.AcknowledgeModeCommit(-1, new long[] { -1, 42 }), Is.False);
             Assert.That(coordinator.AcknowledgeModeCommit(42, new long[] { -1, 42 }), Is.True);
             coordinator.CompleteModeCommit();
             Assert.That(coordinator.State.BlocksSaving, Is.False);
+            Assert.That(coordinator.IsCurrent(coordinator.State.Epoch, 1), Is.True);
         }
 
         [Test]
@@ -42,6 +45,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             coordinator.BeginRepair();
 
             Assert.That(coordinator.IsCurrent(oldEpoch, 2), Is.False);
+            Assert.That(coordinator.IsCurrent(coordinator.State.Epoch, 1), Is.False,
+                "No command or moving snapshot may apply during the repair barrier.");
+            Assert.That(coordinator.CompleteRepair(2UL, 2UL), Is.True);
             Assert.That(coordinator.IsCurrent(coordinator.State.Epoch, 1), Is.True);
         }
 

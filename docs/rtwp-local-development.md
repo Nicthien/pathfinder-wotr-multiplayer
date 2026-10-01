@@ -41,6 +41,7 @@ Until rules, random streams, summons and effects are fully authoritative and rec
 The mode and repair barriers now retransmit their current message twice before counting a timeout as a failed attempt. Duplicate Prepare and Commit messages are acknowledged idempotently on the client, while a full Abort or Fallback checkpoint can recover a client that missed Prepare entirely. This improves behavior under dropped/reordered application messages, but is not a substitute for a two-instance fault-injection run in the game.
 
 Mode completion now has its own acknowledgement. The host remains paused with saving blocked until every connected client acknowledges the final Complete message; if it is missed, the host retransmits it without aborting into a potentially conflicting mode. If the peer disconnects during this last barrier, the host can finish in solo play. Both successful commits and rollback completions use this last barrier.
+Moving combat snapshots and accepted player commands are ignored by a client while a mode-switch, repair or fallback barrier is active, even if their epoch and sequence are otherwise current. Only stable RTwP combat accepts them.
 
 Repair completion likewise holds the host paused and blocks saving until each connected client acknowledges Resume. A lost Resume is retransmitted, and a duplicate is acknowledged by a client that has already resumed. This applies to both a repaired RTwP state and the turn-based fallback.
 

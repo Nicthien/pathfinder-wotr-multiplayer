@@ -52,7 +52,10 @@ namespace WOTRMultiplayer.Services
 
         public bool IsCurrent(long epoch, long sequence)
         {
-            return epoch == _state.Epoch && sequence > 0 && sequence > _state.LastAuthoritativeSequence;
+            return _state.Mode == CombatMode.RealTimeWithPause
+                && _state.Phase == CombatSynchronizationPhase.Stable
+                && epoch == _state.Epoch && sequence > 0
+                && sequence > _state.LastAuthoritativeSequence;
         }
 
         public void RequestModeSwitch(CombatMode requestedMode, IEnumerable<long> connectedPlayers)
