@@ -1,4 +1,5 @@
 using System;
+using WOTRMultiplayer.Entities.Combat;
 
 namespace WOTRMultiplayer.Services
 {
@@ -10,5 +11,11 @@ namespace WOTRMultiplayer.Services
                 && string.Equals(currentUnitId, messageUnitId, StringComparison.OrdinalIgnoreCase)
                 && (!validateSender || receivedFrom == declaredPlayerId);
         }
+
+        public static bool IsCurrentEndSynchronization(NetworkCombatTurnStage stage, string currentUnitId,
+            string messageUnitId, long receivedFrom, long declaredPlayerId) =>
+            stage == NetworkCombatTurnStage.EndSynchronization
+            && IsCurrentEndMessage(currentUnitId, messageUnitId, receivedFrom, declaredPlayerId,
+                validateSender: true);
     }
 }

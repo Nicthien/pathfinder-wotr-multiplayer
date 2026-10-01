@@ -3401,7 +3401,19 @@ namespace WOTRMultiplayer.Services
 
         private void OnClientCombatTurnEndSynchronized(long playerId, ClientCombatTurnEndSynchronized message)
         {
-            Game.Combat.Turn.PlayersEndTurnSynchronization.Add(playerId);
+            lock (ActionLock)
+            {
+                var turn = Game?.Combat?.Turn;
+                if (turn == null || message == null ||
+                    !CombatTurnMessageGate.IsCurrentEndSynchronization(turn.Stage, turn.UnitId,
+                        message.UnitId, playerId, message.PlayerId))
+                {
+                    Logger.LogWarning("Ignoring stale or invalid turn-end synchronization. PlayerId={PlayerId}, MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}, Stage={Stage}",
+                        playerId, message?.UnitId, turn?.UnitId, turn?.Stage);
+                    return;
+                }
+                turn.PlayersEndTurnSynchronization.Add(playerId);
+            }
             TryEndTurn();
         }
 
