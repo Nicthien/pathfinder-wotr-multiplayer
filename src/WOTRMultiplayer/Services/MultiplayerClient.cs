@@ -1977,20 +1977,48 @@ namespace WOTRMultiplayer.Services
             long expectedSequence, long generation)
         {
             await Task.Delay(RealTimeAIChoiceGapTimeoutMs);
-            bool gapStillOpen;
+            NetworkRealTimeCombatState state;
             lock (_realTimeAIChoiceLock)
             {
-                gapStillOpen = ReferenceEquals(Game, session)
-                    && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
-                    && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
-                    && Game.RealTimeCombat.Epoch == epoch
-                    && _realTimeAISequenceEpoch == epoch
-                    && _realTimeAIChoiceGeneration == generation
-                    && _realTimeAIChoiceGapExpectedSequence == expectedSequence
-                    && _pendingRealTimeAIChoices.Count > 0;
+                state = session?.RealTimeCombat;
+                if (!ReferenceEquals(Game, session)
+                    || state?.Mode != CombatMode.RealTimeWithPause
+                    || state.Phase != CombatSynchronizationPhase.Stable
+                    || state.Epoch != epoch
+                    || _realTimeAISequenceEpoch != epoch
+                    || _realTimeAIChoiceGeneration != generation
+                    || _realTimeAIChoiceGapExpectedSequence != expectedSequence
+                    || _pendingRealTimeAIChoices.Count == 0)
+                    return;
+                _localCriticalFaultState = state;
+                _localCriticalFaultEpoch = epoch;
+                state.Phase = CombatSynchronizationPhase.Repairing;
             }
-            if (gapStillOpen)
-                ReportRealTimeAIActionFault(null, null, "host-choice-sequence-gap");
+            Logger.LogError("Host real-time AI choice sequence gap persisted. Epoch={Epoch}, ExpectedSequence={ExpectedSequence}",
+                epoch, expectedSequence);
+            try
+            {
+                await GameInteraction.SetPauseAsync(true);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to pause client after a host AI choice sequence gap. Epoch={Epoch}", epoch);
+            }
+            if (ReferenceEquals(Game, session) && ReferenceEquals(session.RealTimeCombat, state)
+                && state.Epoch == epoch)
+            {
+                try
+                {
+                    Send(new ClientRealTimeAIActionFault
+                    {
+                        Epoch = epoch, Reason = "host-choice-sequence-gap"
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Unable to report host AI choice sequence gap. Epoch={Epoch}", epoch);
+                }
+            }
         }
 
         private async void OnNotifyGlobalMapCommonPopupShown(long receivedFrom, NotifyGlobalMapCommonPopupShown message)

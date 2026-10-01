@@ -911,6 +911,11 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void RealTimeAI_UnfilledSequenceGapTimesOutIntoRepair()
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            var faultSent = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeAIActionFault>.That.Matches(x =>
+                x.Epoch == 3 && x.Reason == "host-choice-sequence-gap")))
+                .Invokes(_ => faultSent.TrySetResult(true));
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
@@ -924,11 +929,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "future" }
                 });
 
-            Assert.That(SpinWait.SpinUntil(() =>
-                _multiplayerClient.Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing,
-                TimeSpan.FromSeconds(7)), Is.True);
+            Assert.That(faultSent.Task.Wait(TimeSpan.FromSeconds(7)), Is.True);
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeAIActionFault>.That.Matches(x =>
                 x.Epoch == 3 && x.Reason == "host-choice-sequence-gap"))).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustNotHaveHappened();
         }
 
         [Test]
