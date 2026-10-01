@@ -23,8 +23,33 @@ dialogue timing, combat barks, pause/resume and reconnection preserve voice
 playback. A prior solo-host game smoke of protocol 25 loaded a save with
 `WOTR_AIVO` enabled, but the protocol-29 menu-only smoke had it disabled.
 
-Release evidence still required: load the current experimental build with
-`WOTR_AIVO` enabled; check the three shared patch sites, French dialogue and
-combat barks, pause/resume, locale change, save/load, and a two-player RTwP
-encounter. Record `Player.log` and the exact DLL hashes. Do not turn the runtime
-validation gate on from this static audit.
+Release evidence still required: check the three shared patch sites during
+play, audible French dialogue and combat barks, pause/resume, locale change,
+save/load, and a two-player RTwP encounter. Keep the exact build and game logs
+with that test. Do not turn the runtime validation gate on from a startup smoke.
+
+## Protocol-38 startup smoke (2026-10-01, 09:00–09:03 CEST)
+
+The staged experimental package with fingerprint
+`F1567ECF0404B9E7725D4C0910BE02D7E38E29C8A54E38878EDEE6A28801A90D`
+was temporarily enabled alongside the installed `WOTR_AIVO` 0.2.0 on game
+`2.7.0x` (`Wrath.exe` SHA-256
+`E82781EF9C1E1438719B0AA39C6EC5A8B6C51875F279E98F3EE31D45E3FB7DDD`).
+`Player.log` reports UMM successfully loaded exactly those two mods. The
+multiplayer log reports 446 Harmony-patched methods, merged `frFR`, and created
+host/join menu content. AIVO reported a 32,647-event French catalog, a
+5,686-clip bark/skill-check catalog, and 184 production banks loaded with
+`AK_Success`; the installed AIVO DLL hash still matches the static audit above.
+It also logged `Missing localization pack for frFR` for its own interface.
+Unobserved external `ConnectFailure` exceptions occurred without any game
+session or direct-IP connection being started; they are not evidence of a
+multiplayer failure.
+
+This proves simultaneous startup and voice-asset loading only. No save,
+spoken line, pause, combat or second peer was exercised. The game was closed
+through its main window, the Unity Mod Manager preferences were restored to
+their original SHA-256
+`4F3F2BB1AB19A7A314FED91BD2620AFB94E91EA375B9A5849B5FF0E4BD1C1833`,
+and stable multiplayer 0.4.16 was re-enabled. The voice project and installed
+voice files were not changed. The exact-build runtime validation marker remains
+absent.
