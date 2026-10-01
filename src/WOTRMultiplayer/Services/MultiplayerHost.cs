@@ -224,7 +224,13 @@ namespace WOTRMultiplayer.Services
             _realTimeModeRetransmissions = 0;
             try
             {
-                await GameInteraction.SetPauseAsync(true);
+                if (!await PauseAtRealTimeProjectileSafePointAsync(transitionState, transitionEpoch))
+                {
+                    if (ReferenceEquals(Game?.RealTimeCombat, transitionState)
+                        && transitionState.Phase == CombatSynchronizationPhase.PreparingModeSwitch)
+                        await AbortRealTimeModeSwitchAsync();
+                    return false;
+                }
                 if (!ReferenceEquals(Game?.RealTimeCombat, transitionState)
                     || transitionState.Epoch != transitionEpoch
                     || transitionState.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
@@ -244,10 +250,56 @@ namespace WOTRMultiplayer.Services
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Unable to prepare real-time combat mode switch. Epoch={Epoch}, Mode={Mode}", Game.RealTimeCombat.Epoch, mode);
-                await AbortRealTimeModeSwitchAsync();
+                Logger.LogError(ex, "Unable to prepare real-time combat mode switch. Epoch={Epoch}, Mode={Mode}",
+                    transitionEpoch, mode);
+                if (ReferenceEquals(Game?.RealTimeCombat, transitionState))
+                    await AbortRealTimeModeSwitchAsync();
                 return false;
             }
+        }
+
+        private async Task<bool> PauseAtRealTimeProjectileSafePointAsync(
+            NetworkRealTimeCombatState transitionState, long transitionEpoch)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline)
+            {
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _mainThreadAccessor.Post(() =>
+                {
+                    try
+                    {
+                        if (!ReferenceEquals(Game?.RealTimeCombat, transitionState)
+                            || transitionState.Epoch != transitionEpoch
+                            || transitionState.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                        {
+                            completion.TrySetResult(false);
+                            return;
+                        }
+                        if (CombatInteraction.HasActiveRealTimeProjectiles())
+                        {
+                            completion.TrySetResult(false);
+                            return;
+                        }
+                        GameInteraction.SetPause(true);
+                        completion.TrySetResult(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        completion.TrySetException(ex);
+                    }
+                });
+                if (await completion.Task)
+                    return true;
+                if (!ReferenceEquals(Game?.RealTimeCombat, transitionState)
+                    || transitionState.Epoch != transitionEpoch
+                    || transitionState.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                    return false;
+                await Task.Delay(50);
+            }
+            Logger.LogWarning("Combat-mode request could not reach a projectile-safe pause within 30 seconds. Epoch={Epoch}",
+                transitionEpoch);
+            return false;
         }
 
         private async Task CommitRealTimeModeSwitchAsync()

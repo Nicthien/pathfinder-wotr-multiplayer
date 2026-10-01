@@ -408,6 +408,44 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task CombatModeSwitch_WaitsForProjectileToFinishBeforePausingAndPreparing()
+        {
+            PrepareRealTimeRepairTest();
+            var checks = 0;
+            A.CallTo(() => _combatInteractionService.HasActiveRealTimeProjectiles())
+                .ReturnsLazily(() => ++checks == 1);
+
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+
+            Assert.That(checks, Is.EqualTo(2));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public async Task CombatModeSwitch_ReplacedSessionDuringProjectileDrainCannotPublishPrepare()
+        {
+            PrepareRealTimeRepairTest();
+            var replacement = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
+            };
+            A.CallTo(() => _combatInteractionService.HasActiveRealTimeProjectiles())
+                .ReturnsLazily(() =>
+                {
+                    _multiplayerHost.Game = replacement;
+                    return true;
+                });
+
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.False);
+            Assert.That(_multiplayerHost.Game, Is.SameAs(replacement));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustNotHaveHappened();
+        }
+
+        [Test]
         public async Task CombatModeSwitch_CriticalOldEpochFaultAbortsThenStartsProtectedRepair()
         {
             PrepareRealTimeRepairTest();

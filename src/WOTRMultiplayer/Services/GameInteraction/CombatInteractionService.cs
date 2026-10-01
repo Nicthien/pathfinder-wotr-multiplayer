@@ -587,6 +587,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return false;
         }
 
+        public bool HasActiveRealTimeProjectiles()
+        {
+            // Inspect every launcher, not only the party. A projectile still travelling
+            // can deliver a delayed hit, rule event or area effect after a mode switch.
+            return Game.Instance.ProjectileController.Projectiles.Any(projectile =>
+                projectile != null && !projectile.Destroyed && !projectile.Cleared);
+        }
+
         public void MakeUnitUntargetable(string unitId)
         {
             var unit = _gameStateLookupService.GetUnitEntity(unitId);

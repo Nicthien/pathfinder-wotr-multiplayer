@@ -95,6 +95,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         bool AreThereAnyProjectilesLaunchedByParty();
 
+        bool HasActiveRealTimeProjectiles();
+
         void InteractWithUnit(NetworkUnitInteractWithUnit networkUnitInteractWithUnit);
 
         void LootUnit(NetworkUnitLootUnit networkUnitLootUnit);
