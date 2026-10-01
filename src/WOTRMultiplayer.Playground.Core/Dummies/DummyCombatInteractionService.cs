@@ -41,6 +41,22 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
             return Task.FromResult<NetworkCombatState>(null);
         }
 
+        public Task UpdateRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task<NetworkCombatState> ApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
+        {
+            return Task.FromResult<NetworkCombatState>(null);
+        }
+
+        public Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
+            NetworkCombatState networkCombatState, Func<bool> canApply)
+        {
+            return Task.FromResult<NetworkCombatState>(null);
+        }
+
         public void InitializeCrusadeArmyCombat()
         {
         }
@@ -102,6 +118,13 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
             return Task.FromResult(false);
         }
 
+        public Task<bool?> TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind,
+            NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability,
+            Func<bool> canExecute)
+        {
+            return Task.FromResult<bool?>(null);
+        }
+
         public Task<bool> StartCombatAsync(NetworkCombatState networkCombatState)
         {
             return Task.FromResult(false);
@@ -153,6 +176,27 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
         public bool AreThereAnyProjectilesLaunchedByParty()
         {
             return false;
+        }
+
+        public bool HasActiveRealTimeProjectiles()
+        {
+            return false;
+        }
+
+        public bool HasActiveRealTimeAtomicActions()
+        {
+            return false;
+        }
+
+        public Task<bool?> TryApplyRealTimeUnitDeathAsync(string unitId, NetworkPlayer hostPlayer,
+            Func<bool> canApply)
+        {
+            return Task.FromResult<bool?>(null);
+        }
+
+        public Task<bool> TryPauseAtProjectileSafePointAsync(Func<bool> canPause, Action pause)
+        {
+            return Task.FromResult(false);
         }
 
         public void InteractWithUnit(NetworkUnitInteractWithUnit interaction)

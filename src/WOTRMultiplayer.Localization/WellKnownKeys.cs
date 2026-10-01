@@ -1641,6 +1641,12 @@ public static class WellKnownKeys
                     public static string Key { get; set; }
                 }
 
+                [Description("endSyncFailed")]
+                public static class EndSyncFailed
+                {
+                    public static string Key { get; set; }
+                }
+
                 [Description("clientOrderDesync")]
                 public static class ClientOrderDesync
                 {

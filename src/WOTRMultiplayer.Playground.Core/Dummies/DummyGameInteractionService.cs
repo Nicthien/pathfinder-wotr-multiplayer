@@ -282,6 +282,11 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
             return Task.CompletedTask;
         }
 
+        public Task<bool> TrySetTurnBasedCombatModeAsync(bool enabled, Func<bool> canApply)
+        {
+            return Task.FromResult(false);
+        }
+
         public void SetRandomEncounterContext(NetworkRandomEncounterContext networkRandomEncounterContext)
         {
         }

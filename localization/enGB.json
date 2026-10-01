@@ -402,6 +402,7 @@
                     "ended": "----- Turn Ended: {0}",
                     "delayed": "----- Turn Delayed: {0}",
                     "hostOrderDesync": "Next turn for player {0} has been overridden",
+                    "endSyncFailed": "Combat synchronization failed after retries. The next turn is blocked and saving is disabled; keep the stable save and collect diagnostics.",
                     "clientOrderDesync": "Next unit turn has been overridden to '{0}'",
                     "invalidUnit": "Current turn unit {0} is dead or missing at {1}. Killing unit / resetting combat turn."
                 },

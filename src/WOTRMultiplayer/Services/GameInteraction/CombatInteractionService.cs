@@ -1185,14 +1185,20 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    UpdateUnits(networkUnits, updatePosition);
-                    taskCompletion.SetResult(true);
+                    var failure = TurnEndUnitUpdatePreflight.FindFailure(networkUnits,
+                        id => _gameStateLookupService.GetUnitEntity(id) != null, updatePosition);
+                    if (failure != null)
+                    {
+                        _logger.LogError("Turn-end unit checkpoint rejected before mutation. Reason={Reason}", failure);
+                        taskCompletion.SetResult(false);
+                        return;
+                    }
+                    taskCompletion.SetResult(UpdateUnitsWithResult(networkUnits, updatePosition));
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error while updating units");
                     taskCompletion.SetResult(false);
-                    throw;
                 }
             });
 
@@ -1201,18 +1207,33 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void UpdateUnits(List<NetworkUnit> networkUnits, bool updatePosition)
         {
+            UpdateUnitsWithResult(networkUnits, updatePosition);
+        }
+
+        private bool UpdateUnitsWithResult(List<NetworkUnit> networkUnits, bool updatePosition)
+        {
+            var allUpdated = true;
             foreach (var networkUnit in networkUnits)
             {
                 try
                 {
                     var unit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
+                    if (unit == null || networkUnit.Descriptor?.State?.Prone == null
+                        || updatePosition && networkUnit.Position == null)
+                    {
+                        _logger.LogError("Unable to update missing or invalid unit. UnitId={UnitId}", networkUnit.Id);
+                        allUpdated = false;
+                        continue;
+                    }
                     UpdateUnit(unit, networkUnit, updatePosition);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error while updating unit. UnitId={UnitId}", networkUnit.Id);
+                    allUpdated = false;
                 }
             }
+            return allUpdated;
         }
 
         public List<NetworkUnit> GetUnitsInCombat()

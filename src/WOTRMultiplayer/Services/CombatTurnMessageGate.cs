@@ -13,8 +13,10 @@ namespace WOTRMultiplayer.Services
         }
 
         public static bool IsCurrentEndSynchronization(NetworkCombatTurnStage stage, string currentUnitId,
-            string messageUnitId, long receivedFrom, long declaredPlayerId) =>
+            string messageUnitId, long receivedFrom, long declaredPlayerId,
+            long messageSequence, long currentSequence) =>
             stage == NetworkCombatTurnStage.EndSynchronization
+            && messageSequence > 0 && messageSequence == currentSequence
             && IsCurrentEndMessage(currentUnitId, messageUnitId, receivedFrom, declaredPlayerId,
                 validateSender: true);
     }

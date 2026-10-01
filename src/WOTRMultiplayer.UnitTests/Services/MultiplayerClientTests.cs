@@ -71,6 +71,84 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void TurnEndCheckpointFailure_ReportsFailureAndBlocksSavingUntilSuccessfulRetry()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            A.CallTo(() => _combatInteractionService.IsCombatTurnFinished()).Returns(true);
+            A.CallTo(() => _combatInteractionService.UpdateUnitsAsync(
+                    A<System.Collections.Generic.List<Entities.Units.NetworkUnit>>._, true))
+                .ReturnsNextFromSequence(Task.FromResult(false), Task.FromResult(true));
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat
+                {
+                    Stage = NetworkCombatStage.Running,
+                    Turn = new NetworkCombatTurn { UnitId = "hero" }
+                }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyCombatTurnEndSynchronizationRequired>(_networkClient);
+            var checkpoint = new NotifyCombatTurnEndSynchronizationRequired
+            {
+                UnitId = "hero", SynchronizationSequence = 8
+            };
+
+            handler(NetworkConstants.HostPlayerId, checkpoint);
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientCombatTurnEndSynchronized>.That.Matches(x =>
+                x.UnitId == "hero" && x.SynchronizationSequence == 8 && !x.Succeeded)))
+                .MustHaveHappenedOnceExactly();
+            FakeUtils.GetNetworkReceiverHandler<NotifyCombatTurnEnded>(_networkClient)(
+                NetworkConstants.HostPlayerId, new NotifyCombatTurnEnded
+                {
+                    UnitId = "hero", SynchronizationSequence = 7
+                });
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.True);
+
+            handler(NetworkConstants.HostPlayerId, checkpoint);
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.False);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientCombatTurnEndSynchronized>.That.Matches(x =>
+                x.UnitId == "hero" && x.SynchronizationSequence == 8 && x.Succeeded)))
+                .MustHaveHappenedOnceExactly();
+            FakeUtils.GetNetworkReceiverHandler<NotifyCombatTurnEnded>(_networkClient)(
+                NetworkConstants.HostPlayerId, new NotifyCombatTurnEnded
+                {
+                    UnitId = "hero", SynchronizationSequence = 8
+                });
+            Assert.That(_multiplayerClient.Game.Combat.Turn.Stage, Is.EqualTo(NetworkCombatTurnStage.Ended));
+        }
+
+        [Test]
+        public void TurnEndCheckpointForDifferentUnit_ReportsFailureWithoutApplyingUnits()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat
+                {
+                    Stage = NetworkCombatStage.Running,
+                    Turn = new NetworkCombatTurn { UnitId = "client-unit" }
+                }
+            };
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyCombatTurnEndSynchronizationRequired>(_networkClient)(
+                NetworkConstants.HostPlayerId, new NotifyCombatTurnEndSynchronizationRequired
+                {
+                    UnitId = "host-unit", SynchronizationSequence = 8
+                });
+
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _combatInteractionService.UpdateUnitsAsync(
+                A<System.Collections.Generic.List<Entities.Units.NetworkUnit>>._, true))
+                .MustNotHaveHappened();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientCombatTurnEndSynchronized>.That.Matches(x =>
+                !x.Succeeded && x.SynchronizationSequence == 8
+                    && x.FailureReason == "wrong-current-unit")))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void DisconnectDuringRealTimeCombat_BlocksSavingUntilSessionReset()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())

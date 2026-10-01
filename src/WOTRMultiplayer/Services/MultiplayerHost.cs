@@ -86,6 +86,11 @@ namespace WOTRMultiplayer.Services
         private long _realTimeAISequenceEpoch;
         private long _nextRealTimeAISequence;
         private NetworkCombat _autoModeAttemptCombat;
+        private long _turnEndSynchronizationSequence;
+        private NotifyCombatTurnEndSynchronizationRequired _turnEndSynchronizationCheckpoint;
+        private readonly Dictionary<long, int> _turnEndSynchronizationRetries = [];
+        private readonly HashSet<long> _turnEndSynchronizationFailedPlayers = [];
+        private volatile bool _turnEndSynchronizationFailed;
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -99,10 +104,10 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat != null && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable;
 
-        public bool IsSavingBlockedByCombatSync => IsActive && Game?.RealTimeCombat != null
-            && (Game.RealTimeCombat.BlocksSaving
+        public bool IsSavingBlockedByCombatSync => IsActive && (_turnEndSynchronizationFailed
+            || Game?.RealTimeCombat != null && (Game.RealTimeCombat.BlocksSaving
                 || Game.Combat?.Stage == NetworkCombatStage.Running
-                    && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause);
+                    && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause));
 
         public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
         {
@@ -137,6 +142,10 @@ namespace WOTRMultiplayer.Services
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
+            _turnEndSynchronizationCheckpoint = null;
+            _turnEndSynchronizationRetries.Clear();
+            _turnEndSynchronizationFailedPlayers.Clear();
+            _turnEndSynchronizationFailed = false;
         }
 
         public void PublishRealTimeCombatSnapshot()
@@ -3401,18 +3410,56 @@ namespace WOTRMultiplayer.Services
 
         private void OnClientCombatTurnEndSynchronized(long playerId, ClientCombatTurnEndSynchronized message)
         {
+            NotifyCombatTurnEndSynchronizationRequired retry = null;
+            var hardFailure = false;
             lock (ActionLock)
             {
                 var turn = Game?.Combat?.Turn;
                 if (turn == null || message == null ||
                     !CombatTurnMessageGate.IsCurrentEndSynchronization(turn.Stage, turn.UnitId,
-                        message.UnitId, playerId, message.PlayerId))
+                        message.UnitId, playerId, message.PlayerId,
+                        message.SynchronizationSequence, _turnEndSynchronizationSequence))
                 {
-                    Logger.LogWarning("Ignoring stale or invalid turn-end synchronization. PlayerId={PlayerId}, MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}, Stage={Stage}",
-                        playerId, message?.UnitId, turn?.UnitId, turn?.Stage);
+                    Logger.LogWarning("Ignoring stale or invalid turn-end synchronization. PlayerId={PlayerId}, MessageUnitId={MessageUnitId}, CurrentUnitId={CurrentUnitId}, Stage={Stage}, Sequence={Sequence}, CurrentSequence={CurrentSequence}",
+                        playerId, message?.UnitId, turn?.UnitId, turn?.Stage,
+                        message?.SynchronizationSequence, _turnEndSynchronizationSequence);
                     return;
                 }
-                turn.PlayersEndTurnSynchronization.Add(playerId);
+                if (!message.Succeeded)
+                {
+                    if (turn.PlayersEndTurnSynchronization.Contains(playerId))
+                        return; // A delayed failed reply cannot undo a later successful retry.
+                    _turnEndSynchronizationFailedPlayers.Add(playerId);
+                    _turnEndSynchronizationFailed = true;
+                    var failures = _turnEndSynchronizationRetries.TryGetValue(playerId, out var previous)
+                        ? previous + 1 : 1;
+                    _turnEndSynchronizationRetries[playerId] = failures;
+                    Logger.LogError("Turn-end synchronization failed. PlayerId={PlayerId}, UnitId={UnitId}, Sequence={Sequence}, Attempt={Attempt}, Reason={Reason}",
+                        playerId, message.UnitId, message.SynchronizationSequence, failures,
+                        message.FailureReason);
+                    if (failures <= 2)
+                        retry = _turnEndSynchronizationCheckpoint;
+                    else if (failures == 3)
+                    {
+                        Logger.LogCritical("Turn-end synchronization still failed after retries; combat remains blocked and saving disabled. PlayerId={PlayerId}, UnitId={UnitId}",
+                            playerId, message.UnitId);
+                        hardFailure = true;
+                    }
+                }
+                else
+                {
+                    _turnEndSynchronizationFailedPlayers.Remove(playerId);
+                    _turnEndSynchronizationFailed = _turnEndSynchronizationFailedPlayers.Count > 0;
+                    turn.PlayersEndTurnSynchronization.Add(playerId);
+                }
+            }
+            if (!message.Succeeded)
+            {
+                if (retry != null) Send(playerId, retry);
+                if (hardFailure)
+                    PlayerNotification.ShowWarningNotification(
+                        WellKnownKeys.GameNotifications.Combat.Turn.EndSyncFailed.Key);
+                return;
             }
             TryEndTurn();
         }
@@ -4249,11 +4296,17 @@ namespace WOTRMultiplayer.Services
                     if (Game.Combat.Turn.Stage == NetworkCombatTurnStage.Ending)
                     {
                         SetCombatTurnStage(NetworkCombatTurnStage.EndSynchronization);
+                        _turnEndSynchronizationRetries.Clear();
+                        _turnEndSynchronizationFailedPlayers.Clear();
+                        _turnEndSynchronizationFailed = false;
                         var units = CombatInteraction.GetUnitsInCombat();
                         var turnEndSyncMessage = new NotifyCombatTurnEndSynchronizationRequired
                         {
-                            Units = Mapper.Map<List<Networking.Messages.Contracts.NetworkUnit>>(units)
+                            Units = Mapper.Map<List<Networking.Messages.Contracts.NetworkUnit>>(units),
+                            UnitId = Game.Combat.Turn.UnitId,
+                            SynchronizationSequence = ++_turnEndSynchronizationSequence
                         };
+                        _turnEndSynchronizationCheckpoint = turnEndSyncMessage;
                         Send(turnEndSyncMessage);
                     }
 
@@ -4265,7 +4318,14 @@ namespace WOTRMultiplayer.Services
                     }
 
                     Logger.LogInformation("Turn has been ended");
-                    var turnEndMessage = new NotifyCombatTurnEnded();
+                    _turnEndSynchronizationCheckpoint = null;
+                    _turnEndSynchronizationFailedPlayers.Clear();
+                    _turnEndSynchronizationFailed = false;
+                    var turnEndMessage = new NotifyCombatTurnEnded
+                    {
+                        UnitId = Game.Combat.Turn.UnitId,
+                        SynchronizationSequence = _turnEndSynchronizationSequence
+                    };
                     Send(turnEndMessage);
 
                     // Game calls 'turn end' every tick, no need for extra calls

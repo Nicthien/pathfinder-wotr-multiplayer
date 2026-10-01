@@ -47,6 +47,7 @@ namespace WOTRMultiplayer.Services
     {
         private readonly INetworkClientConnection _networkClient;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
+        private readonly SemaphoreSlim _turnEndSynchronizationGate = new(1, 1);
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
         private readonly RealTimeEntityIdMailbox _realTimeEntityIds = new();
         private const int RealTimeRuleRollTimeoutMs = 2500;
@@ -70,6 +71,9 @@ namespace WOTRMultiplayer.Services
         private NetworkRealTimeCombatState _localCriticalFaultState;
         private long _localCriticalFaultEpoch;
         private volatile bool _disconnectedDuringRealTimeCombat;
+        private NetworkGame _turnEndSynchronizationSession;
+        private long _lastTurnEndSynchronizationSequence;
+        private volatile bool _turnEndSynchronizationFailed;
 
         public Action OnNetworkError { get; set; }
 
@@ -85,7 +89,7 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat != null && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable;
 
-        public bool IsSavingBlockedByCombatSync => _disconnectedDuringRealTimeCombat
+        public bool IsSavingBlockedByCombatSync => _disconnectedDuringRealTimeCombat || _turnEndSynchronizationFailed
             || IsActive && Game?.RealTimeCombat != null
                 && (Game.RealTimeCombat.BlocksSaving
                     || Game.Combat?.Stage == NetworkCombatStage.Running
@@ -250,6 +254,9 @@ namespace WOTRMultiplayer.Services
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
             _disconnectedDuringRealTimeCombat = false;
+            _turnEndSynchronizationFailed = false;
+            _turnEndSynchronizationSession = null;
+            _lastTurnEndSynchronizationSequence = 0;
             _localCriticalFaultState = null;
 
             Game = null;
@@ -1188,22 +1195,116 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyCombatTurnEndSynchronizationRequired(long receivedFrom, NotifyCombatTurnEndSynchronizationRequired message)
         {
-            await WaitWhileTrue(() => !CombatInteraction.IsCombatTurnFinished(), "Waiting for an active turn to end before proceeding with synchronization");
-
-            var units = Mapper.Map<List<NetworkUnit>>(message.Units);
-            var isSynced = await CombatInteraction.UpdateUnitsAsync(units, updatePosition: true);
-            if (!isSynced)
+            if (receivedFrom != NetworkConstants.HostPlayerId || message == null
+                || message.SynchronizationSequence <= 0)
+                return;
+            var session = Game;
+            var turn = session?.Combat?.Turn;
+            await _turnEndSynchronizationGate.WaitAsync();
+            try
             {
-                // TODO: some kind of recovery?
-                Logger.LogError("Failed to synchronize turn end. UnitId={UnitId}", Game.Combat.Turn.UnitId);
-            }
+                if (turn == null || session.Combat?.Stage != NetworkCombatStage.Running)
+                    return;
+                lock (ActionLock)
+                {
+                    if (!ReferenceEquals(_turnEndSynchronizationSession, session))
+                    {
+                        _turnEndSynchronizationSession = session;
+                        _lastTurnEndSynchronizationSequence = 0;
+                    }
+                    if (message.SynchronizationSequence < _lastTurnEndSynchronizationSequence)
+                        return;
+                    _lastTurnEndSynchronizationSequence = message.SynchronizationSequence;
+                }
+                if (!string.Equals(turn.UnitId, message.UnitId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _turnEndSynchronizationFailed = true;
+                    Logger.LogError("Turn-end synchronization targets a different unit. HostUnitId={HostUnitId}, ClientUnitId={ClientUnitId}, Sequence={Sequence}",
+                        message.UnitId, turn.UnitId, message.SynchronizationSequence);
+                    Send(new ClientCombatTurnEndSynchronized
+                    {
+                        UnitId = message.UnitId, PlayerId = session.LocalPlayerId,
+                        SynchronizationSequence = message.SynchronizationSequence,
+                        Succeeded = false, FailureReason = "wrong-current-unit"
+                    });
+                    return;
+                }
+                var finished = await WaitWhileTrue(() => ReferenceEquals(Game, session)
+                    && ReferenceEquals(session.Combat?.Turn, turn)
+                    && _lastTurnEndSynchronizationSequence == message.SynchronizationSequence
+                    && !CombatInteraction.IsCombatTurnFinished(),
+                    "Waiting for an active turn to end before proceeding with synchronization");
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(session.Combat?.Turn, turn)
+                    || _lastTurnEndSynchronizationSequence != message.SynchronizationSequence)
+                    return;
 
-            var confirmationMessage = new ClientCombatTurnEndSynchronized { UnitId = Game.Combat.Turn.UnitId, PlayerId = Game.LocalPlayerId };
-            Send(confirmationMessage);
+                var isSynced = false;
+                var failureReason = finished ? "unit-checkpoint-application-failed" : "turn-still-active";
+                if (finished)
+                {
+                    try
+                    {
+                        var units = Mapper.Map<List<NetworkUnit>>(message.Units);
+                        isSynced = await CombatInteraction.UpdateUnitsAsync(units, updatePosition: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Turn-end unit synchronization threw. UnitId={UnitId}, Sequence={Sequence}",
+                            message.UnitId, message.SynchronizationSequence);
+                    }
+                }
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(session.Combat?.Turn, turn)
+                    || _lastTurnEndSynchronizationSequence != message.SynchronizationSequence)
+                    return;
+                _turnEndSynchronizationFailed = !isSynced;
+                if (!isSynced)
+                    Logger.LogError("Failed to synchronize turn end; requesting host retry. UnitId={UnitId}, Sequence={Sequence}, Reason={Reason}",
+                        message.UnitId, message.SynchronizationSequence, failureReason);
+                Send(new ClientCombatTurnEndSynchronized
+                {
+                    UnitId = message.UnitId, PlayerId = session.LocalPlayerId,
+                    SynchronizationSequence = message.SynchronizationSequence,
+                    Succeeded = isSynced,
+                    FailureReason = isSynced ? null : failureReason
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Turn-end synchronization failed unexpectedly. UnitId={UnitId}, Sequence={Sequence}",
+                    message.UnitId, message.SynchronizationSequence);
+                if (ReferenceEquals(Game, session) && ReferenceEquals(session?.Combat?.Turn, turn)
+                    && turn != null
+                    && _lastTurnEndSynchronizationSequence == message.SynchronizationSequence)
+                {
+                    _turnEndSynchronizationFailed = true;
+                    Send(new ClientCombatTurnEndSynchronized
+                    {
+                        UnitId = message.UnitId, PlayerId = session.LocalPlayerId,
+                        SynchronizationSequence = message.SynchronizationSequence,
+                        Succeeded = false, FailureReason = "unexpected-sync-error"
+                    });
+                }
+            }
+            finally
+            {
+                _turnEndSynchronizationGate.Release();
+            }
         }
 
         private void OnNotifyCombatTurnEnded(long receivedFrom, NotifyCombatTurnEnded message)
         {
+            if (receivedFrom != NetworkConstants.HostPlayerId || message == null
+                || !ReferenceEquals(_turnEndSynchronizationSession, Game)
+                || message.SynchronizationSequence != _lastTurnEndSynchronizationSequence
+                || !string.Equals(Game?.Combat?.Turn?.UnitId, message.UnitId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.LogWarning("Ignoring stale turn-end completion. UnitId={UnitId}, Sequence={Sequence}, CurrentUnitId={CurrentUnitId}, CurrentSequence={CurrentSequence}",
+                    message?.UnitId, message?.SynchronizationSequence, Game?.Combat?.Turn?.UnitId,
+                    _lastTurnEndSynchronizationSequence);
+                return;
+            }
+            _turnEndSynchronizationFailed = false;
             SetCombatTurnStage(NetworkCombatTurnStage.Ended);
         }
 

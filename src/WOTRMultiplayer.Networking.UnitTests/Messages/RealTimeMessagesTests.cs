@@ -9,6 +9,34 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void TurnEndSynchronization_RoundTripsFailureAndSequence()
+        {
+            var checkpoint = Serializer.DeepClone(new NotifyCombatTurnEndSynchronizationRequired
+            {
+                UnitId = "hero", SynchronizationSequence = 9,
+                Units = [new NetworkUnit { Id = "hero" }]
+            });
+            var reply = Serializer.DeepClone(new ClientCombatTurnEndSynchronized
+            {
+                UnitId = "hero", PlayerId = 2, SynchronizationSequence = 9,
+                Succeeded = false, FailureReason = "missing-unit:hero"
+            });
+            var complete = Serializer.DeepClone(new NotifyCombatTurnEnded
+            {
+                UnitId = "hero", SynchronizationSequence = 9
+            });
+
+            Assert.That(checkpoint.UnitId, Is.EqualTo("hero"));
+            Assert.That(checkpoint.SynchronizationSequence, Is.EqualTo(9));
+            Assert.That(checkpoint.Units[0].Id, Is.EqualTo("hero"));
+            Assert.That(reply.SynchronizationSequence, Is.EqualTo(9));
+            Assert.That(reply.Succeeded, Is.False);
+            Assert.That(reply.FailureReason, Is.EqualTo("missing-unit:hero"));
+            Assert.That(complete.UnitId, Is.EqualTo("hero"));
+            Assert.That(complete.SynchronizationSequence, Is.EqualTo(9));
+        }
+
+        [Test]
         public void ContentState_RoundTripsExactBuildFingerprint()
         {
             var source = new NetworkContentState

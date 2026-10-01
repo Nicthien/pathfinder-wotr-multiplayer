@@ -25,13 +25,15 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void EndSynchronizationAck_RequiresCurrentPhaseTurnAndSender()
         {
             Assert.That(CombatTurnMessageGate.IsCurrentEndSynchronization(
-                NetworkCombatTurnStage.EndSynchronization, "unit-a", "UNIT-A", 42, 42), Is.True);
+                NetworkCombatTurnStage.EndSynchronization, "unit-a", "UNIT-A", 42, 42, 8, 8), Is.True);
             Assert.That(CombatTurnMessageGate.IsCurrentEndSynchronization(
-                NetworkCombatTurnStage.Playing, "unit-a", "unit-a", 42, 42), Is.False);
+                NetworkCombatTurnStage.Playing, "unit-a", "unit-a", 42, 42, 8, 8), Is.False);
             Assert.That(CombatTurnMessageGate.IsCurrentEndSynchronization(
-                NetworkCombatTurnStage.EndSynchronization, "unit-b", "unit-a", 42, 42), Is.False);
+                NetworkCombatTurnStage.EndSynchronization, "unit-b", "unit-a", 42, 42, 8, 8), Is.False);
             Assert.That(CombatTurnMessageGate.IsCurrentEndSynchronization(
-                NetworkCombatTurnStage.EndSynchronization, "unit-a", "unit-a", 99, 42), Is.False);
+                NetworkCombatTurnStage.EndSynchronization, "unit-a", "unit-a", 99, 42, 8, 8), Is.False);
+            Assert.That(CombatTurnMessageGate.IsCurrentEndSynchronization(
+                NetworkCombatTurnStage.EndSynchronization, "unit-a", "unit-a", 42, 42, 7, 8), Is.False);
         }
     }
 }

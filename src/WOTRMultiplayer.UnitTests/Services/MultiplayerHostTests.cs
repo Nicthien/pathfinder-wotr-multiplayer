@@ -83,6 +83,78 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void FailedTurnEndCheckpoint_RetriesWithoutAcknowledgingOrEnablingSaving()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            var turn = new NetworkCombatTurn
+            {
+                UnitId = "hero", Stage = NetworkCombatTurnStage.EndSynchronization
+            };
+            turn.PlayersEndTurnInitialization.Add(NetworkConstants.HostPlayerId);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running, Turn = turn }
+            };
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(NetworkConstants.HostPlayerId)
+            {
+                LobbySyncStatus = NetworkLobbySyncStatus.Succeed
+            });
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(42)
+            {
+                LobbySyncStatus = NetworkLobbySyncStatus.Succeed
+            });
+            var checkpoint = new NotifyCombatTurnEndSynchronizationRequired
+            {
+                UnitId = "hero", SynchronizationSequence = 8
+            };
+            typeof(MultiplayerHost).GetField("_turnEndSynchronizationSequence",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(_multiplayerHost, 8L);
+            typeof(MultiplayerHost).GetField("_turnEndSynchronizationCheckpoint",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(_multiplayerHost, checkpoint);
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientCombatTurnEndSynchronized>(_networkServer);
+
+            handler.Invoke(42, new ClientCombatTurnEndSynchronized
+            {
+                UnitId = "hero", PlayerId = 42, SynchronizationSequence = 7, Succeeded = true
+            });
+            handler.Invoke(42, new ClientCombatTurnEndSynchronized
+            {
+                UnitId = "hero", PlayerId = 42, SynchronizationSequence = 8,
+                Succeeded = false, FailureReason = "missing-unit:hero"
+            });
+
+            Assert.That(turn.PlayersEndTurnSynchronization, Does.Not.Contain(42));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _networkServer.Send(42, checkpoint)).MustHaveHappenedOnceExactly();
+
+            handler.Invoke(42, new ClientCombatTurnEndSynchronized
+            {
+                UnitId = "hero", PlayerId = 42, SynchronizationSequence = 8,
+                Succeeded = false, FailureReason = "missing-unit:hero"
+            });
+            handler.Invoke(42, new ClientCombatTurnEndSynchronized
+            {
+                UnitId = "hero", PlayerId = 42, SynchronizationSequence = 8,
+                Succeeded = false, FailureReason = "missing-unit:hero"
+            });
+            Assert.That(turn.PlayersEndTurnSynchronization, Does.Not.Contain(42));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _networkServer.Send(42, checkpoint)).MustHaveHappenedTwiceExactly();
+            A.CallTo(() => _playerNotificationService.ShowWarningNotification(
+                A<string>._,
+                A<bool>._, A<float>._, A<object[]>._)).MustHaveHappenedOnceExactly();
+
+            handler.Invoke(42, new ClientCombatTurnEndSynchronized
+            {
+                UnitId = "hero", PlayerId = 42, SynchronizationSequence = 8, Succeeded = true
+            });
+            Assert.That(turn.PlayersEndTurnSynchronization, Does.Contain(42));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.False);
+        }
+
+        [Test]
         public void RealTimeDiceRoll_HostPublishesSequencedResult()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

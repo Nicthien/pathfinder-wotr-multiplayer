@@ -182,6 +182,7 @@
         "turn": {
           "started": "----- Début du tour : {0}", "ended": "----- Fin du tour : {0}", "delayed": "----- Tour retardé : {0}",
           "hostOrderDesync": "Le prochain tour du joueur {0} a été corrigé.", "clientOrderDesync": "Le prochain tour a été attribué à l'unité « {0} ».",
+          "endSyncFailed": "La synchronisation du combat a échoué après plusieurs essais. Le tour suivant reste bloqué et la sauvegarde est désactivée ; conservez la sauvegarde stable et recueillez les diagnostics.",
           "invalidUnit": "L'unité {0}, dont c'est le tour, est morte ou introuvable chez {1}. Mort appliquée ou tour réinitialisé."
         },
         "areaEffects": { "missing": "L'effet de zone manquant « {0} » ({1}) ne s'est pas déclenché." }
