@@ -2822,6 +2822,13 @@ namespace WOTRMultiplayer.Services
                     }
                 }
 
+                // A command rejected by the game must not consume its sender's sequence.
+                if (!_realTimeCommandGate.TryCommit(envelope))
+                {
+                    Logger.LogWarning("Real-time command changed epoch or order during game execution; scheduling verification. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, message.Epoch, message.Sequence);
+                    _mainThreadAccessor.Post(() => _ = BeginRealTimeRepairAsync());
+                    return false;
+                }
                 authoritativeSequence = new RealTimeCombatCoordinator(Game.RealTimeCombat).NextAuthoritativeSequence();
             }
 

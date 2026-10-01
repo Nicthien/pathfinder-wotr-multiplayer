@@ -37,7 +37,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             var state = RealTimeState();
             var gate = new RealTimeCommandGate(state);
             var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
-            gate.Validate(Command(state.Epoch, 2, 42, "unit-a"), 42, owners);
+            var accepted = Command(state.Epoch, 2, 42, "unit-a");
+            Assert.That(gate.Validate(accepted, 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
+            Assert.That(gate.TryCommit(accepted), Is.True);
 
             var result = gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), 42, owners);
 
@@ -62,7 +64,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             var state = RealTimeState();
             var gate = new RealTimeCommandGate(state);
             var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
-            gate.Validate(Command(state.Epoch, 9, 42, "unit-a"), 42, owners);
+            var accepted = Command(state.Epoch, 9, 42, "unit-a");
+            Assert.That(gate.Validate(accepted, 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
+            Assert.That(gate.TryCommit(accepted), Is.True);
             state.Epoch++;
 
             Assert.That(gate.Validate(Command(state.Epoch, 1, 42, "unit-a"), 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
@@ -88,6 +92,33 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(gate.Validate(spoofed, 99, owners), Is.EqualTo(RealTimeCommandRejection.SenderMismatch));
             Assert.That(gate.Validate(spoofed, 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
+        }
+
+        [Test]
+        public void ExecutionFailure_DoesNotConsumeSequence()
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state);
+            var owners = new Dictionary<string, long> { ["unit-a"] = 42 };
+            var command = Command(state.Epoch, 3, 42, "unit-a");
+
+            Assert.That(gate.Validate(command, 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
+            // The game rejects execution, so the host never calls Commit.
+            Assert.That(gate.Validate(command, 42, owners), Is.EqualTo(RealTimeCommandRejection.None));
+            Assert.That(gate.TryCommit(command), Is.True);
+            Assert.That(gate.Validate(command, 42, owners), Is.EqualTo(RealTimeCommandRejection.InvalidSequence));
+            Assert.That(gate.TryCommit(command), Is.False);
+        }
+
+        [Test]
+        public void OldEpochCommand_CannotBeCommitted()
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state);
+            var command = Command(state.Epoch, 1, 42, "unit-a");
+            state.Epoch++;
+
+            Assert.That(gate.TryCommit(command), Is.False);
         }
 
         private static NetworkRealTimeCombatState RealTimeState()

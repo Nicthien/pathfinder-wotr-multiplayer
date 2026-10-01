@@ -79,8 +79,30 @@ namespace WOTRMultiplayer.Services
                 return RealTimeCommandRejection.UnitOwnedByAnotherPlayer;
             }
 
-            _lastSequenceByPlayer[command.PlayerId] = command.Sequence;
             return RealTimeCommandRejection.None;
+        }
+
+        public bool TryCommit(RealTimeCommandEnvelope command)
+        {
+            if (command == null || command.Epoch != _state.Epoch || command.Sequence <= 0)
+            {
+                return false;
+            }
+
+            if (_trackedEpoch != _state.Epoch)
+            {
+                _lastSequenceByPlayer.Clear();
+                _trackedEpoch = _state.Epoch;
+            }
+
+            if (_lastSequenceByPlayer.TryGetValue(command.PlayerId, out var lastSequence)
+                && command.Sequence <= lastSequence)
+            {
+                return false;
+            }
+
+            _lastSequenceByPlayer[command.PlayerId] = command.Sequence;
+            return true;
         }
 
         public void Reset()
