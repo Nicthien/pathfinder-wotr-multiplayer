@@ -8,6 +8,7 @@ using Kingmaker.Controllers.Units;
 using Kingmaker.EntitySystem.Entities;
 using Microsoft.Extensions.Logging;
 using UnityEngine;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
 {
@@ -70,6 +71,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
                 var index = Main.Multiplayer.ValueGenerator.Range(seededContext.Lifetime, identifier, minInclusive, maxExclusive);
                 var point = points.ElementAt(index);
+                point = RealTimeVector3Authority.Resolve(Main.Multiplayer,
+                    $"fear-destination:{identifier}:{minInclusive}:{maxExclusive}:{points.Count}", point);
                 Main.GetLogger<UnitFearControllerPatches>().LogInformation("Fear move point has been selected. UnitId={UnitId}, Point={Point}, Index={Index}, Identifier={Identifier}", movementData.unit.UniqueId, point, index, identifier);
                 return point;
             }
