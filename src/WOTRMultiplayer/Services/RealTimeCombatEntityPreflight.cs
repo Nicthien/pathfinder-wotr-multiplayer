@@ -19,11 +19,21 @@ namespace WOTRMultiplayer.Services
             }
 
             var missing = new HashSet<string>(StringComparer.Ordinal);
+            if (checkpoint.Units == null) missing.Add("invalid-combat:units");
+            if (checkpoint.AreaEffects == null) missing.Add("invalid-combat:areas");
             foreach (var unit in checkpoint.Units ?? [])
             {
-                if (unit?.Id == null || !hasUnit(unit.Id))
+                var exists = unit?.Id != null && hasUnit(unit.Id);
+                if (!exists)
                 {
                     missing.Add($"missing-unit:{unit?.Id ?? "<null>"}");
+                }
+                else
+                {
+                    if (unit.Position == null) missing.Add($"invalid-unit:{unit.Id}:position");
+                    if (unit.Descriptor?.State?.Prone == null) missing.Add($"invalid-unit:{unit.Id}:state");
+                    if (unit.BuffCollection?.Buffs == null || unit.BuffCollection.NegativeLevels == null)
+                        missing.Add($"invalid-unit:{unit.Id}:buffs");
                 }
                 if (unit?.Id == null) { continue; }
                 foreach (var engagement in (unit.CombatState?.EngagedUnits ?? [])
@@ -37,9 +47,15 @@ namespace WOTRMultiplayer.Services
             }
             foreach (var area in checkpoint.AreaEffects ?? [])
             {
-                if (area?.Id == null || !hasArea(area))
+                var exists = area?.Id != null && hasArea(area);
+                if (!exists)
                 {
                     missing.Add($"missing-area:{area?.Id ?? "<null>"}");
+                }
+                else
+                {
+                    if (area.Position == null) missing.Add($"invalid-area:{area.Id}:position");
+                    if (area.UnitsInside == null) missing.Add($"invalid-area:{area.Id}:occupants");
                 }
                 if (area?.Id == null) { continue; }
                 foreach (var unitId in area.UnitsInside ?? [])

@@ -1344,6 +1344,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void UpdateUnitCombatState(UnitEntityData unit, NetworkUnitCombatState combatState)
         {
+            // Some scripted non-combat allies are included in the combat snapshot
+            // without a combat state. They have no engagement data to apply.
+            if (combatState == null || unit.CombatState == null) { return; }
             unit.CombatState.NotSurprised = combatState.NotSurprised;
         }
 
@@ -1607,6 +1610,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var engagedUnits = new Dictionary<string, UnitEntityData>();
             foreach (var (networkUnit, unit) in unitsToUpdate)
             {
+                if (unit?.CombatState == null || networkUnit.CombatState == null) { continue; }
                 AddUnitToEngagementReset([unit.UniqueId], engagedUnits);
                 AddUnitToEngagementReset(networkUnit.CombatState?.EngagedBy.Select(x => x.UnitId).ToList() ?? [], engagedUnits);
                 AddUnitToEngagementReset(networkUnit.CombatState?.EngagedUnits.Select(x => x.UnitId).ToList() ?? [], engagedUnits);
@@ -1614,6 +1618,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             foreach (var (_, unitToClear) in engagedUnits)
             {
+                if (unitToClear.CombatState == null) { continue; }
                 unitToClear.CombatState.m_EngagedBy.Clear();
                 unitToClear.CombatState.m_EngagedUnits.Clear();
                 unitToClear.CombatState.DisengageAttackTargets.Clear();
@@ -1621,12 +1626,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             foreach (var (networkUnit, unit) in unitsToUpdate)
             {
+                if (unit?.CombatState == null || networkUnit.CombatState == null) { continue; }
                 foreach (var engagement in networkUnit.CombatState.EngagedUnits)
                 {
                     var engageTarget = _gameStateLookupService.GetUnitEntity(engagement.UnitId);
-                    if (engageTarget == null)
+                    if (engageTarget?.CombatState == null)
                     {
-                        _logger.LogError("Unable to engage missing unit. UnitId={UnitId}, EngageTargetId={EngageTargetId}", unit.UniqueId, engagement.UnitId);
+                        _logger.LogError("Unable to engage missing unit or combat state. UnitId={UnitId}, EngageTargetId={EngageTargetId}", unit.UniqueId, engagement.UnitId);
                         continue;
                     }
 

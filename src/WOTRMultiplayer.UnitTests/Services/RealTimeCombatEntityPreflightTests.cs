@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Units;
@@ -14,8 +15,8 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             var checkpoint = new NetworkCombatState
             {
-                Units = [new NetworkUnit { Id = "summon" }],
-                AreaEffects = [new NetworkAreaEffect { Id = "cloud" }]
+                Units = [CompleteUnit("summon")],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", Position = new NetworkVector3() }]
             };
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
@@ -43,6 +44,12 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Units = [new NetworkUnit
                 {
                     Id = "hero",
+                    Position = new NetworkVector3(),
+                    Descriptor = new NetworkUnitDescriptor
+                    {
+                        State = new NetworkUnitState { Prone = new NetworkUnitProneState() }
+                    },
+                    BuffCollection = new NetworkUnitBuffCollection(),
                     CombatState = new NetworkUnitCombatState
                     {
                         EngagedUnits = [new NetworkUnitEngagement { UnitId = "missing-enemy" }]
@@ -51,6 +58,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 AreaEffects = [new NetworkAreaEffect
                 {
                     Id = "cloud",
+                    Position = new NetworkVector3(),
                     UnitsInside = ["missing-summon"]
                 }]
             };
@@ -65,12 +73,46 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             var checkpoint = new NetworkCombatState
             {
-                AreaEffects = [new NetworkAreaEffect { Id = "cloud", UnitsInside = ["missing", "missing"] }]
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", Position = new NetworkVector3(), UnitsInside = ["missing", "missing"] }]
             };
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
                 _ => false, area => area.Id == "cloud"),
                 Is.EqualTo("missing-area-unit:cloud:missing"));
         }
+
+        [Test]
+        public void IncompleteExistingEntities_AreRejectedBeforeCheckpointMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "hero" }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", UnitsInside = null }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                id => id == "hero", area => area.Id == "cloud"),
+                Is.EqualTo("invalid-area:cloud:occupants,invalid-area:cloud:position,invalid-unit:hero:buffs,invalid-unit:hero:position,invalid-unit:hero:state"));
+        }
+
+        [Test]
+        public void MissingTopLevelCollections_AreRejectedBeforeCheckpointMutation()
+        {
+            var checkpoint = new NetworkCombatState { Units = null, AreaEffects = null };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true), Is.EqualTo("invalid-combat:areas,invalid-combat:units"));
+        }
+
+        private static NetworkUnit CompleteUnit(string id) => new NetworkUnit
+        {
+            Id = id,
+            Position = new NetworkVector3(),
+            Descriptor = new NetworkUnitDescriptor
+            {
+                State = new NetworkUnitState { Prone = new NetworkUnitProneState() }
+            },
+            BuffCollection = new NetworkUnitBuffCollection()
+        };
     }
 }
