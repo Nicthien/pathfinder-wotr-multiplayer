@@ -49,6 +49,7 @@ Before applying any RTwP checkpoint, the client now verifies that every referenc
 
 The preflight also validates units referenced inside active areas and by combat engagements. A missing area occupant or engagement target is rejected before any unit, buff or area mutation, with a bounded cause such as `missing-area-unit:cloud:summon` or `missing-engagement-target:hero:enemy`.
 It rejects incomplete positional, health/state, buff and area payloads before mutation as well. Scripted allies without a combat-state component are allowed, and the checkpoint updater skips engagement changes for them instead of dereferencing a null component.
+Non-lethal damage is now projected from the game's character stats into each combat checkpoint and restored on the client. A missing stats payload is rejected by RTwP preflight before mutation; the legacy turn-based updater tolerates it. The moving fingerprint already covered this field, and a test now confirms that non-lethal damage changes the fingerprint. This is a code-level check, not an in-game validation of unconsciousness or recovery.
 
 The moving fingerprint now also contains a bounded ledger of the last 32 orders accepted by the host, including a digest of each move/attack/ability payload. The client records an order only after successfully executing the host's accepted message. This detects missing or altered command traffic; it is not yet a complete projection of all currently executing Unity commands.
 
