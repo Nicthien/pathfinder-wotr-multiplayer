@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
+using WOTRMultiplayer.Entities.Units;
 
 namespace WOTRMultiplayer.Services
 {
@@ -32,7 +33,7 @@ namespace WOTRMultiplayer.Services
                 else if (Hash(new NetworkCombatState { Units = [hostUnit] })
                     != Hash(new NetworkCombatState { Units = [clientUnit] }))
                 {
-                    differences.Add($"unit:{id}");
+                    differences.Add(DescribeUnitDifference(id, hostUnit, clientUnit));
                 }
             }
 
@@ -70,5 +71,30 @@ namespace WOTRMultiplayer.Services
 
         private static ulong Hash(NetworkCombatState state) =>
             RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
+
+        private static string DescribeUnitDifference(string id, NetworkUnit expected, NetworkUnit actual)
+        {
+            var causes = new List<string>();
+            var expectedProne = expected.Descriptor?.State?.Prone;
+            var actualProne = actual.Descriptor?.State?.Prone;
+            if ((expectedProne?.Active ?? false) != (actualProne?.Active ?? false)
+                || (expectedProne?.ShouldBeActive ?? false) != (actualProne?.ShouldBeActive ?? false))
+            {
+                causes.Add("prone");
+            }
+            if (!SameEngagements(expected.CombatState?.EngagedUnits, actual.CombatState?.EngagedUnits)
+                || !SameEngagements(expected.CombatState?.EngagedBy, actual.CombatState?.EngagedBy))
+            {
+                causes.Add("engagement");
+            }
+            return causes.Count == 0 ? $"unit:{id}" : $"unit:{id}:{string.Join("+", causes)}";
+        }
+
+        private static bool SameEngagements(IEnumerable<NetworkUnitEngagement> expected,
+            IEnumerable<NetworkUnitEngagement> actual)
+        {
+            return (expected ?? []).Select(x => x?.UnitId).OrderBy(x => x, StringComparer.Ordinal)
+                .SequenceEqual((actual ?? []).Select(x => x?.UnitId).OrderBy(x => x, StringComparer.Ordinal));
+        }
     }
 }

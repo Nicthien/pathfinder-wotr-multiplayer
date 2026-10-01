@@ -25,5 +25,29 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("unit:hero,missing-area:cloud"));
         }
+
+        [Test]
+        public void Summarize_IdentifiesProneAndEngagementMismatch()
+        {
+            var host = new NetworkCombatState
+            {
+                Units = [new NetworkUnit
+                {
+                    Id = "hero",
+                    Descriptor = new NetworkUnitDescriptor
+                    {
+                        State = new NetworkUnitState { Prone = new NetworkUnitProneState { Active = true } }
+                    },
+                    CombatState = new NetworkUnitCombatState
+                    {
+                        EngagedUnits = [new NetworkUnitEngagement { UnitId = "enemy" }]
+                    }
+                }]
+            };
+            var client = new NetworkCombatState { Units = [new NetworkUnit { Id = "hero" }] };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client),
+                Is.EqualTo("unit:hero:prone+engagement"));
+        }
     }
 }
