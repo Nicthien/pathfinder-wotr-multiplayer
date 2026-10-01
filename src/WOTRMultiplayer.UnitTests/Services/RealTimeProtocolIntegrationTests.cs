@@ -125,6 +125,72 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task Client_IgnoresRealTimeAuthorityMessagesFromNonHost()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            var epoch = client.Game.RealTimeCombat.Epoch;
+            var preferredMode = client.Game.RealTimeCombat.PreferredMode;
+            var preferenceSequence = client.Game.RealTimeCombat.PreferenceSequence;
+            const long forgedSender = 42;
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(clientNetwork)(forgedSender,
+                new NotifyRealTimeCombatSnapshot
+                {
+                    Epoch = epoch, Sequence = 1,
+                    State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(clientNetwork)(forgedSender,
+                new NotifyRealTimeCombatCommandAccepted
+                {
+                    Epoch = epoch, AuthoritativeSequence = 1, Kind = (int)RealTimeCommandKind.Move,
+                    Movement = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkUnitMoveTo
+                    {
+                        InitiatorUnitId = "guest-unit"
+                    }
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimePauseChanged>(clientNetwork)(forgedSender,
+                new NotifyRealTimePauseChanged
+                {
+                    Epoch = epoch, Sequence = 1, IsPaused = true,
+                    Policy = (int)PausePolicy.HostOnly, PausedPlayers = [forgedSender]
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatPreference>(clientNetwork)(forgedSender,
+                new NotifyRealTimeCombatPreference
+                {
+                    Sequence = client.Game.RealTimeCombat.PreferenceSequence + 1,
+                    PreferredMode = (int)CombatMode.RealTimeWithPause,
+                    PausePolicy = (int)PausePolicy.AnyoneFreeResume
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(clientNetwork)(forgedSender,
+                new NotifyRealTimeModeTransition
+                {
+                    Epoch = epoch + 1, Stage = (int)RealTimeModeTransitionStage.Prepare,
+                    Mode = (int)CombatMode.TurnBased
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(clientNetwork)(forgedSender,
+                new NotifyRealTimeRepair
+                {
+                    Epoch = epoch + 1, Stage = (int)RealTimeRepairStage.Prepare,
+                    Mode = (int)CombatMode.RealTimeWithPause
+                });
+
+            Assert.That(queued, Is.Empty);
+            Assert.That(client.Game.RealTimeCombat.Epoch, Is.EqualTo(epoch));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.PauseSequence, Is.Zero);
+            Assert.That(client.Game.RealTimeCombat.PreferredMode, Is.EqualTo(preferredMode));
+            Assert.That(client.Game.RealTimeCombat.PreferenceSequence, Is.EqualTo(preferenceSequence));
+            Assert.That(client.Game.RealTimeCombat.LastAuthoritativeSequence, Is.Zero);
+            A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
+                A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))
+                .MustNotHaveHappened();
+            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .MustHaveHappenedOnceExactly(); // Legitimate mode commit only.
+        }
+
+        [Test]
         public void Host_UnansweredSnapshot_AgesOutAsMissingApplicationReply()
         {
             var (host, _, _, _, queued, _) = CreatePair();

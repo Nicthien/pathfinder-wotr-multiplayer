@@ -1102,6 +1102,7 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyRealTimeCombatSnapshot(long receivedFrom, NotifyRealTimeCombatSnapshot message)
         {
+            if (receivedFrom != NetworkConstants.HostPlayerId || message == null) return;
             await _realTimeSnapshotGate.WaitAsync();
             try
             {
@@ -1169,6 +1170,7 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)
         {
+            if (receivedFrom != NetworkConstants.HostPlayerId || message == null) return;
             await _realTimeSnapshotGate.WaitAsync();
             try
             {
@@ -1219,7 +1221,7 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyRealTimePauseChanged(long receivedFrom, NotifyRealTimePauseChanged message)
         {
-            if (Game?.RealTimeCombat == null || message == null
+            if (receivedFrom != NetworkConstants.HostPlayerId || Game?.RealTimeCombat == null || message == null
                 || message.Epoch != Game.RealTimeCombat.Epoch
                 || message.Sequence <= Game.RealTimeCombat.PauseSequence
                 || message.IsPaused != (message.PausedPlayers?.Count > 0)
@@ -1240,7 +1242,7 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyRealTimeCombatPreference(long receivedFrom, NotifyRealTimeCombatPreference message)
         {
-            if (Game?.RealTimeCombat == null || message == null
+            if (receivedFrom != NetworkConstants.HostPlayerId || Game?.RealTimeCombat == null || message == null
                 || message.Sequence <= Game.RealTimeCombat.PreferenceSequence
                 || !Enum.IsDefined(typeof(CombatMode), message.PreferredMode)
                 || !Enum.IsDefined(typeof(PausePolicy), message.PausePolicy))
@@ -1255,6 +1257,7 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyRealTimeModeTransition(long receivedFrom, NotifyRealTimeModeTransition message)
         {
+            if (receivedFrom != NetworkConstants.HostPlayerId) return;
             await _realTimeSnapshotGate.WaitAsync();
             try
             {
@@ -1416,6 +1419,7 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyRealTimeRepair(long receivedFrom, NotifyRealTimeRepair message)
         {
+            if (receivedFrom != NetworkConstants.HostPlayerId) return;
             await _realTimeSnapshotGate.WaitAsync();
             try
             {
@@ -1565,6 +1569,11 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyAIActionExecuted(long receivedFrom, NotifyAIActionSelected message)
         {
+            if (Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
+                && receivedFrom != NetworkConstants.HostPlayerId)
+            {
+                return;
+            }
             if (Game.ArmyCombat != null)
             {
                 return;
