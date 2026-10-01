@@ -106,6 +106,66 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 unit.Remove<UnitPartNegativeLevels>();
                 return;
             }
+
+            var localLevels = unit.Get<UnitPartNegativeLevels>()?.m_LevelsData;
+            if (localLevels == null || localLevels.Count != negativeLevels.Count)
+            {
+                _logger.LogWarning("Negative levels cannot be repaired without matching game effects. UnitId={UnitId}, LocalCount={LocalCount}, HostCount={HostCount}",
+                    unit.UniqueId, localLevels?.Count ?? 0, negativeLevels.Count);
+                return;
+            }
+
+            var hostGroups = negativeLevels.GroupBy(level =>
+                (level.Count, level.EnergyDrainType, level.SavingThrowType))
+                .ToDictionary(group => group.Key, group => group.OrderBy(level => level.Duration).ToList());
+            var localGroups = localLevels.GroupBy(level =>
+                (level.Count, level.Type, level.SavingThrowType))
+                .ToDictionary(group => group.Key, group => group.OrderBy(level => level.EndTime).ToList());
+            if (hostGroups.Count != localGroups.Count || hostGroups.Any(group =>
+                    !localGroups.TryGetValue(group.Key, out var matches) || matches.Count != group.Value.Count))
+            {
+                _logger.LogWarning("Negative level types differ; timer-only repair refused. UnitId={UnitId}", unit.UniqueId);
+                return;
+            }
+
+            foreach (var group in hostGroups)
+            {
+                var matches = localGroups[group.Key];
+                for (var index = 0; index < group.Value.Count; index++)
+                {
+                    var duration = group.Value[index].Duration;
+                    var local = matches[index];
+                    if (duration.HasValue != local.EndTime.HasValue
+                        || duration.HasValue && (duration.Value <= TimeSpan.Zero
+                            || local.RelatedBuff == null || local.RelatedBuff.IsPermanent))
+                    {
+                        _logger.LogWarning("Negative level timer cannot be repaired without a matching active buff. UnitId={UnitId}, Count={Count}, DrainType={DrainType}",
+                            unit.UniqueId, local.Count, local.Type);
+                        return;
+                    }
+                }
+            }
+
+            var baseTime = BuffBaseTime;
+            foreach (var group in hostGroups)
+            {
+                var matches = localGroups[group.Key];
+                for (var index = 0; index < group.Value.Count; index++)
+                {
+                    var hostDuration = group.Value[index].Duration;
+                    var local = matches[index];
+                    if (!hostDuration.HasValue)
+                        continue;
+                    var localDuration = local.EndTime.Value - baseTime;
+                    if (Math.Abs((decimal)hostDuration.Value.Ticks - localDuration.Ticks)
+                        <= TimeSpan.FromSeconds(1).Ticks)
+                        continue;
+                    local.RelatedBuff.SetDuration(hostDuration.Value);
+                    local.EndTime = baseTime.SafeAdd(hostDuration.Value);
+                    _logger.LogInformation("Temporary negative level timer repaired. UnitId={UnitId}, Count={Count}, DrainType={DrainType}, PreviousDuration={PreviousDuration}, HostDuration={HostDuration}",
+                        unit.UniqueId, local.Count, local.Type, localDuration, hostDuration.Value);
+                }
+            }
         }
 
         private void CreateUnitBuffs(UnitEntityData unit, List<NetworkBuff> remoteUnitBuffs, TimeSpan buffBaseTime)
