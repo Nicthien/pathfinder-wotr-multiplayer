@@ -105,5 +105,32 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(task.IsFaulted, Is.True);
             Assert.That(task.Exception?.GetBaseException().Message, Is.EqualTo("missing-area:missing-area"));
         }
+
+        [Test]
+        public void TryApplyAndReadRealTimeCombatStateAsync_StaleQueuedCheckpointSkipsWorldMutation()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            Action queued = null;
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => queued = action);
+            var lookup = A.Fake<IGameStateLookupService>();
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var current = true;
+
+            var task = service.TryApplyAndReadRealTimeCombatStateAsync(
+                new NetworkCombatState { Units = [new NetworkUnit { Id = "old-unit" }] },
+                () => current);
+            Assert.That(queued, Is.Not.Null);
+            Assert.That(task.IsCompleted, Is.False);
+            current = false;
+            queued();
+
+            Assert.That(task.IsCompleted, Is.True);
+            Assert.That(task.IsFaulted, Is.False);
+            Assert.That(task.Result, Is.Null);
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
     }
 }

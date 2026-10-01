@@ -288,7 +288,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))
                 .MustNotHaveHappened();
-            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+            A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
+                A<NetworkCombatState>._, A<Func<bool>>._))
                 .MustHaveHappenedOnceExactly(); // Legitimate mode commit only.
         }
 
@@ -477,7 +478,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
             Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
             Assert.That(client.Game.RealTimeCombat.CanonicalStateHash, Is.EqualTo(settledHash));
-            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+            A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
+                A<NetworkCombatState>._, A<Func<bool>>._))
                 .MustHaveHappenedTwiceExactly(); // One checkpoint for each legitimate mode commit.
         }
 
@@ -512,7 +514,8 @@ namespace WOTRMultiplayer.UnitTests.Services
                 }
             });
 
-            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+            A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
+                A<NetworkCombatState>._, A<Func<bool>>._))
                 .MustHaveHappenedOnceExactly(); // Commit only; not the reordered moving snapshot.
             A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))
@@ -676,7 +679,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             await host.BeginRealTimeRepairAsync();
             Pump(queued, hostNetwork, clientNetwork);
 
-            Assert.That(calls, Is.EqualTo(2));
+            Assert.That(calls, Is.EqualTo(1)); // Verify samples once; Apply+read is one guarded dispatch.
+            A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
+                A<NetworkCombatState>._, A<Func<bool>>._)).MustHaveHappenedTwiceExactly();
             Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
             Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
             Assert.That(host.Game.RealTimeCombat.CanonicalStateHash, Is.EqualTo(client.Game.RealTimeCombat.CanonicalStateHash));
@@ -689,6 +694,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
             Pump(queued, hostNetwork, clientNetwork);
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(
+                Task.FromResult(new NetworkCombatState { Units = [new NetworkUnit { Id = "unrepairable-unit" }] }));
+            A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
+                A<NetworkCombatState>._, A<Func<bool>>._)).Returns(
                 Task.FromResult(new NetworkCombatState { Units = [new NetworkUnit { Id = "unrepairable-unit" }] }));
 
             await host.BeginRealTimeRepairAsync();
@@ -722,9 +730,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => hostCombat.ExecuteRealTimeCombatCommand(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._)).Returns(true);
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
-            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
-                .Returns(Task.CompletedTask);
-            A.CallTo(() => clientCombat.ApplyAndReadRealTimeCombatStateAsync(A<NetworkCombatState>._))
+            A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
+                    A<NetworkCombatState>._, A<Func<bool>>._))
                 .Returns(Task.FromResult(new NetworkCombatState()));
             A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))

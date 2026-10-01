@@ -1187,6 +1187,8 @@ namespace WOTRMultiplayer.Services
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null) return;
             await _realTimeSnapshotGate.WaitAsync();
+            NetworkGame session = null;
+            NetworkRealTimeCombatState combat = null;
             try
             {
                 if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause || message.State == null)
@@ -1194,28 +1196,35 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
-                var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
+                session = Game;
+                combat = session.RealTimeCombat;
+                var coordinator = new RealTimeCombatCoordinator(combat);
                 if (!coordinator.IsCurrent(message.Epoch, message.Sequence))
                 {
                     Logger.LogDebug("Ignoring stale real-time combat snapshot. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
                     return;
                 }
 
-                Game.RealTimeCombat.ResponseTimeMs = Math.Max(0, message.ResponseTimeMs);
-                Game.RealTimeCombat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
+                combat.ResponseTimeMs = Math.Max(0, message.ResponseTimeMs);
+                combat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
 
                 var state = Mapper.Map<NetworkCombatState>(message.State);
                 // Apply and sample inside one main-thread dispatch. A game tick between two
                 // separate dispatches makes a moving unit appear divergent even after correction.
-                var actual = await CombatInteraction.ApplyAndReadRealTimeCombatStateAsync(state);
+                var actual = await CombatInteraction.TryApplyAndReadRealTimeCombatStateAsync(state,
+                    () => IsCurrentRealTimeMessage(session, combat, message.Epoch)
+                        && coordinator.IsCurrent(message.Epoch, message.Sequence));
+                if (actual == null || !IsCurrentRealTimeMessage(session, combat, message.Epoch)
+                    || !coordinator.IsCurrent(message.Epoch, message.Sequence))
+                    return;
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
                 {
                     Combat = actual,
-                    ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(Game.RealTimeCombat).ToList()
+                    ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(combat).ToList()
                 });
                 var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(state, actual);
-                Game.RealTimeCombat.LastAuthoritativeSequence = message.Sequence;
-                Game.RealTimeCombat.CanonicalStateHash = message.CanonicalStateHash;
+                combat.LastAuthoritativeSequence = message.Sequence;
+                combat.CanonicalStateHash = message.CanonicalStateHash;
                 Send(new ClientRealTimeStateHash
                 {
                     Epoch = message.Epoch,
@@ -1229,6 +1238,9 @@ namespace WOTRMultiplayer.Services
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Real-time combat snapshot could not be applied. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+                if (session == null || combat == null
+                    || !IsCurrentRealTimeMessage(session, combat, message.Epoch))
+                    return;
                 var reason = $"{ex.GetType().Name}:{ex.Message}";
                 Send(new ClientRealTimeStateHash
                 {
@@ -1432,14 +1444,16 @@ namespace WOTRMultiplayer.Services
                     {
                         return;
                     }
-                    var actualHash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    var actualHash = await ApplyRealTimeModeSnapshotAsync(message.State,
+                        session, state, message.Epoch, CombatSynchronizationPhase.PreparingModeSwitch);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
-                        || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                        || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch
+                        || !actualHash.HasValue)
                         return;
                     if (actualHash != message.CanonicalStateHash)
                     {
                         Logger.LogWarning("Combat-mode commit checkpoint differs. Epoch={Epoch}, HostHash={HostHash}, ClientHash={ClientHash}", message.Epoch, message.CanonicalStateHash, actualHash);
-                        SendRealTimeModeAck(message, false, actualHash);
+                        SendRealTimeModeAck(message, false, actualHash.Value);
                         return;
                     }
                     await GameInteraction.SetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased);
@@ -1447,9 +1461,9 @@ namespace WOTRMultiplayer.Services
                         || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
                         return;
                     state.Mode = mode;
-                    state.CanonicalStateHash = actualHash;
+                    state.CanonicalStateHash = actualHash.Value;
                     state.Phase = CombatSynchronizationPhase.Synchronizing;
-                    SendRealTimeModeAck(message, true, actualHash);
+                    SendRealTimeModeAck(message, true, actualHash.Value);
                     return;
                 }
 
@@ -1464,9 +1478,11 @@ namespace WOTRMultiplayer.Services
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.Repairing)
                         return;
-                    var actualHash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    var actualHash = await ApplyRealTimeModeSnapshotAsync(message.State,
+                        session, state, message.Epoch, CombatSynchronizationPhase.Repairing);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
-                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        || state.Phase != CombatSynchronizationPhase.Repairing
+                        || !actualHash.HasValue)
                         return;
                     await GameInteraction.SetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
@@ -1476,7 +1492,7 @@ namespace WOTRMultiplayer.Services
                     state.PendingMode = null;
                     state.PreviousMode = null;
                     state.CanonicalStateHash = message.CanonicalStateHash;
-                    SendRealTimeModeAck(message, actualHash == message.CanonicalStateHash, actualHash);
+                    SendRealTimeModeAck(message, actualHash == message.CanonicalStateHash, actualHash.Value);
                     return;
                 }
 
@@ -1522,11 +1538,16 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async Task<ulong> ApplyRealTimeModeSnapshotAsync(Networking.Messages.Contracts.NetworkCombatState snapshot)
+        private async Task<ulong?> ApplyRealTimeModeSnapshotAsync(
+            Networking.Messages.Contracts.NetworkCombatState snapshot,
+            NetworkGame session, NetworkRealTimeCombatState state, long epoch,
+            CombatSynchronizationPhase phase)
         {
             var expected = Mapper.Map<NetworkCombatState>(snapshot);
-            await CombatInteraction.UpdateRealTimeCombatStateAsync(expected);
-            var appliedState = await CombatInteraction.GetRealTimeCombatStateAsync();
+            var appliedState = await CombatInteraction.TryApplyAndReadRealTimeCombatStateAsync(expected,
+                () => IsCurrentRealTimeMessage(session, state, epoch) && state.Phase == phase);
+            if (appliedState == null)
+                return null;
             var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(expected, appliedState);
             if (temporalMismatch != null)
                 throw new InvalidOperationException($"Temporal combat checkpoint differs: {temporalMismatch}");
@@ -1635,12 +1656,14 @@ namespace WOTRMultiplayer.Services
                 if (stage == RealTimeRepairStage.Apply
                     && state.Phase == CombatSynchronizationPhase.Repairing && message.State != null)
                 {
-                    var hash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    var hash = await ApplyRealTimeModeSnapshotAsync(message.State,
+                        session, state, message.Epoch, CombatSynchronizationPhase.Repairing);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
-                        || state.Phase != CombatSynchronizationPhase.Repairing)
+                        || state.Phase != CombatSynchronizationPhase.Repairing
+                        || !hash.HasValue)
                         return;
                     state.CanonicalStateHash = message.CanonicalStateHash;
-                    SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash);
+                    SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash.Value);
                     return;
                 }
                 if (stage == RealTimeRepairStage.Fallback
@@ -1649,16 +1672,18 @@ namespace WOTRMultiplayer.Services
                     && message.State != null)
                 {
                     state.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
-                    var hash = await ApplyRealTimeModeSnapshotAsync(message.State);
+                    var hash = await ApplyRealTimeModeSnapshotAsync(message.State,
+                        session, state, message.Epoch, CombatSynchronizationPhase.FallingBackToTurnBased);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
-                        || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased)
+                        || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased
+                        || !hash.HasValue)
                         return;
                     await GameInteraction.SetTurnBasedCombatModeAsync(true);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased)
                         return;
                     state.CanonicalStateHash = message.CanonicalStateHash;
-                    SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash);
+                    SendRealTimeRepairAck(message, hash == message.CanonicalStateHash, hash.Value);
                     return;
                 }
                 if (stage == RealTimeRepairStage.Resume

@@ -366,11 +366,24 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task<NetworkCombatState> ApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
         {
+            return TryApplyAndReadRealTimeCombatStateAsync(networkCombatState, () => true);
+        }
+
+        public Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
+            NetworkCombatState networkCombatState, Func<bool> canApply)
+        {
+            if (canApply == null)
+                throw new ArgumentNullException(nameof(canApply));
             var completion = new TaskCompletionSource<NetworkCombatState>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try
                 {
+                    if (!canApply())
+                    {
+                        completion.TrySetResult(null);
+                        return;
+                    }
                     ApplyRealTimeCombatState(networkCombatState);
                     completion.TrySetResult(GetRealTimeCombatState());
                 }
