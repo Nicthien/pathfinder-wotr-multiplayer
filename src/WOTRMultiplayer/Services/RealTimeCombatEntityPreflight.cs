@@ -32,6 +32,7 @@ namespace WOTRMultiplayer.Services
                 {
                     if (unit.Position == null) missing.Add($"invalid-unit:{unit.Id}:position");
                     if (unit.Descriptor?.State?.Prone == null) missing.Add($"invalid-unit:{unit.Id}:state");
+                    if (unit.Descriptor?.Stats == null) missing.Add($"invalid-unit:{unit.Id}:stats");
                     if (unit.BuffCollection?.Buffs == null || unit.BuffCollection.NegativeLevels == null)
                         missing.Add($"invalid-unit:{unit.Id}:buffs");
                 }

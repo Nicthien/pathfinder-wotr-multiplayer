@@ -42,6 +42,19 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void NonLethalDamageDivergence_ChangesHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var unconscious = Sample();
+            unconscious.Combat.Units[0].Descriptor.Stats = new NetworkCharacterStats
+            {
+                DamageNonLethal = 7
+            };
+
+            Assert.That(RealTimeCombatHasher.Compute(unconscious), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
         public void AreaAndActiveOrderDivergence_ChangeHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

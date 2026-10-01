@@ -1241,6 +1241,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 Damage = combatUnit.Descriptor.Damage,
                 Stats = new NetworkCharacterStats
                 {
+                    DamageNonLethal = combatUnit.Descriptor.Stats.DamageNonLethal.BaseValue,
                 },
                 State = new NetworkUnitState
                 {
@@ -1408,6 +1409,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private void UpdateUnitHealth(UnitEntityData unit, NetworkUnit networkUnit)
         {
             unit.Damage = networkUnit.Descriptor.Damage;
+            if (networkUnit.Descriptor.Stats != null &&
+                unit.Descriptor.Stats.DamageNonLethal.BaseValue != networkUnit.Descriptor.Stats.DamageNonLethal)
+            {
+                unit.Descriptor.Stats.DamageNonLethal.BaseValue = networkUnit.Descriptor.Stats.DamageNonLethal;
+            }
         }
 
         private void RunUnitMoveToCommand(UnitEntityData executorUnit, NetworkUnitMoveTo networkUnitMoveTo)

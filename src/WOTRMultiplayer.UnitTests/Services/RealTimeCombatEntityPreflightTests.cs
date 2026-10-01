@@ -47,6 +47,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Position = new NetworkVector3(),
                     Descriptor = new NetworkUnitDescriptor
                     {
+                        Stats = new NetworkCharacterStats(),
                         State = new NetworkUnitState { Prone = new NetworkUnitProneState() }
                     },
                     BuffCollection = new NetworkUnitBuffCollection(),
@@ -92,7 +93,7 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
                 id => id == "hero", area => area.Id == "cloud"),
-                Is.EqualTo("invalid-area:cloud:occupants,invalid-area:cloud:position,invalid-unit:hero:buffs,invalid-unit:hero:position,invalid-unit:hero:state"));
+                Is.EqualTo("invalid-area:cloud:occupants,invalid-area:cloud:position,invalid-unit:hero:buffs,invalid-unit:hero:position,invalid-unit:hero:state,invalid-unit:hero:stats"));
         }
 
         [Test]
@@ -110,6 +111,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             Position = new NetworkVector3(),
             Descriptor = new NetworkUnitDescriptor
             {
+                Stats = new NetworkCharacterStats(),
                 State = new NetworkUnitState { Prone = new NetworkUnitProneState() }
             },
             BuffCollection = new NetworkUnitBuffCollection()
