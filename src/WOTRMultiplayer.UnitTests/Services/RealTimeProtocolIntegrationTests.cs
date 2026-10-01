@@ -716,6 +716,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => hostGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
+            A.CallTo(() => hostCombat.GetRealTimeCombatStateAsync())
+                .Returns(Task.FromResult(new NetworkCombatState()));
             A.CallTo(() => hostCombat.ExecuteRealTimeCombatCommand(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._)).Returns(true);
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));

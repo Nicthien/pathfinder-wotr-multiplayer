@@ -122,6 +122,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             _globalMapInteractionService = A.Fake<IGlobalMapInteractionService>();
             _pingInteractionService = A.Fake<IPingInteractionService>();
             _combatInteractionService = A.Fake<ICombatInteractionService>();
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync())
+                .Returns(Task.FromResult(new NetworkCombatState()));
             _multiplayerSettingsProvider = A.Fake<IMultiplayerSettingsService>();
             _fileSystemService = A.Fake<IFileSystemService>();
             _hashService = A.Fake<IHashService>();
@@ -360,6 +362,10 @@ namespace WOTRMultiplayer.UnitTests.Services
             });
 
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Synchronizing));
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync())
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatState())
+                .MustNotHaveHappened();
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x => x.Stage == (int)RealTimeModeTransitionStage.Complete)))
                 .MustNotHaveHappened();
             handler.Invoke(42, new ClientRealTimeModeTransitionAck
@@ -444,6 +450,28 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustNotHaveHappened();
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Resume)))
                 .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public async Task RealTimeRepair_VerificationWaitsForMainThreadStateSample()
+        {
+            PrepareRealTimeRepairTest();
+            var pending = new TaskCompletionSource<NetworkCombatState>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var verified = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(pending.Task);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Verify)))
+                .Invokes(_ => verified.TrySetResult(true));
+
+            await _multiplayerHost.BeginRealTimeRepairAsync();
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(_networkServer);
+            handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Prepare, 0));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Verify))).MustNotHaveHappened();
+
+            pending.SetResult(new NetworkCombatState());
+            Assert.That(await Task.WhenAny(verified.Task, Task.Delay(1000)), Is.SameAs(verified.Task));
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatState()).MustNotHaveHappened();
         }
 
         [Test]
