@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System;
 using Kingmaker.GameModes;
 using Kingmaker.Items.Slots;
 using WOTRMultiplayer.Abstractions.Random;
@@ -36,6 +37,8 @@ namespace WOTRMultiplayer.Abstractions
         IUIFactory UIFactory { get; }
 
         IValueGenerator ValueGenerator { get; }
+
+        int ResolveRealTimeDiceRoll(string key, Func<int> localRoll);
 
         void Initialize();
 

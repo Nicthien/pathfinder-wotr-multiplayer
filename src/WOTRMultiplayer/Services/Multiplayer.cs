@@ -106,6 +106,17 @@ namespace WOTRMultiplayer.Services
         public bool IsSavingBlockedByCombatSync => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsSavingBlockedByCombatSync)
             || _multiplayerActorAccessor.Client.IsSavingBlockedByCombatSync;
 
+        public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
+        {
+            if (_multiplayerActorAccessor.Host.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Host.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Host.ResolveRealTimeDiceRoll(key, localRoll);
+            if (_multiplayerActorAccessor.Client.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Client.ResolveRealTimeDiceRoll(key, localRoll);
+            return localRoll();
+        }
+
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
             return _multiplayerActorAccessor.Client.SubmitRealTimeCombatCommand(kind, movement, attack, ability);

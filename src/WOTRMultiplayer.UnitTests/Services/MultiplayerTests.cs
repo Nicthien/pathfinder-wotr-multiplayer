@@ -1,4 +1,5 @@
 ﻿using FakeItEasy;
+using System;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using WOTRMultiplayer.Abstractions;
@@ -124,6 +125,36 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             // Assert
             A.CallTo(() => _multiplayerClient.Reset()).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void RealTimeDiceRoll_UsesLocalCalculationOutsideRealTimeOrDuringBarrier()
+        {
+            A.CallTo(() => _multiplerActorAccessor.Host).Returns(_multiplayerHost);
+            A.CallTo(() => _multiplerActorAccessor.Client).Returns(_multiplayerClient);
+            var calculations = 0;
+            Assert.That(_multiplayer.ResolveRealTimeDiceRoll("rule", () => { calculations++; return 5; }), Is.EqualTo(5));
+
+            A.CallTo(() => _multiplayerHost.IsRealTimeCombatActive).Returns(true);
+            A.CallTo(() => _multiplayerHost.IsRealTimeCombatBarrierActive).Returns(true);
+            Assert.That(_multiplayer.ResolveRealTimeDiceRoll("rule", () => { calculations++; return 6; }), Is.EqualTo(6));
+            Assert.That(calculations, Is.EqualTo(2));
+            A.CallTo(() => _multiplayerHost.ResolveRealTimeDiceRoll(A<string>._, A<Func<int>>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void RealTimeDiceRoll_RoutesToActiveHostOrClient()
+        {
+            A.CallTo(() => _multiplerActorAccessor.Host).Returns(_multiplayerHost);
+            A.CallTo(() => _multiplerActorAccessor.Client).Returns(_multiplayerClient);
+            A.CallTo(() => _multiplayerHost.IsRealTimeCombatActive).Returns(true);
+            A.CallTo(() => _multiplayerHost.ResolveRealTimeDiceRoll("rule", A<Func<int>>._)).Returns(17);
+            Assert.That(_multiplayer.ResolveRealTimeDiceRoll("rule", () => 5), Is.EqualTo(17));
+
+            A.CallTo(() => _multiplayerHost.IsRealTimeCombatActive).Returns(false);
+            A.CallTo(() => _multiplayerClient.IsRealTimeCombatActive).Returns(true);
+            A.CallTo(() => _multiplayerClient.ResolveRealTimeDiceRoll("rule", A<Func<int>>._)).Returns(19);
+            Assert.That(_multiplayer.ResolveRealTimeDiceRoll("rule", () => 5), Is.EqualTo(19));
         }
     }
 }

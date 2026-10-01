@@ -55,8 +55,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 var abilityName = context.SourceAbility?.NameForAcronym;
                 var itemName = context.SourceItem?.NameForAcronym;
                 var identifier = $"{nameof(ContextValueHelper)}:{nameof(RollDice)}:{context.NameForAcronym}:{unitId}:{targetUnitId}:{context.SourceAbility?.AssetGuid.ToString()}:{abilityName}:{itemName}:{ruleRollDice.DiceFormula.Rolls}:{ruleRollDice.DiceFormula.Dice}_{seededContext.Id}";
-                var random = Main.Multiplayer.ValueGenerator.GetRandom(seededContext.Lifetime, identifier);
-                var result = ruleRollDice.DiceFormula.Roll(random);
+                var key = $"context-value:{identifier}:{ruleRollDice.DiceFormula.Rolls}:{(int)ruleRollDice.DiceFormula.Dice}";
+                var result = Main.Multiplayer.ResolveRealTimeDiceRoll(key, () =>
+                    ruleRollDice.DiceFormula.Roll(Main.Multiplayer.ValueGenerator.GetRandom(seededContext.Lifetime, identifier)));
                 Main.GetLogger<ContextValueHelperPatches>().LogInformation("Ability/Item random value has been rolled. Name={Name}, Result={Result}, UnitId={UnitId}, TargetUnitId={TargetUnitId}, AbilityName={AbilityName}, ItemName={ItemName}, DiceRolls={DiceRolls}, Dice={Dice}, IdentifierLifetime={IdentifierLifetime}, Identifier={Identifier}",
                     context.NameForAcronym, result, unitId, targetUnitId, abilityName, itemName, ruleRollDice.DiceFormula.Rolls, ruleRollDice.DiceFormula.Dice, seededContext.Lifetime, identifier);
                 return result;

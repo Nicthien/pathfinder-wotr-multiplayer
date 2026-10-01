@@ -49,7 +49,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             {
                 var seededContext = Main.Multiplayer.GetSeededContext();
                 var identifier = $"{image.Source.Owner.Unit.UniqueId}:{nameof(UnitPartMirrorImage)}.{nameof(UnitPartMirrorImage.TryAbsorbHit)}_{seededContext.Id}";
-                int absorbedCount = Main.Multiplayer.ValueGenerator.Range(seededContext.Lifetime, identifier, minRange, maxRange);
+                var key = $"mirror-image:{identifier}:{minRange}:{maxRange}";
+                int absorbedCount = Main.Multiplayer.ResolveRealTimeDiceRoll(key, () =>
+                    Main.Multiplayer.ValueGenerator.Range(seededContext.Lifetime, identifier, minRange, maxRange));
                 Main.GetLogger<UnitPartMirrorImagePatches>().LogInformation("Mirror image absorbtion count has been generated. Id={Id}, Count={Count}, MinRange={MinRange}, MaxRange={MaxRange}", identifier, absorbedCount, minRange, maxRange);
 
                 return absorbedCount;
