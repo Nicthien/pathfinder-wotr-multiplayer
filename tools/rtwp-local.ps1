@@ -14,8 +14,11 @@ $repoPath = Split-Path -Parent $PSScriptRoot
 $modsPath = Join-Path $GamePath 'Mods'
 $stablePath = Join-Path $modsPath '00_WOTRMultiplayer'
 $experimentalPath = Join-Path $modsPath '00_WOTRMultiplayerRTwP'
-$disabledStablePath = Join-Path $modsPath '00_WOTRMultiplayer.disabled'
-$disabledExperimentalPath = Join-Path $modsPath '00_WOTRMultiplayerRTwP.disabled'
+$slotRoot = Join-Path $repoPath 'local-artifacts\mod-slots'
+$disabledStablePath = Join-Path $slotRoot '00_WOTRMultiplayer'
+$disabledExperimentalPath = Join-Path $slotRoot '00_WOTRMultiplayerRTwP'
+$legacyDisabledStablePath = Join-Path $modsPath '00_WOTRMultiplayer.disabled'
+$legacyDisabledExperimentalPath = Join-Path $modsPath '00_WOTRMultiplayerRTwP.disabled'
 $buildPath = Join-Path $repoPath 'src\WOTRMultiplayer\bin\Release\net481'
 $backupRoot = Join-Path $repoPath 'local-artifacts\backups'
 $runtimeReadyPath = Join-Path $repoPath 'local-artifacts\RTWP_RUNTIME_VALIDATED.json'
@@ -51,10 +54,33 @@ function Assert-GameInstallation {
 
 function Assert-SafeModPath([string]$path) {
     $resolvedModsPath = [IO.Path]::GetFullPath($modsPath).TrimEnd('\')
+    $resolvedSlotRoot = [IO.Path]::GetFullPath($slotRoot).TrimEnd('\')
     $resolvedPath = [IO.Path]::GetFullPath($path)
     $parent = Split-Path -Parent $resolvedPath
-    if (-not [string]::Equals($parent, $resolvedModsPath, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Chemin de mod hors du dossier prévu : $resolvedPath"
+    if (-not ([string]::Equals($parent, $resolvedModsPath, [StringComparison]::OrdinalIgnoreCase) -or
+            [string]::Equals($parent, $resolvedSlotRoot, [StringComparison]::OrdinalIgnoreCase))) {
+        throw "Chemin de mod hors des dossiers prévus : $resolvedPath"
+    }
+}
+
+function Move-LegacyDisabledSlots {
+    Assert-GameStopped
+    $legacySlots = @(
+        @{ Legacy = $legacyDisabledStablePath; Destination = $disabledStablePath },
+        @{ Legacy = $legacyDisabledExperimentalPath; Destination = $disabledExperimentalPath }
+    )
+    foreach ($slot in $legacySlots) {
+        if (-not (Test-Path -LiteralPath $slot.Legacy)) { continue }
+        Assert-SafeModPath $slot.Legacy
+        Assert-SafeModPath $slot.Destination
+        if (Test-Path -LiteralPath $slot.Destination) {
+            throw "Migration refusée : l'ancien et le nouveau dossier du mod existent : $($slot.Legacy), $($slot.Destination)"
+        }
+    }
+    foreach ($slot in $legacySlots) {
+        if (-not (Test-Path -LiteralPath $slot.Legacy)) { continue }
+        New-Item -ItemType Directory -Path $slotRoot -Force | Out-Null
+        Move-Item -LiteralPath $slot.Legacy -Destination $slot.Destination
     }
 }
 
@@ -73,12 +99,17 @@ function Show-Status {
         [pscustomobject]@{ Slot = 'Experimental'; Path = $experimentalPath; Enabled = Test-Path -LiteralPath $experimentalPath; Info = Get-ModInfo $experimentalPath }
         [pscustomobject]@{ Slot = 'Stable disabled'; Path = $disabledStablePath; Enabled = $false; Info = Get-ModInfo $disabledStablePath }
         [pscustomobject]@{ Slot = 'Experimental disabled'; Path = $disabledExperimentalPath; Enabled = $false; Info = Get-ModInfo $disabledExperimentalPath }
+        [pscustomobject]@{ Slot = 'Stable legacy (UMM loads this!)'; Path = $legacyDisabledStablePath; Enabled = $true; Info = Get-ModInfo $legacyDisabledStablePath }
+        [pscustomobject]@{ Slot = 'Experimental legacy (UMM loads this!)'; Path = $legacyDisabledExperimentalPath; Enabled = $true; Info = Get-ModInfo $legacyDisabledExperimentalPath }
     )
 
     $entries | Where-Object { $_.Info } | Select-Object Slot, Enabled, Path, @{Name='Id';Expression={$_.Info.id}}, @{Name='Version';Expression={$_.Info.version}}
 
     if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $experimentalPath)) {
         throw 'Les variantes stable et expérimentale sont actives simultanément. Corrigez avec EnableStable ou EnableExperimental.'
+    }
+    if ((Test-Path -LiteralPath $legacyDisabledStablePath) -or (Test-Path -LiteralPath $legacyDisabledExperimentalPath)) {
+        throw 'Un dossier .disabled reste dans Mods et sera quand même chargé par Unity Mod Manager. Fermez le jeu puis activez un des deux modes pour le migrer.'
     }
 }
 
@@ -107,6 +138,7 @@ function Install-Experimental([bool]$testOnly) {
     }
     Assert-GameStopped
     Assert-GameInstallation
+    Move-LegacyDisabledSlots
     if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $experimentalPath)) {
         throw 'Installation refusée : les variantes stable et expérimentale sont déjà actives simultanément.'
     }
@@ -132,6 +164,7 @@ function Install-Experimental([bool]$testOnly) {
 function Enable-Stable {
     Assert-GameStopped
     Assert-GameInstallation
+    Move-LegacyDisabledSlots
     Assert-SafeModPath $stablePath
     Assert-SafeModPath $experimentalPath
     Assert-SafeModPath $disabledStablePath
@@ -162,6 +195,7 @@ function Enable-Experimental([bool]$testOnly) {
     }
     Assert-GameStopped
     Assert-GameInstallation
+    Move-LegacyDisabledSlots
     Assert-SafeModPath $stablePath
     Assert-SafeModPath $experimentalPath
     Assert-SafeModPath $disabledStablePath

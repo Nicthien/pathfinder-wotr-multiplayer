@@ -156,16 +156,16 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPatch(typeof(UnitCommands), nameof(UnitCommands.Run), [typeof(UnitCommand)])]
         [HarmonyPrefix]
-        public static bool UnitCommands_Run_Prefix(UnitCommand command)
+        public static bool UnitCommands_Run_Prefix(UnitCommand __0)
         {
-            return InterceptRealTimePlayerCommand(command);
+            return InterceptRealTimePlayerCommand(__0);
         }
 
         [HarmonyPatch(typeof(UnitCommands), nameof(UnitCommands.Run), [typeof(UnitCommand), typeof(bool), typeof(bool)])]
         [HarmonyPrefix]
-        public static bool UnitCommands_RunWithFlags_Prefix(UnitCommand command)
+        public static bool UnitCommands_RunWithFlags_Prefix(UnitCommand __0)
         {
-            return InterceptRealTimePlayerCommand(command);
+            return InterceptRealTimePlayerCommand(__0);
         }
 
         private static bool InterceptRealTimePlayerCommand(UnitCommand command)
