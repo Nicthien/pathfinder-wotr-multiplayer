@@ -147,6 +147,30 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_SpawnedUnitIdIgnoresForgedPeerAndUsesHost()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            var key = "unit:summoned-wolf:caster:position";
+            Assert.That(host.ResolveRealTimeEntityId(key, () => "host-wolf-id"), Is.EqualTo("host-wolf-id"));
+            var published = (NotifyRealTimeEntityId)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeEntityId>(clientNetwork)(42,
+                new NotifyRealTimeEntityId
+                {
+                    Epoch = published.Epoch, Key = key, Sequence = published.Sequence,
+                    EntityId = "forged-wolf-id"
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeEntityId>(clientNetwork)
+                (NetworkConstants.HostPlayerId, published);
+
+            Assert.That(client.ResolveRealTimeEntityId(key, () => "client-wolf-id"),
+                Is.EqualTo("host-wolf-id"));
+            Assert.That(queued, Is.Empty);
+        }
+
+        [Test]
         public async Task TwoActors_MissingHostAreaId_UsesProtectedFallback()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
