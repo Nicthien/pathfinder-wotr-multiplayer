@@ -26,5 +26,9 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(5)]
         [LogMe]
         public bool Applied { get; set; }
+
+        [ProtoMember(6)]
+        [LogMe]
+        public bool TemporalMismatch { get; set; }
     }
 }

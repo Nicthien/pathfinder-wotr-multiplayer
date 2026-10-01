@@ -29,7 +29,7 @@ function Assert-RuntimeReady {
     }
 
     $validation = Get-Content -LiteralPath $runtimeReadyPath -Raw | ConvertFrom-Json
-    if ($validation.protocolVersion -ne 24 -or $validation.twoInstanceCombatVerified -ne $true) {
+    if ($validation.protocolVersion -ne 25 -or $validation.twoInstanceCombatVerified -ne $true) {
         throw 'Validation RTwP absente ou incompatible : installation refusée.'
     }
 }

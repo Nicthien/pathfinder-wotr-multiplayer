@@ -2454,7 +2454,8 @@ namespace WOTRMultiplayer.Services
                 Epoch = Game.RealTimeCombat.Epoch,
                 Stage = (int)RealTimeRepairStage.Verify,
                 Mode = (int)CombatMode.RealTimeWithPause,
-                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
+                State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
             };
             Send(_lastRealTimeRepairMessage);
             if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
@@ -2677,7 +2678,11 @@ namespace WOTRMultiplayer.Services
                     }
                     else if (_realTimeRepairStage == RealTimeRepairStage.Verify)
                     {
-                        _realTimeRepairHasMismatch |= message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash;
+                        _realTimeRepairHasMismatch |= message.CanonicalStateHash != Game.RealTimeCombat.CanonicalStateHash
+                            || message.TemporalMismatch;
+                        if (message.TemporalMismatch)
+                            Logger.LogWarning("Peer reports temporal combat divergence. PlayerId={PlayerId}, Epoch={Epoch}",
+                                receivedFrom, message.Epoch);
                         Game.RealTimeCombat.ReadyPlayers.Add(receivedFrom);
                         if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
                         {

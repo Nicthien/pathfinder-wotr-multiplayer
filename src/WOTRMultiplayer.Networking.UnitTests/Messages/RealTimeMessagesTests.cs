@@ -234,13 +234,15 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 Stage = (int)RealTimeRepairStage.Apply,
                 PlayerId = 42,
                 CanonicalStateHash = 77UL,
-                Applied = true
+                Applied = true,
+                TemporalMismatch = true
             });
 
             Assert.That(instruction.State.Units[0].Id, Is.EqualTo("unit-a"));
             Assert.That(instruction.CanonicalStateHash, Is.EqualTo(77UL));
             Assert.That(ack.PlayerId, Is.EqualTo(42));
             Assert.That(ack.Applied, Is.True);
+            Assert.That(ack.TemporalMismatch, Is.True);
         }
     }
 }

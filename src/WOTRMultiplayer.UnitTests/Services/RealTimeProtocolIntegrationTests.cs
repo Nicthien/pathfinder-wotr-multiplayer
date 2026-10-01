@@ -502,6 +502,37 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_TemporalMismatchDuringVerify_RequestsFullApplyEvenWhenHashMatches()
+        {
+            var (host, _, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            await host.BeginRealTimeRepairAsync();
+            var prepare = (NotifyRealTimeRepair)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(clientNetwork)
+                (NetworkConstants.HostPlayerId, prepare);
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(hostNetwork)
+                (42, (ClientRealTimeRepairAck)queued.Dequeue());
+            var verify = (NotifyRealTimeRepair)queued.Dequeue();
+            Assert.That(verify.Stage, Is.EqualTo((int)RealTimeRepairStage.Verify));
+            Assert.That(verify.State, Is.Not.Null);
+
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(hostNetwork)(42,
+                new ClientRealTimeRepairAck
+                {
+                    Epoch = verify.Epoch, Stage = verify.Stage, PlayerId = 42,
+                    CanonicalStateHash = verify.CanonicalStateHash,
+                    Applied = true, TemporalMismatch = true
+                });
+
+            Assert.That(((NotifyRealTimeRepair)queued.Peek()).Stage,
+                Is.EqualTo((int)RealTimeRepairStage.Apply));
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+        }
+
+        [Test]
         public async Task TwoActors_LostAndDuplicateRepairResume_HostWaitsForAcknowledgement()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();

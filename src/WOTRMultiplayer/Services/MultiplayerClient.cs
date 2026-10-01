@@ -1129,6 +1129,7 @@ namespace WOTRMultiplayer.Services
                     Combat = actual,
                     ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(Game.RealTimeCombat).ToList()
                 });
+                var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(state, actual);
                 Game.RealTimeCombat.LastAuthoritativeSequence = message.Sequence;
                 Game.RealTimeCombat.CanonicalStateHash = message.CanonicalStateHash;
                 Send(new ClientRealTimeStateHash
@@ -1136,8 +1137,9 @@ namespace WOTRMultiplayer.Services
                     Epoch = message.Epoch,
                     Sequence = message.Sequence,
                     CanonicalStateHash = hash,
-                    Applied = true,
-                    FailureReason = hash == message.CanonicalStateHash ? null : RealTimeCombatDiff.Summarize(state, actual)
+                    Applied = temporalMismatch == null,
+                    FailureReason = temporalMismatch ??
+                        (hash == message.CanonicalStateHash ? null : RealTimeCombatDiff.Summarize(state, actual))
                 });
             }
             catch (Exception ex)
@@ -1400,8 +1402,12 @@ namespace WOTRMultiplayer.Services
 
         private async Task<ulong> ApplyRealTimeModeSnapshotAsync(Networking.Messages.Contracts.NetworkCombatState snapshot)
         {
-            await CombatInteraction.UpdateRealTimeCombatStateAsync(Mapper.Map<NetworkCombatState>(snapshot));
+            var expected = Mapper.Map<NetworkCombatState>(snapshot);
+            await CombatInteraction.UpdateRealTimeCombatStateAsync(expected);
             var appliedState = await CombatInteraction.GetRealTimeCombatStateAsync();
+            var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(expected, appliedState);
+            if (temporalMismatch != null)
+                throw new InvalidOperationException($"Temporal combat checkpoint differs: {temporalMismatch}");
             return RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = appliedState });
         }
 
@@ -1477,7 +1483,13 @@ namespace WOTRMultiplayer.Services
                 {
                     var local = await CombatInteraction.GetRealTimeCombatStateAsync();
                     var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = local });
-                    SendRealTimeRepairAck(message, true, hash);
+                    var expected = message.State == null ? null : Mapper.Map<NetworkCombatState>(message.State);
+                    var temporalMismatch = expected == null ? "missing-verify-checkpoint"
+                        : RealTimeCombatTemporalDiff.Summarize(expected, local);
+                    if (temporalMismatch != null)
+                        Logger.LogWarning("Temporal combat verification differs. Epoch={Epoch}, Reason={Reason}",
+                            message.Epoch, temporalMismatch);
+                    SendRealTimeRepairAck(message, true, hash, temporalMismatch != null);
                     return;
                 }
                 if (stage == RealTimeRepairStage.Apply
@@ -1533,7 +1545,8 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private void SendRealTimeRepairAck(NotifyRealTimeRepair message, bool applied, ulong hash)
+        private void SendRealTimeRepairAck(NotifyRealTimeRepair message, bool applied, ulong hash,
+            bool temporalMismatch = false)
         {
             Send(new ClientRealTimeRepairAck
             {
@@ -1541,7 +1554,8 @@ namespace WOTRMultiplayer.Services
                 Stage = message.Stage,
                 PlayerId = Game.LocalPlayerId,
                 CanonicalStateHash = hash,
-                Applied = applied
+                Applied = applied,
+                TemporalMismatch = temporalMismatch
             });
         }
 
