@@ -29,5 +29,31 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(task.IsCompleted, Is.True);
         }
+
+        [Test]
+        public void CombatModeChange_StaleQueuedRequestIsRejectedOnGameThread()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            Action queued = null;
+            A.CallTo(() => mainThread.Post(A<Action>._))
+                .Invokes((Action action) => queued = action);
+            var service = new GameInteractionService(
+                A.Fake<ILogger<GameInteractionService>>(),
+                A.Fake<IUIAccessor>(),
+                mainThread,
+                A.Fake<IEquipmentDefinitions>(),
+                A.Fake<IPlayerNotificationService>(),
+                A.Fake<IUISyncCountersService>(),
+                A.Fake<IGameStateLookupService>());
+            var isCurrentSession = true;
+
+            var change = service.TrySetTurnBasedCombatModeAsync(true, () => isCurrentSession);
+            Assert.That(queued, Is.Not.Null);
+            isCurrentSession = false;
+            queued();
+
+            Assert.That(change.IsCompleted, Is.True);
+            Assert.That(change.Result, Is.False);
+        }
     }
 }

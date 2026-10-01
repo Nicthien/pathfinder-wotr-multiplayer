@@ -44,6 +44,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         Task SetTurnBasedCombatModeAsync(bool enabled);
 
+        Task<bool> TrySetTurnBasedCombatModeAsync(bool enabled, Func<bool> canApply);
+
         List<NetworkCharacter> GetPartyPlayers();
 
         bool IsUnitInParty(string unitId);

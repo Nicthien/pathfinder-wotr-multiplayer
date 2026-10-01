@@ -890,6 +890,10 @@ namespace WOTRMultiplayer.UnitTests.Services
             }).CreateMapper();
             var hostGame = A.Fake<IGameInteractionService>();
             var clientGame = A.Fake<IGameInteractionService>();
+            A.CallTo(() => hostGame.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
+            A.CallTo(() => clientGame.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             var hostCombat = A.Fake<ICombatInteractionService>();
             var clientCombat = A.Fake<ICombatInteractionService>();
             A.CallTo(() => clientCombat.TryPauseAtProjectileSafePointAsync(
@@ -903,6 +907,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => hostGame.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => clientGame.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => hostGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
+            A.CallTo(() => hostGame.TrySetTurnBasedCombatModeAsync(true, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
             A.CallTo(() => hostCombat.GetRealTimeCombatStateAsync())

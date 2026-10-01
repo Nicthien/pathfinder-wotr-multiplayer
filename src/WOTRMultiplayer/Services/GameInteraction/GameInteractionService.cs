@@ -332,11 +332,22 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task SetTurnBasedCombatModeAsync(bool enabled)
         {
+            return TrySetTurnBasedCombatModeAsync(enabled, () => true);
+        }
+
+        public Task<bool> TrySetTurnBasedCombatModeAsync(bool enabled, Func<bool> canApply)
+        {
+            if (canApply == null) throw new ArgumentNullException(nameof(canApply));
             var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try
                 {
+                    if (!canApply())
+                    {
+                        completion.TrySetResult(false);
+                        return;
+                    }
                     SettingsRoot.Game.TurnBased.EnableTurnBasedMode.SetValueAndConfirm(enabled);
                     if (SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue() != enabled)
                     {

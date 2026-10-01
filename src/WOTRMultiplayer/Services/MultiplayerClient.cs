@@ -1481,6 +1481,8 @@ namespace WOTRMultiplayer.Services
         {
             if (receivedFrom != NetworkConstants.HostPlayerId) return;
             await _realTimeSnapshotGate.WaitAsync();
+            NetworkGame session = null;
+            NetworkRealTimeCombatState state = null;
             try
             {
                 if (Game?.RealTimeCombat == null || message == null
@@ -1490,8 +1492,8 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
-                var session = Game;
-                var state = session.RealTimeCombat;
+                session = Game;
+                state = session.RealTimeCombat;
                 var stage = (RealTimeModeTransitionStage)message.Stage;
                 var mode = (CombatMode)message.Mode;
                 if (message.Epoch < state.Epoch)
@@ -1566,7 +1568,10 @@ namespace WOTRMultiplayer.Services
                         SendRealTimeModeAck(message, false, actualHash.Value);
                         return;
                     }
-                    await GameInteraction.SetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased);
+                    if (!await GameInteraction.TrySetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased,
+                            () => IsCurrentRealTimeMessage(session, state, message.Epoch)
+                                && state.Phase == CombatSynchronizationPhase.PreparingModeSwitch))
+                        return;
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
                         return;
@@ -1594,7 +1599,10 @@ namespace WOTRMultiplayer.Services
                         || state.Phase != CombatSynchronizationPhase.Repairing
                         || !actualHash.HasValue)
                         return;
-                    await GameInteraction.SetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased);
+                    if (!await GameInteraction.TrySetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased,
+                            () => IsCurrentRealTimeMessage(session, state, message.Epoch)
+                                && state.Phase == CombatSynchronizationPhase.Repairing))
+                        return;
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.Repairing)
                         return;
@@ -1637,7 +1645,8 @@ namespace WOTRMultiplayer.Services
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Unable to apply combat-mode transition. Epoch={Epoch}, Stage={Stage}", message?.Epoch, message?.Stage);
-                if (message != null)
+                if (message != null && session != null && state != null
+                    && IsCurrentRealTimeMessage(session, state, message.Epoch))
                 {
                     SendRealTimeModeAck(message, false, 0);
                 }
@@ -1709,6 +1718,8 @@ namespace WOTRMultiplayer.Services
         {
             if (receivedFrom != NetworkConstants.HostPlayerId) return;
             await _realTimeSnapshotGate.WaitAsync();
+            NetworkGame session = null;
+            NetworkRealTimeCombatState state = null;
             try
             {
                 if (Game?.RealTimeCombat == null || message == null
@@ -1717,8 +1728,8 @@ namespace WOTRMultiplayer.Services
                 {
                     return;
                 }
-                var session = Game;
-                var state = session.RealTimeCombat;
+                session = Game;
+                state = session.RealTimeCombat;
                 var stage = (RealTimeRepairStage)message.Stage;
                 if (stage == RealTimeRepairStage.Prepare)
                 {
@@ -1806,7 +1817,10 @@ namespace WOTRMultiplayer.Services
                         || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased
                         || !hash.HasValue)
                         return;
-                    await GameInteraction.SetTurnBasedCombatModeAsync(true);
+                    if (!await GameInteraction.TrySetTurnBasedCombatModeAsync(true,
+                            () => IsCurrentRealTimeMessage(session, state, message.Epoch)
+                                && state.Phase == CombatSynchronizationPhase.FallingBackToTurnBased))
+                        return;
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.FallingBackToTurnBased)
                         return;
@@ -1845,7 +1859,8 @@ namespace WOTRMultiplayer.Services
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Unable to apply real-time combat repair. Epoch={Epoch}, Stage={Stage}", message?.Epoch, message?.Stage);
-                if (message != null)
+                if (message != null && session != null && state != null
+                    && IsCurrentRealTimeMessage(session, state, message.Epoch))
                 {
                     SendRealTimeRepairAck(message, false, 0);
                 }

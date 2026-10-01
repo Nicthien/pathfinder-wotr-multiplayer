@@ -116,6 +116,8 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             _logger = A.Fake<ILogger<MultiplayerHost>>();
             _gameInteractionService = A.Fake<IGameInteractionService>();
+            A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             _levelingInteractionService = A.Fake<ILevelingInteractionService>();
             _playerNotificationService = A.Fake<IPlayerNotificationService>();
             _dialogInteractionService = A.Fake<IDialogInteractionService>();
@@ -730,6 +732,47 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task RealTimeRepairFallback_ReplacedSessionCannotChangeModeOrPublishCheckpoint()
+        {
+            PrepareRealTimeRepairTest();
+            var original = _multiplayerHost.Game;
+            original.RealTimeCombat.Epoch = 4;
+            original.RealTimeCombat.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
+            Func<bool> capturedGuard = null;
+            var modeChange = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(true, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> guard) =>
+                {
+                    capturedGuard = guard;
+                    return modeChange.Task;
+                });
+            var method = typeof(MultiplayerHost).GetMethod("StartRealTimeRepairFallbackAsync",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var fallback = (Task)method.Invoke(_multiplayerHost, null);
+            Assert.That(capturedGuard, Is.Not.Null);
+            Assert.That(capturedGuard(), Is.True);
+
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Epoch = 4,
+                    Phase = CombatSynchronizationPhase.Repairing
+                }
+            };
+            Assert.That(capturedGuard(), Is.False);
+            modeChange.SetResult(true);
+            await fallback;
+
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).MustNotHaveHappened();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Fallback))).MustNotHaveHappened();
+        }
+
+        [Test]
         public async Task RealTimeRepair_MismatchThenMatchingSnapshot_ResumesRealTime()
         {
             PrepareRealTimeRepairTest();
@@ -817,6 +860,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _networkServer.IsActive).Returns(true);
             A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(true, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatState()).Returns(new NetworkCombatState());
             _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
             {

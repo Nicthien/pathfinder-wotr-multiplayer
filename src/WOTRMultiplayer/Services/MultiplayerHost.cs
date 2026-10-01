@@ -313,19 +313,32 @@ namespace WOTRMultiplayer.Services
                 return;
             }
             _realTimeModeCommitInProgress = true;
+            var session = Game;
+            var transitionState = session.RealTimeCombat;
+            var transitionEpoch = transitionState.Epoch;
             try
             {
-                var transitionState = Game.RealTimeCombat;
-                var transitionEpoch = transitionState.Epoch;
                 var state = await CombatInteraction.GetRealTimeCombatStateAsync();
-                if (!ReferenceEquals(Game?.RealTimeCombat, transitionState)
+                if (!ReferenceEquals(Game, session)
+                    || !ReferenceEquals(session.RealTimeCombat, transitionState)
                     || transitionState.Epoch != transitionEpoch
                     || transitionState.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
                     return;
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
                 var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
                 coordinator.CommitModeSwitch(hash);
-                await GameInteraction.SetTurnBasedCombatModeAsync(Game.RealTimeCombat.Mode == CombatMode.TurnBased);
+                if (!await GameInteraction.TrySetTurnBasedCombatModeAsync(
+                        transitionState.Mode == CombatMode.TurnBased,
+                        () => ReferenceEquals(Game, session)
+                            && ReferenceEquals(session.RealTimeCombat, transitionState)
+                            && transitionState.Epoch == transitionEpoch
+                            && transitionState.Phase == CombatSynchronizationPhase.Synchronizing))
+                    return;
+                if (!ReferenceEquals(Game, session)
+                    || !ReferenceEquals(session.RealTimeCombat, transitionState)
+                    || transitionState.Epoch != transitionEpoch
+                    || transitionState.Phase != CombatSynchronizationPhase.Synchronizing)
+                    return;
                 _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
                 _realTimeModeRetransmissions = 0;
                 _lastRealTimeModeCommit = new NotifyRealTimeModeTransition
@@ -345,8 +358,11 @@ namespace WOTRMultiplayer.Services
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Unable to commit real-time combat mode switch. Epoch={Epoch}", Game?.RealTimeCombat?.Epoch);
-                await AbortRealTimeModeSwitchAsync();
+                Logger.LogError(ex, "Unable to commit real-time combat mode switch. Epoch={Epoch}", transitionEpoch);
+                if (ReferenceEquals(Game, session)
+                    && ReferenceEquals(session.RealTimeCombat, transitionState)
+                    && transitionState.Epoch == transitionEpoch)
+                    await AbortRealTimeModeSwitchAsync();
             }
             finally
             {
@@ -432,6 +448,7 @@ namespace WOTRMultiplayer.Services
                 return;
             }
             var requiredPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToHashSet();
+            var session = Game;
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.AbortModeSwitch();
             _lastRealTimeModePrepare = null;
@@ -440,10 +457,19 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
             Game.RealTimeCombat.RequiredPlayers = requiredPlayers;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+            var transitionState = session.RealTimeCombat;
+            var transitionEpoch = transitionState.Epoch;
             try
             {
-                await GameInteraction.SetTurnBasedCombatModeAsync(Game.RealTimeCombat.Mode == CombatMode.TurnBased);
+                Func<bool> canApply = () => ReferenceEquals(Game, session)
+                    && ReferenceEquals(session.RealTimeCombat, transitionState)
+                    && transitionState.Epoch == transitionEpoch
+                    && transitionState.Phase == CombatSynchronizationPhase.Repairing;
+                if (!await GameInteraction.TrySetTurnBasedCombatModeAsync(
+                        transitionState.Mode == CombatMode.TurnBased, canApply)
+                    || !canApply()) return;
                 var state = await CombatInteraction.GetRealTimeCombatStateAsync();
+                if (!canApply()) return;
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
                 Game.RealTimeCombat.CanonicalStateHash = hash;
                 _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
@@ -461,9 +487,14 @@ namespace WOTRMultiplayer.Services
             }
             catch (Exception ex)
             {
-                _realTimeModeSwitchDeadline = default;
-                Logger.LogError(ex, "Combat-mode rollback could not be applied locally; the game remains paused and saving is blocked. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
-                GameInteraction.SetPause(true);
+                Logger.LogError(ex, "Combat-mode rollback could not be applied locally; the game remains paused and saving is blocked. Epoch={Epoch}", transitionEpoch);
+                if (ReferenceEquals(Game, session)
+                    && ReferenceEquals(session.RealTimeCombat, transitionState)
+                    && transitionState.Epoch == transitionEpoch)
+                {
+                    _realTimeModeSwitchDeadline = default;
+                    GameInteraction.SetPause(true);
+                }
             }
         }
 
@@ -2787,33 +2818,47 @@ namespace WOTRMultiplayer.Services
 
         private async Task StartRealTimeRepairFallbackAsync()
         {
+            var session = Game;
+            var state = session?.RealTimeCombat;
+            var combat = session?.Combat;
+            if (state == null) return;
+            var epoch = state.Epoch;
+            Func<bool> canApply = () => ReferenceEquals(Game, session)
+                && ReferenceEquals(session.RealTimeCombat, state)
+                && ReferenceEquals(session.Combat, combat)
+                && state.Epoch == epoch
+                && state.Phase != CombatSynchronizationPhase.Stable
+                && _realTimeRepairStage != RealTimeRepairStage.Fallback;
             try
             {
-                await GameInteraction.SetTurnBasedCombatModeAsync(true);
-                _realTimeRepairCheckpoint = await CombatInteraction.GetRealTimeCombatStateAsync();
-                Game.RealTimeCombat.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = _realTimeRepairCheckpoint });
-                Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
+                if (!await GameInteraction.TrySetTurnBasedCombatModeAsync(true, canApply)
+                    || !canApply()) return;
+                var checkpoint = await CombatInteraction.GetRealTimeCombatStateAsync();
+                if (!canApply()) return;
+                _realTimeRepairCheckpoint = checkpoint;
+                state.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = checkpoint });
+                state.ReadyPlayers = [session.LocalPlayerId];
                 _realTimeRepairStage = RealTimeRepairStage.Fallback;
                 _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
                 _realTimeRepairRetransmissions = 0;
                 _lastRealTimeRepairMessage = new NotifyRealTimeRepair
                 {
-                    Epoch = Game.RealTimeCombat.Epoch,
+                    Epoch = epoch,
                     Stage = (int)RealTimeRepairStage.Fallback,
                     Mode = (int)CombatMode.TurnBased,
-                    CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
-                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(_realTimeRepairCheckpoint)
+                    CanonicalStateHash = state.CanonicalStateHash,
+                    State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(checkpoint)
                 };
                 Send(_lastRealTimeRepairMessage);
-                if (Game.RealTimeCombat.RequiredPlayers.IsSubsetOf(Game.RealTimeCombat.ReadyPlayers))
+                if (state.RequiredPlayers.IsSubsetOf(state.ReadyPlayers))
                 {
                     CommitRealTimeRepairFallback();
                 }
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Unable to apply automatic turn-based fallback. Epoch={Epoch}; game remains paused and saving is blocked", Game.RealTimeCombat.Epoch);
-                GameInteraction.SetPause(true);
+                Logger.LogError(ex, "Unable to apply automatic turn-based fallback. Epoch={Epoch}; game remains paused and saving is blocked", epoch);
+                if (canApply()) GameInteraction.SetPause(true);
             }
         }
 
