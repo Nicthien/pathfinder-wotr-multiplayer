@@ -1284,6 +1284,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var unitCombatState = combatUnit.CombatState;
             var state = new NetworkUnitCombatState
             {
+                NotSurprised = unitCombatState.NotSurprised,
                 EngagedUnits = [.. unitCombatState.m_EngagedUnits.Select(CreateUnitEngagement)],
                 EngagedBy = [.. unitCombatState.m_EngagedBy.Select(CreateUnitEngagement)]
             };
@@ -1697,7 +1698,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             var newPosition = expectedPosition.ToUnityVector3();
             var previousPosition = unit.Position;
-            unit.CombatState.PreventAttacksOfOpporunityNextFrame = true;
+            if (unit.CombatState != null)
+            {
+                unit.CombatState.PreventAttacksOfOpporunityNextFrame = true;
+            }
             unit.View.transform.position = newPosition;
             unit.Position = newPosition;
 

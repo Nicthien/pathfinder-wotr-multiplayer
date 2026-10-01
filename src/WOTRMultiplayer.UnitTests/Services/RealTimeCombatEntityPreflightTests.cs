@@ -105,6 +105,23 @@ namespace WOTRMultiplayer.UnitTests.Services
                 _ => true, _ => true), Is.EqualTo("invalid-combat:areas,invalid-combat:units"));
         }
 
+        [Test]
+        public void NullBuffAndEngagementEntries_AreRejectedBeforeMutation()
+        {
+            var unit = CompleteUnit("hero");
+            unit.BuffCollection.Buffs.Add(null);
+            unit.CombatState = new NetworkUnitCombatState
+            {
+                EngagedUnits = [null],
+                EngagedBy = null
+            };
+            var checkpoint = new NetworkCombatState { Units = [unit] };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                id => id == "hero", _ => true),
+                Is.EqualTo("invalid-unit:hero:buff-entry,invalid-unit:hero:engagements,missing-engagement-target:hero:<null>"));
+        }
+
         private static NetworkUnit CompleteUnit(string id) => new NetworkUnit
         {
             Id = id,

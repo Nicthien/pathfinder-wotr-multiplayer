@@ -35,6 +35,14 @@ namespace WOTRMultiplayer.Services
                     if (unit.Descriptor?.Stats == null) missing.Add($"invalid-unit:{unit.Id}:stats");
                     if (unit.BuffCollection?.Buffs == null || unit.BuffCollection.NegativeLevels == null)
                         missing.Add($"invalid-unit:{unit.Id}:buffs");
+                    else if (unit.BuffCollection.Buffs.Any(buff => buff == null) ||
+                             unit.BuffCollection.NegativeLevels.Any(level => level == null))
+                        missing.Add($"invalid-unit:{unit.Id}:buff-entry");
+                    if (unit.CombatState != null &&
+                        (unit.CombatState.EngagedUnits == null || unit.CombatState.EngagedBy == null ||
+                         unit.CombatState.EngagedUnits.Any(engagement => engagement == null) ||
+                         unit.CombatState.EngagedBy.Any(engagement => engagement == null)))
+                        missing.Add($"invalid-unit:{unit.Id}:engagements");
                 }
                 if (unit?.Id == null) { continue; }
                 foreach (var engagement in (unit.CombatState?.EngagedUnits ?? [])
