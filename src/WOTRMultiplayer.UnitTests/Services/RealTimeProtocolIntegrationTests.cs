@@ -95,8 +95,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                 (42, (ClientRealTimeRepairAck)queued.Dequeue());
 
             Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
-            Assert.That(((NotifyRealTimeRepair)queued.Dequeue()).Stage,
+            Assert.That(((NotifyRealTimeRepair)queued.Peek()).Stage,
                 Is.EqualTo((int)RealTimeRepairStage.Fallback));
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
         }
 
         [Test]
