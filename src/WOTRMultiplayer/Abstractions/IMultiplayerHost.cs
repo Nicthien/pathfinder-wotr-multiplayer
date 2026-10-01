@@ -23,6 +23,8 @@ namespace WOTRMultiplayer.Abstractions
 
         int ResolveRealTimeDiceRoll(string key, System.Func<int> localRoll);
 
+        string ResolveRealTimeEntityId(string key, System.Func<string> localId);
+
         System.Threading.Tasks.Task<bool> RequestRealTimeCombatModeAsync(CombatMode mode);
 
         System.Threading.Tasks.Task BeginRealTimeRepairAsync();

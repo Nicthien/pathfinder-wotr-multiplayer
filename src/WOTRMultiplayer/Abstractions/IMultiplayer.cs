@@ -40,6 +40,8 @@ namespace WOTRMultiplayer.Abstractions
 
         int ResolveRealTimeDiceRoll(string key, Func<int> localRoll);
 
+        string ResolveRealTimeEntityId(string key, Func<string> localId);
+
         void Initialize();
 
         void UpdateRealTimeCombat();

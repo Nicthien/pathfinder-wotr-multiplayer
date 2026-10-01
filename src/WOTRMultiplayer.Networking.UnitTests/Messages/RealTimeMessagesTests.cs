@@ -106,6 +106,24 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         }
 
         [Test]
+        public void HostEntityIdAndClientFault_RoundTrip()
+        {
+            var published = Serializer.DeepClone(new NotifyRealTimeEntityId
+            {
+                Epoch = 4, Key = "area:cloud", Sequence = 2, EntityId = "host-area-id"
+            });
+            var fault = Serializer.DeepClone(new ClientRealTimeEntityIdFault
+            {
+                Epoch = 4, Key = "area:cloud", Sequence = 2, Reason = "host-id-timeout"
+            });
+
+            Assert.That((published.Epoch, published.Key, published.Sequence, published.EntityId),
+                Is.EqualTo((4L, "area:cloud", 2L, "host-area-id")));
+            Assert.That((fault.Epoch, fault.Key, fault.Sequence, fault.Reason),
+                Is.EqualTo((4L, "area:cloud", 2L, "host-id-timeout")));
+        }
+
+        [Test]
         public void StateHashReply_ReportsApplicationFailure()
         {
             var copy = Serializer.DeepClone(new ClientRealTimeStateHash

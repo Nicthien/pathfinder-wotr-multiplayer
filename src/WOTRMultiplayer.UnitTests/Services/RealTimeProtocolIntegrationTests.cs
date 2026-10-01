@@ -125,6 +125,45 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_HostAreaIdOverridesClientId()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.ResolveRealTimeEntityId("area:cloud", () => "host-id"), Is.EqualTo("host-id"));
+            var published = (NotifyRealTimeEntityId)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeEntityId>(clientNetwork)
+                (NetworkConstants.HostPlayerId, published);
+
+            var localCalls = 0;
+            Assert.That(client.ResolveRealTimeEntityId("area:cloud", () =>
+            {
+                localCalls++;
+                return "client-id";
+            }), Is.EqualTo("host-id"));
+            Assert.That(localCalls, Is.EqualTo(1));
+            Assert.That(queued, Is.Empty);
+        }
+
+        [Test]
+        public async Task TwoActors_MissingHostAreaId_UsesProtectedFallback()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(client.ResolveRealTimeEntityId("area:cloud", () => "client-id"), Is.EqualTo("client-id"));
+            var fault = (ClientRealTimeEntityIdFault)queued.Dequeue();
+            Assert.That(fault.Reason, Is.EqualTo("host-id-timeout"));
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeEntityIdFault>(hostNetwork)(42, fault);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+        }
+
+        [Test]
         public async Task TwoActors_UnresolvableHostAIChoice_UsesProtectedFallback()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();

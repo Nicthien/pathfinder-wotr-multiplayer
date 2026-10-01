@@ -54,6 +54,7 @@ namespace WOTRMultiplayer.Services
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), DateTime> _realTimeSnapshotSentAt = new();
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
+        private readonly RealTimeEntityIdMailbox _realTimeEntityIds = new();
         private int _consecutiveMissingRealTimeReplies;
         private readonly object _realTimeCommandLock = new();
         private readonly object _realTimePauseLock = new();
@@ -115,9 +116,24 @@ namespace WOTRMultiplayer.Services
             return result;
         }
 
+        public string ResolveRealTimeEntityId(string key, Func<string> localId)
+        {
+            var id = localId();
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return id;
+            var epoch = Game.RealTimeCombat.Epoch;
+            var sequence = _realTimeEntityIds.Publish(epoch, key);
+            Send(new NotifyRealTimeEntityId
+            {
+                Epoch = epoch, Key = key, Sequence = sequence, EntityId = id
+            });
+            return id;
+        }
+
         protected override void ResetRealTimeRuleRolls()
         {
             _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
         }
 
@@ -541,6 +557,7 @@ namespace WOTRMultiplayer.Services
         public void Create(string gameId, string gamePassword, Entities.Connectivity.ExternalServer externalServer, NetworkGameStartUp gameStartUp)
         {
             _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
             if (_networkHost.IsActive)
             {
@@ -649,6 +666,7 @@ namespace WOTRMultiplayer.Services
         {
             Logger.LogInformation("Resetting");
             _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
             Game = null;
             _realTimeSnapshotHashes.Clear();
@@ -2194,6 +2212,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimeRepairAck>(OnClientRealTimeRepairAck)
                .On<ClientRealTimeRuleRollFault>(OnClientRealTimeRuleRollFault)
                .On<ClientRealTimeAIActionFault>(OnClientRealTimeAIActionFault)
+               .On<ClientRealTimeEntityIdFault>(OnClientRealTimeEntityIdFault)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -2372,6 +2391,21 @@ namespace WOTRMultiplayer.Services
                     return;
                 Logger.LogWarning("Client could not apply authoritative combat AI action; starting protected fallback. PlayerId={PlayerId}, Epoch={Epoch}, UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.UnitId, message.ActionId, message.Reason);
+                _realTimeCriticalFaulted = true;
+                _ = BeginRealTimeRepairAsync();
+            });
+        }
+
+        private void OnClientRealTimeEntityIdFault(long receivedFrom, ClientRealTimeEntityIdFault message)
+        {
+            _mainThreadAccessor.Post(() =>
+            {
+                if (message == null || GetPlayer(receivedFrom) == null || !IsRealTimeCombatActive
+                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                    || message.Epoch != Game.RealTimeCombat.Epoch || message.Sequence <= 0)
+                    return;
+                Logger.LogWarning("Client could not obtain host entity ID; starting protected fallback. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
+                    receivedFrom, message.Epoch, message.Sequence, message.Key, message.Reason);
                 _realTimeCriticalFaulted = true;
                 _ = BeginRealTimeRepairAsync();
             });

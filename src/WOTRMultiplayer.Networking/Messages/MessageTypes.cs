@@ -310,7 +310,9 @@
             NotifyRealTimeCombatPreference,
             NotifyRealTimeRuleRoll,
             ClientRealTimeRuleRollFault,
-            ClientRealTimeAIActionFault
+            ClientRealTimeAIActionFault,
+            NotifyRealTimeEntityId,
+            ClientRealTimeEntityIdFault
         }
 
         public static class Mods

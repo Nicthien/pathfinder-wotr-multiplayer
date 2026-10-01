@@ -30,6 +30,8 @@ namespace WOTRMultiplayer.Abstractions
 
         int ResolveRealTimeDiceRoll(string key, Func<int> localRoll);
 
+        string ResolveRealTimeEntityId(string key, Func<string> localId);
+
         bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
 
         bool RequestRealTimePause(bool wantsPause);

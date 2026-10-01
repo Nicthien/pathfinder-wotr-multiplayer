@@ -48,6 +48,7 @@ namespace WOTRMultiplayer.Services
         private readonly INetworkClientConnection _networkClient;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
+        private readonly RealTimeEntityIdMailbox _realTimeEntityIds = new();
         private const int RealTimeRuleRollTimeoutMs = 2500;
         private readonly object _realTimeCommandSequenceLock = new();
         private long _realTimeCommandEpoch;
@@ -112,7 +113,38 @@ namespace WOTRMultiplayer.Services
             return localResult;
         }
 
-        protected override void ResetRealTimeRuleRolls() => _realTimeRuleRolls.Reset();
+        public string ResolveRealTimeEntityId(string key, Func<string> localId)
+        {
+            // Keep deterministic local counters advancing even though the host ID wins.
+            var local = localId();
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return local;
+            var epoch = Game.RealTimeCombat.Epoch;
+            if (_realTimeEntityIds.TryConsume(epoch, key, RealTimeRuleRollTimeoutMs,
+                out var sequence, out var hostId))
+            {
+                if (!string.Equals(hostId, local, StringComparison.Ordinal))
+                {
+                    Logger.LogWarning("Entity ID differed from host. Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Local={Local}, Host={Host}",
+                        epoch, sequence, key, local, hostId);
+                }
+                return hostId;
+            }
+            Logger.LogError("Authoritative entity ID unavailable; requesting protected fallback. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
+                epoch, sequence, key);
+            if (IsRealTimeCombatActive && Game.RealTimeCombat.Epoch == epoch)
+                Send(new ClientRealTimeEntityIdFault
+                {
+                    Epoch = epoch, Key = key, Sequence = sequence, Reason = "host-id-timeout"
+                });
+            return local;
+        }
+
+        protected override void ResetRealTimeRuleRolls()
+        {
+            _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
+        }
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -156,6 +188,7 @@ namespace WOTRMultiplayer.Services
         public void Connect(string address, int port)
         {
             _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
             var settings = SettingsService.GetSettings();
             _networkClient.ConnectAsync(address, port, settings.NetworkAwaiterTimeout).ConfigureAwait(false);
         }
@@ -163,6 +196,7 @@ namespace WOTRMultiplayer.Services
         public void Connect(string code, string password, Entities.Connectivity.ExternalServer externalServer)
         {
             _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
             var settings = SettingsService.GetSettings();
             var externalServerConfiguration = new ExternalServerConfiguration
             {
@@ -178,6 +212,7 @@ namespace WOTRMultiplayer.Services
         {
             Logger.LogInformation("Resetting");
             _realTimeRuleRolls.Reset();
+            _realTimeEntityIds.Reset();
             _disconnectedDuringRealTimeCombat = false;
 
             Game = null;
@@ -765,6 +800,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
                .On<NotifyRealTimeCombatPreference>(OnNotifyRealTimeCombatPreference)
                .On<NotifyRealTimeRuleRoll>(OnNotifyRealTimeRuleRoll)
+               .On<NotifyRealTimeEntityId>(OnNotifyRealTimeEntityId)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -1185,6 +1221,16 @@ namespace WOTRMultiplayer.Services
                 return;
             if (!_realTimeRuleRolls.Receive(message.Epoch, message.Key, message.Sequence, message.Result))
                 Logger.LogWarning("Ignoring stale, duplicate or overflowing host combat roll. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
+                    message.Epoch, message.Sequence, message.Key);
+        }
+
+        private void OnNotifyRealTimeEntityId(long receivedFrom, NotifyRealTimeEntityId message)
+        {
+            if (message == null || receivedFrom != NetworkConstants.HostPlayerId
+                || !IsRealTimeCombatActive || Game.RealTimeCombat.Epoch != message.Epoch)
+                return;
+            if (!_realTimeEntityIds.Receive(message.Epoch, message.Key, message.Sequence, message.EntityId))
+                Logger.LogWarning("Ignoring stale, duplicate or overflowing host entity ID. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
                     message.Epoch, message.Sequence, message.Key);
         }
 

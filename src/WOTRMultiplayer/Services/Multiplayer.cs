@@ -122,6 +122,17 @@ namespace WOTRMultiplayer.Services
             return localRoll();
         }
 
+        public string ResolveRealTimeEntityId(string key, Func<string> localId)
+        {
+            if (_multiplayerActorAccessor.Host.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Host.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Host.ResolveRealTimeEntityId(key, localId);
+            if (_multiplayerActorAccessor.Client.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Client.ResolveRealTimeEntityId(key, localId);
+            return localId();
+        }
+
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
             return _multiplayerActorAccessor.Client.SubmitRealTimeCombatCommand(kind, movement, attack, ability);
