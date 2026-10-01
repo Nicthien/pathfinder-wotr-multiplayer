@@ -57,7 +57,7 @@ namespace WOTRMultiplayer.Services
         private readonly ConcurrentDictionary<string, ConcurrentQueue<NetworkAIAction>> _realTimeAIActions = new(StringComparer.Ordinal);
         private long _realTimeAISequenceEpoch;
         private long _lastRealTimeAISequence;
-        private bool _disconnectedDuringRealTimeCombat;
+        private volatile bool _disconnectedDuringRealTimeCombat;
 
         public Action OnNetworkError { get; set; }
 
