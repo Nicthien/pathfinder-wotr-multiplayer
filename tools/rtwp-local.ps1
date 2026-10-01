@@ -147,6 +147,20 @@ function Get-ExperimentalFingerprint([string]$path, [string]$catalogRoot = $path
     finally { $sha.Dispose() }
 }
 
+function Assert-ExperimentalFingerprintParity([string]$path) {
+    $expected = Get-ExperimentalFingerprint $path
+    if ([string]::IsNullOrWhiteSpace($expected)) {
+        throw 'Empreinte du paquet RTwP incomplète : contrôle de parité refusé.'
+    }
+    $engine = (Get-Process -Id $PID).Path
+    $probe = Join-Path $PSScriptRoot 'rtwp-fingerprint-probe.ps1'
+    $actual = & $engine -NoProfile -File $probe -PackagePath $path
+    if ($LASTEXITCODE -ne 0 -or -not [string]::Equals(
+            [string]$actual, $expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Empreinte RTwP incohérente entre le mod et l'outil local : paquet refusé."
+    }
+}
+
 function Show-Status {
     $entries = @(
         [pscustomobject]@{ Slot = 'Stable'; Path = $stablePath; Enabled = Test-Path -LiteralPath $stablePath; Info = Get-ModInfo $stablePath }
@@ -296,6 +310,7 @@ function Install-Experimental([bool]$testOnly) {
     Copy-Item -Path (Join-Path $buildPath '*') -Destination $targetPath -Recurse -Force
     New-Item -ItemType Directory -Path (Join-Path $targetPath 'localization') -Force | Out-Null
     Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $targetPath 'localization') -Force
+    Assert-ExperimentalFingerprintParity $targetPath
 }
 
 function Enable-Stable {
