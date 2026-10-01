@@ -119,12 +119,11 @@ namespace WOTRMultiplayer.Services
         {
             var ordered = (engagements ?? [])
                 .OrderBy(x => x?.UnitId, StringComparer.Ordinal)
-                .ThenBy(x => x?.Rounds ?? 0).ToList();
+                .ToList();
             writer.Write(ordered.Count);
             foreach (var engagement in ordered)
             {
                 WriteString(writer, engagement?.UnitId);
-                writer.Write(engagement?.Rounds ?? 0);
             }
         }
 

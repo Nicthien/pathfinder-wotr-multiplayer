@@ -98,6 +98,23 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatHasher.Compute(second), Is.EqualTo(RealTimeCombatHasher.Compute(first)));
         }
 
+        [Test]
+        public void LocalEngagementRoundTiming_DoesNotCauseFalseDivergence()
+        {
+            var first = Sample();
+            first.Combat.Units[0].CombatState = new NetworkUnitCombatState
+            {
+                EngagedUnits = [new NetworkUnitEngagement { UnitId = "d", Rounds = 2 }]
+            };
+            var second = Sample();
+            second.Combat.Units[0].CombatState = new NetworkUnitCombatState
+            {
+                EngagedUnits = [new NetworkUnitEngagement { UnitId = "d", Rounds = 3 }]
+            };
+
+            Assert.That(RealTimeCombatHasher.Compute(second), Is.EqualTo(RealTimeCombatHasher.Compute(first)));
+        }
+
         private static RealTimeCombatSnapshot Sample()
         {
             return new RealTimeCombatSnapshot
