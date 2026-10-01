@@ -46,6 +46,46 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Is.EqualTo("buff-time:hero:haste"));
         }
 
+        [Test]
+        public void TemporaryNegativeLevelDrift_IsIdentified()
+        {
+            var host = Sample();
+            var client = Sample();
+            host.Units[0].BuffCollection.NegativeLevels.Add(new NetworkUnitNegativeLevelsData
+            {
+                Count = 1, Duration = TimeSpan.FromMinutes(10)
+            });
+            client.Units[0].BuffCollection.NegativeLevels.Add(new NetworkUnitNegativeLevelsData
+            {
+                Count = 1, Duration = TimeSpan.FromMinutes(9)
+            });
+            Assert.That(RealTimeCombatTemporalDiff.Summarize(host, client), Is.EqualTo("negative-level-time:hero:Temporary:1"));
+        }
+
+        [Test]
+        public void NegativeLevelTransitDelayAndOrdering_DoNotReportDivergence()
+        {
+            var host = Sample();
+            var client = Sample();
+            host.Units[0].BuffCollection.NegativeLevels.Add(new NetworkUnitNegativeLevelsData
+            {
+                Count = 1, Duration = TimeSpan.FromMinutes(10)
+            });
+            host.Units[0].BuffCollection.NegativeLevels.Add(new NetworkUnitNegativeLevelsData
+            {
+                Count = 1, Duration = TimeSpan.FromMinutes(5)
+            });
+            client.Units[0].BuffCollection.NegativeLevels.Add(new NetworkUnitNegativeLevelsData
+            {
+                Count = 1, Duration = TimeSpan.FromMinutes(5) - TimeSpan.FromMilliseconds(200)
+            });
+            client.Units[0].BuffCollection.NegativeLevels.Add(new NetworkUnitNegativeLevelsData
+            {
+                Count = 1, Duration = TimeSpan.FromMinutes(10) - TimeSpan.FromMilliseconds(200)
+            });
+            Assert.That(RealTimeCombatTemporalDiff.Summarize(host, client), Is.Null);
+        }
+
         private static NetworkCombatState Sample() => new()
         {
             Units = [new NetworkUnit

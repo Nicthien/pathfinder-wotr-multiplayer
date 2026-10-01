@@ -1,4 +1,7 @@
+using System;
+using System.Reflection;
 using AutoMapper;
+using Kingmaker.UnitLogic.Parts;
 using NUnit.Framework;
 using WOTRMultiplayer.Config.Mapping;
 using WOTRMultiplayer.Entities.AreaEffects;
@@ -10,6 +13,27 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class RealTimeBlueprintMappingTests
     {
+        [Test]
+        public void TemporaryNegativeLevelMapping_UsesRemainingDuration()
+        {
+            var mapper = new MapperConfiguration(configuration =>
+                configuration.AddProfile<GameProfile>()).CreateMapper();
+            var levelType = typeof(UnitPartNegativeLevels).GetNestedType("Data",
+                BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.That(levelType, Is.Not.Null);
+            var level = Activator.CreateInstance(levelType, true);
+            levelType.GetField("Count", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SetValue(level, 1);
+            levelType.GetField("EndTime", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SetValue(level, (TimeSpan?)TimeSpan.FromMinutes(12));
+
+            var network = (NetworkUnitNegativeLevelsData)mapper.Map(level, levelType,
+                typeof(NetworkUnitNegativeLevelsData),
+                options => options.Items[GameProfile.BuffBaseTimeItem] = TimeSpan.FromMinutes(2));
+
+            Assert.That(network.Duration, Is.EqualTo(TimeSpan.FromMinutes(10)));
+        }
+
         [Test]
         public void CombatCheckpointMapping_PreservesUnitAndAreaBlueprintIds()
         {

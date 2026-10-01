@@ -402,7 +402,7 @@ namespace WOTRMultiplayer.Config.Mapping
             var part = new NetworkUnitNegativeLevelsData
             {
                 Count = negativeLevels.Count,
-                Duration = negativeLevels.EndTime.HasValue ? buffBaseTime - negativeLevels.EndTime.Value : null,
+                Duration = negativeLevels.EndTime.HasValue ? negativeLevels.EndTime.Value - buffBaseTime : null,
                 EnergyDrainType = negativeLevels.Type,
                 SavingThrowType = negativeLevels.SavingThrowType
             };

@@ -41,6 +41,29 @@ namespace WOTRMultiplayer.Services
                     if (!SameTime(expectedBuff.NextResourceSpendingTime, actualBuff.NextResourceSpendingTime))
                         differences.Add($"buff-resource-time:{expectedUnit.Id}:{expectedBuff.Id}");
                 }
+
+                var expectedLevels = (expectedUnit.BuffCollection?.NegativeLevels ?? [])
+                    .Where(level => level != null)
+                    .GroupBy(level => (level.Count, level.SavingThrowType, level.EnergyDrainType));
+                var actualLevels = (actualUnit.BuffCollection?.NegativeLevels ?? [])
+                    .Where(level => level != null)
+                    .GroupBy(level => (level.Count, level.SavingThrowType, level.EnergyDrainType))
+                    .ToDictionary(group => group.Key, group => group.ToList());
+                foreach (var group in expectedLevels)
+                {
+                    if (!actualLevels.TryGetValue(group.Key, out var localLevels)
+                        || localLevels.Count != group.Count())
+                        continue; // The structural hash handles absent or extra levels.
+                    var hostDurations = group.Select(level => level.Duration)
+                        .OrderBy(duration => duration).ToList();
+                    var localDurations = localLevels.Select(level => level.Duration)
+                        .OrderBy(duration => duration).ToList();
+                    for (var index = 0; index < hostDurations.Count; index++)
+                    {
+                        if (!SameOptionalTime(hostDurations[index], localDurations[index]))
+                            differences.Add($"negative-level-time:{expectedUnit.Id}:{group.Key.EnergyDrainType}:{group.Key.Count}");
+                    }
+                }
             }
 
             var actualAreas = (actual.AreaEffects ?? []).Where(area => area?.Id != null)
@@ -69,6 +92,10 @@ namespace WOTRMultiplayer.Services
             expected == TimeSpan.MaxValue || actual == TimeSpan.MaxValue
                 ? expected == actual
                 : SameTicks(expected.Ticks, actual.Ticks);
+
+        private static bool SameOptionalTime(TimeSpan? expected, TimeSpan? actual) =>
+            expected.HasValue == actual.HasValue
+            && (!expected.HasValue || SameTime(expected.Value, actual.Value));
 
         private static bool SameTicks(long expected, long actual) =>
             Math.Abs((decimal)expected - actual) <= ToleranceTicks;
