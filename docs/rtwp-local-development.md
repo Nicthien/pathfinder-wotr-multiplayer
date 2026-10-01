@@ -116,6 +116,8 @@ On 2026-10-01, a local hidden-window startup smoke of the protocol-22 experiment
 When a checkpoint still differs, the bounded unit diagnostic now labels prone and engagement causes where applicable instead of reporting only the unit ID.
 
 The local test suite now also connects host and client protocol actors through an in-memory queued transport. It deliberately drops and duplicates mode-switch messages and drops a repair Prepare, then asserts both peers return to the same stable mode and epoch. A projected-unit mismatch is also tested with a mocked game service that successfully applies the host checkpoint. These are protocol-level two-actor tests, not proof that the real Unity service can reconstruct a missing unit or that combat rules converge under network faults.
+
+The two-actor mode-switch suite now additionally injects bounded, seeded delivery jitter, message reordering and duplicates over twelve deterministic schedules, asserting both peers finish with the same stable mode and epoch. Loss and retransmission remain covered by the focused dropped-message tests. This is an in-memory application-protocol simulation, not a real network or game-engine latency test.
 The queued transport also injects a moving snapshot and an accepted order while the client is waiting for mode-switch completion; neither mutates client combat state, and the handshake still completes afterward.
 
 The inverse case is tested as well: when the mocked client continues to report a divergent unit after every host checkpoint, both actors remain in the fallback phase with saving blocked. That protects the save, but is explicitly not the campaign-ready recovery path; reconstructing the missing game entity remains open.

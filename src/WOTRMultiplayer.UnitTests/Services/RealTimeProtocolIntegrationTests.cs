@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
 using FakeItEasy;
@@ -387,6 +388,59 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
             Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
             Assert.That(host.Game.RealTimeCombat.CanonicalStateHash, Is.EqualTo(client.Game.RealTimeCombat.CanonicalStateHash));
+        }
+
+        [Test]
+        public async Task TwoActors_JitterAndDuplicateModePackets_ConvergeAcrossDeterministicSeeds()
+        {
+            for (var seed = 0; seed < 12; seed++)
+            {
+                var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+                Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause),
+                    Is.True, $"seed={seed}");
+                var random = new System.Random(seed);
+                var delayed = new List<(object Message, int Due)>();
+                for (var tick = 0; tick < 150; tick++)
+                {
+                    while (queued.Count > 0)
+                    {
+                        var message = queued.Dequeue();
+                        delayed.Add((message, tick + random.Next(4)));
+                        if (random.Next(3) == 0)
+                            delayed.Add((message, tick + random.Next(4)));
+                    }
+                    var ready = delayed.Where(x => x.Due <= tick).ToList();
+                    if (ready.Count > 0)
+                    {
+                        var chosen = ready[random.Next(ready.Count)];
+                        delayed.Remove(chosen);
+                        switch (chosen.Message)
+                        {
+                            case NotifyRealTimeModeTransition transition:
+                                DeliverToClient(clientNetwork, transition);
+                                break;
+                            case ClientRealTimeModeTransitionAck ack:
+                                FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42, ack);
+                                break;
+                            default:
+                                Assert.Fail($"Unexpected mode packet: {chosen.Message.GetType().Name}");
+                                break;
+                        }
+                    }
+                    if (queued.Count == 0 && delayed.Count == 0
+                        && host.Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                        && client.Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable)
+                        break;
+                }
+
+                Assert.That(queued, Is.Empty, $"seed={seed}");
+                Assert.That(delayed, Is.Empty, $"seed={seed}");
+                Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable), $"seed={seed}");
+                Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable), $"seed={seed}");
+                Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause), $"seed={seed}");
+                Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(host.Game.RealTimeCombat.Mode), $"seed={seed}");
+                Assert.That(client.Game.RealTimeCombat.Epoch, Is.EqualTo(host.Game.RealTimeCombat.Epoch), $"seed={seed}");
+            }
         }
 
         [Test]
