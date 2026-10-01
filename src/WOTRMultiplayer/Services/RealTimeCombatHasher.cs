@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat.RealTime;
+using WOTRMultiplayer.Entities.Units;
 
 namespace WOTRMultiplayer.Services
 {
@@ -21,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(1); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(2); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -34,6 +35,11 @@ namespace WOTRMultiplayer.Services
                     writer.Write(unit?.Descriptor?.Damage ?? 0);
                     writer.Write(unit?.Descriptor?.Stats?.DamageNonLethal ?? 0);
                     writer.Write(unit?.Descriptor?.State?.IsCharging ?? false);
+                    writer.Write(unit?.Descriptor?.State?.Prone?.Active ?? false);
+                    writer.Write(unit?.Descriptor?.State?.Prone?.ShouldBeActive ?? false);
+                    writer.Write(unit?.CombatState?.NotSurprised ?? false);
+                    WriteEngagements(writer, unit?.CombatState?.EngagedUnits);
+                    WriteEngagements(writer, unit?.CombatState?.EngagedBy);
 
                     var buffs = (unit?.BuffCollection?.Buffs ?? [])
                         .OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -106,6 +112,19 @@ namespace WOTRMultiplayer.Services
                 writer.Write(Quantize(position.X));
                 writer.Write(Quantize(position.Y));
                 writer.Write(Quantize(position.Z));
+            }
+        }
+
+        private static void WriteEngagements(BinaryWriter writer, System.Collections.Generic.IEnumerable<NetworkUnitEngagement> engagements)
+        {
+            var ordered = (engagements ?? [])
+                .OrderBy(x => x?.UnitId, StringComparer.Ordinal)
+                .ThenBy(x => x?.Rounds ?? 0).ToList();
+            writer.Write(ordered.Count);
+            foreach (var engagement in ordered)
+            {
+                WriteString(writer, engagement?.UnitId);
+                writer.Write(engagement?.Rounds ?? 0);
             }
         }
 

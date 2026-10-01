@@ -54,6 +54,50 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatHasher.Compute(order), Is.Not.EqualTo(baseline));
         }
 
+        [Test]
+        public void ProneAndEngagementDivergence_ChangeHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var prone = Sample();
+            prone.Combat.Units[0].Descriptor.State = new NetworkUnitState
+            {
+                Prone = new NetworkUnitProneState { Active = true }
+            };
+            var engagement = Sample();
+            engagement.Combat.Units[0].CombatState = new NetworkUnitCombatState
+            {
+                EngagedUnits = [new NetworkUnitEngagement { UnitId = "d", Rounds = 2 }]
+            };
+
+            Assert.That(RealTimeCombatHasher.Compute(prone), Is.Not.EqualTo(baseline));
+            Assert.That(RealTimeCombatHasher.Compute(engagement), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
+        public void EngagementOrder_DoesNotAffectHash()
+        {
+            var first = Sample();
+            first.Combat.Units[0].CombatState = new NetworkUnitCombatState
+            {
+                EngagedUnits =
+                [
+                    new NetworkUnitEngagement { UnitId = "d", Rounds = 2 },
+                    new NetworkUnitEngagement { UnitId = "e", Rounds = 1 }
+                ]
+            };
+            var second = Sample();
+            second.Combat.Units[0].CombatState = new NetworkUnitCombatState
+            {
+                EngagedUnits =
+                [
+                    new NetworkUnitEngagement { UnitId = "e", Rounds = 1 },
+                    new NetworkUnitEngagement { UnitId = "d", Rounds = 2 }
+                ]
+            };
+
+            Assert.That(RealTimeCombatHasher.Compute(second), Is.EqualTo(RealTimeCombatHasher.Compute(first)));
+        }
+
         private static RealTimeCombatSnapshot Sample()
         {
             return new RealTimeCombatSnapshot
