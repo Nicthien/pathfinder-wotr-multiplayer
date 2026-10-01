@@ -270,14 +270,6 @@ function Build-Experimental {
     if ($LASTEXITCODE -ne 0) { throw 'La compilation ou les tests ont échoué.' }
 }
 
-function Backup-Mod([string]$path, [string]$name) {
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $destination = Join-Path $backupRoot "$stamp-$name"
-    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-    Copy-Item -LiteralPath $path -Destination $destination -Recurse
-}
-
 function Install-Experimental([bool]$testOnly) {
     if ($testOnly) {
         Assert-UnvalidatedTestRequested
@@ -302,15 +294,43 @@ function Install-Experimental([bool]$testOnly) {
     if (-not $testOnly) {
         Assert-RuntimeReady (Get-ExperimentalFingerprint $buildPath $repoPath)
     }
-    Backup-Mod $targetPath 'experimental'
-    if (Test-Path -LiteralPath $targetPath) {
-        Remove-Item -LiteralPath $targetPath -Recurse
+    $candidatePath = Join-Path $slotRoot ("rtwp-candidate-" + [Guid]::NewGuid().ToString('N'))
+    $backupPath = Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-experimental-' + [Guid]::NewGuid().ToString('N'))
+    Assert-SafeModPath $candidatePath
+    if (-not [string]::Equals([IO.Path]::GetFullPath((Split-Path -Parent $backupPath)),
+            [IO.Path]::GetFullPath($backupRoot), [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Chemin de sauvegarde imprévu : $backupPath"
     }
-    New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
-    Copy-Item -Path (Join-Path $buildPath '*') -Destination $targetPath -Recurse -Force
-    New-Item -ItemType Directory -Path (Join-Path $targetPath 'localization') -Force | Out-Null
-    Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $targetPath 'localization') -Force
-    Assert-ExperimentalFingerprintParity $targetPath
+    if (Test-Path -LiteralPath $candidatePath) { throw "Dossier temporaire déjà présent : $candidatePath" }
+    if (Test-Path -LiteralPath $backupPath) { throw "Sauvegarde déjà présente : $backupPath" }
+    New-Item -ItemType Directory -Path $candidatePath -Force | Out-Null
+    $oldMoved = $false
+    try {
+        Copy-Item -Path (Join-Path $buildPath '*') -Destination $candidatePath -Recurse -Force
+        New-Item -ItemType Directory -Path (Join-Path $candidatePath 'localization') -Force | Out-Null
+        Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $candidatePath 'localization') -Force
+        Assert-ExperimentalFingerprintParity $candidatePath
+
+        if (Test-Path -LiteralPath $targetPath) {
+            New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+            Move-Item -LiteralPath $targetPath -Destination $backupPath
+            $oldMoved = $true
+        }
+        Move-Item -LiteralPath $candidatePath -Destination $targetPath
+        if ($oldMoved) { Write-Output "Ancien paquet expérimental conservé : $backupPath" }
+    }
+    catch {
+        if ($oldMoved -and -not (Test-Path -LiteralPath $targetPath) -and (Test-Path -LiteralPath $backupPath)) {
+            Move-Item -LiteralPath $backupPath -Destination $targetPath
+        }
+        throw
+    }
+    finally {
+        if (Test-Path -LiteralPath $candidatePath) {
+            Assert-SafeModPath $candidatePath
+            Remove-Item -LiteralPath $candidatePath -Recurse
+        }
+    }
 }
 
 function Enable-Stable {
