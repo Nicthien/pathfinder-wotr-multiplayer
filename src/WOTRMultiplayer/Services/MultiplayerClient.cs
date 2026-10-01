@@ -1620,11 +1620,18 @@ namespace WOTRMultiplayer.Services
                     && (state.Phase == CombatSynchronizationPhase.Repairing
                         || state.Phase == CombatSynchronizationPhase.FallingBackToTurnBased))
                 {
+                    if ((CombatMode)message.Mode == CombatMode.RealTimeWithPause
+                        && ReferenceEquals(_localCriticalFaultState, state)
+                        && _localCriticalFaultEpoch == message.Epoch)
+                        return;
                     state.Mode = (CombatMode)message.Mode;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     state.Phase = CombatSynchronizationPhase.Stable;
                     if (state.Mode == CombatMode.TurnBased)
+                    {
                         _disconnectedDuringRealTimeCombat = false;
+                        _localCriticalFaultState = null;
+                    }
                     SendRealTimeRepairAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
                     return;

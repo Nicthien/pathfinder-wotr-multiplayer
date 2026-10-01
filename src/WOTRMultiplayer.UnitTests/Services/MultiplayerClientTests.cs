@@ -657,12 +657,20 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Epoch = 7, Stage = (int)RealTimeModeTransitionStage.Complete,
                     Mode = (int)CombatMode.RealTimeWithPause, CanonicalStateHash = 123
                 });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(_networkClient)(-1,
+                new NotifyRealTimeRepair
+                {
+                    Epoch = 7, Stage = (int)RealTimeRepairStage.Resume,
+                    Mode = (int)CombatMode.RealTimeWithPause, CanonicalStateHash = 123
+                });
 
             Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
                 Is.EqualTo(CombatSynchronizationPhase.Repairing));
             A.CallTo(() => _gameInteractionService.SetPause(false)).MustNotHaveHappened();
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
                 x.Stage == (int)RealTimeModeTransitionStage.Complete))).MustNotHaveHappened();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Resume))).MustNotHaveHappened();
         }
 
         [Test]
