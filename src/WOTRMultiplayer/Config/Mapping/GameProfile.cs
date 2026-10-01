@@ -364,6 +364,7 @@ namespace WOTRMultiplayer.Config.Mapping
             var areaEffect = new NetworkAreaEffect
             {
                 Id = areaEffectEntityData.UniqueId,
+                BlueprintId = areaEffectEntityData.Blueprint.AssetGuid.ToString(),
                 Name = areaEffectEntityData.Blueprint.name,
                 Position = areaEffectEntityData.m_Position.ToNetworkVector3(),
                 UnitsInside = [.. areaEffectEntityData.m_UnitsInside.Select(x => x.Reference.UniqueId)],

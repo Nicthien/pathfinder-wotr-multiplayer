@@ -16,7 +16,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             var checkpoint = new NetworkCombatState
             {
                 Units = [CompleteUnit("summon")],
-                AreaEffects = [new NetworkAreaEffect { Id = "cloud", Position = new NetworkVector3() }]
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3() }]
             };
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
@@ -44,6 +44,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Units = [new NetworkUnit
                 {
                     Id = "hero",
+                    BlueprintId = "hero-type",
                     Position = new NetworkVector3(),
                     Descriptor = new NetworkUnitDescriptor
                     {
@@ -59,6 +60,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 AreaEffects = [new NetworkAreaEffect
                 {
                     Id = "cloud",
+                    BlueprintId = "cloud-type",
                     Position = new NetworkVector3(),
                     UnitsInside = ["missing-summon"]
                 }]
@@ -74,7 +76,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             var checkpoint = new NetworkCombatState
             {
-                AreaEffects = [new NetworkAreaEffect { Id = "cloud", Position = new NetworkVector3(), UnitsInside = ["missing", "missing"] }]
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3(), UnitsInside = ["missing", "missing"] }]
             };
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
@@ -93,7 +95,7 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
                 id => id == "hero", area => area.Id == "cloud"),
-                Is.EqualTo("invalid-area:cloud:occupants,invalid-area:cloud:position,invalid-unit:hero:buffs,invalid-unit:hero:position,invalid-unit:hero:state,invalid-unit:hero:stats"));
+                Is.EqualTo("invalid-area:cloud:blueprint,invalid-area:cloud:occupants,invalid-area:cloud:position,invalid-unit:hero:blueprint,invalid-unit:hero:buffs,invalid-unit:hero:position,invalid-unit:hero:state,invalid-unit:hero:stats"));
         }
 
         [Test]
@@ -128,7 +130,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             var checkpoint = new NetworkCombatState
             {
                 Units = [CompleteUnit("hero")],
-                AreaEffects = [new NetworkAreaEffect { Id = "cloud", Position = new NetworkVector3() }]
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3() }]
             };
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
@@ -136,9 +138,27 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Is.EqualTo("invalid-area:cloud:view"));
         }
 
+        [Test]
+        public void WrongLocalBlueprints_AreRejectedBeforeMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [CompleteUnit("hero")],
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3()
+                }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true, null, _ => "wrong-unit-type", _ => "wrong-area-type"),
+                Is.EqualTo("invalid-area:cloud:blueprint,invalid-unit:hero:blueprint"));
+        }
+
         private static NetworkUnit CompleteUnit(string id) => new NetworkUnit
         {
             Id = id,
+            BlueprintId = "hero-type",
             Position = new NetworkVector3(),
             Descriptor = new NetworkUnitDescriptor
             {

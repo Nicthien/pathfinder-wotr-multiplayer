@@ -21,6 +21,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(5)]
         public string Type { get; set; }
 
+        [ProtoMember(6)]
+        public string BlueprintId { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

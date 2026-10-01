@@ -49,5 +49,23 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatDiff.Summarize(host, client),
                 Is.EqualTo("unit:hero:prone+engagement"));
         }
+
+        [Test]
+        public void Summarize_IdentifiesWrongEntityBlueprints()
+        {
+            var host = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "summon", BlueprintId = "wolf" }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", BlueprintId = "fog" }]
+            };
+            var client = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "summon", BlueprintId = "bear" }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", BlueprintId = "fire" }]
+            };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client),
+                Is.EqualTo("unit:summon:blueprint,area:cloud:blueprint"));
+        }
     }
 }

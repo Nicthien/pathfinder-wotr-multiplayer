@@ -36,6 +36,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(9)]
         public NetworkUnitPartTacticalCombat UnitPartTacticalCombat { get; set; }
 
+        [ProtoMember(10)]
+        public string BlueprintId { get; set; }
+
         public override string ToString()
         {
             return Id?.ToString();

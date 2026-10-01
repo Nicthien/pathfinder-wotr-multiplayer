@@ -18,7 +18,11 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 CanonicalStateHash = 987654321UL,
                 ResponseTimeMs = 42,
                 MissingReplies = 3,
-                State = new NetworkCombatState { Units = [new NetworkUnit { Id = "unit-a" }] }
+                State = new NetworkCombatState
+                {
+                    Units = [new NetworkUnit { Id = "unit-a", BlueprintId = "unit-blueprint" }],
+                    AreaEffects = [new NetworkAreaEffect { Id = "area-a", BlueprintId = "area-blueprint" }]
+                }
             };
 
             var copy = Serializer.DeepClone(source);
@@ -29,6 +33,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.ResponseTimeMs, Is.EqualTo(42));
             Assert.That(copy.MissingReplies, Is.EqualTo(3));
             Assert.That(copy.State.Units[0].Id, Is.EqualTo("unit-a"));
+            Assert.That(copy.State.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
+            Assert.That(copy.State.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
         }
 
         [Test]

@@ -10,7 +10,9 @@ namespace WOTRMultiplayer.Services
     public static class RealTimeCombatEntityPreflight
     {
         public static string FindMissing(NetworkCombatState checkpoint, Func<string, bool> hasUnit,
-            Func<NetworkAreaEffect, bool> hasArea, Func<NetworkAreaEffect, bool> hasAreaView = null)
+            Func<NetworkAreaEffect, bool> hasArea, Func<NetworkAreaEffect, bool> hasAreaView = null,
+            Func<string, string> getUnitBlueprintId = null,
+            Func<NetworkAreaEffect, string> getAreaBlueprintId = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -30,6 +32,10 @@ namespace WOTRMultiplayer.Services
                 }
                 else
                 {
+                    if (string.IsNullOrEmpty(unit.BlueprintId) ||
+                        (getUnitBlueprintId != null && !string.Equals(unit.BlueprintId,
+                            getUnitBlueprintId(unit.Id), StringComparison.OrdinalIgnoreCase)))
+                        missing.Add($"invalid-unit:{unit.Id}:blueprint");
                     if (unit.Position == null) missing.Add($"invalid-unit:{unit.Id}:position");
                     if (unit.Descriptor?.State?.Prone == null) missing.Add($"invalid-unit:{unit.Id}:state");
                     if (unit.Descriptor?.Stats == null) missing.Add($"invalid-unit:{unit.Id}:stats");
@@ -63,6 +69,10 @@ namespace WOTRMultiplayer.Services
                 }
                 else
                 {
+                    if (string.IsNullOrEmpty(area.BlueprintId) ||
+                        (getAreaBlueprintId != null && !string.Equals(area.BlueprintId,
+                            getAreaBlueprintId(area), StringComparison.OrdinalIgnoreCase)))
+                        missing.Add($"invalid-area:{area.Id}:blueprint");
                     if (hasAreaView != null && !hasAreaView(area))
                         missing.Add($"invalid-area:{area.Id}:view");
                     if (area.Position == null) missing.Add($"invalid-area:{area.Id}:position");

@@ -355,7 +355,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
                         id => _gameStateLookupService.GetUnitEntity(id) != null,
                         area => _gameStateLookupService.GetAreaEffect(area) != null,
-                        area => _gameStateLookupService.GetAreaEffect(area)?.View != null);
+                        area => _gameStateLookupService.GetAreaEffect(area)?.View != null,
+                        id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
+                        area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString());
                     if (missing != null)
                     {
                         throw new InvalidOperationException(missing);
@@ -1090,6 +1092,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 var unit = new NetworkUnit
                 {
                     Id = unitEntity.UniqueId,
+                    BlueprintId = unitEntity.Blueprint?.AssetGuid.ToString(),
                     Position = unitEntity.Position.ToNetworkVector3(),
                     Orientation = unitEntity.Orientation,
                     TurnBasedInfo = includeTurnBasedInfo ? GetUnitTurnBasedInfo(unitEntity) : null,

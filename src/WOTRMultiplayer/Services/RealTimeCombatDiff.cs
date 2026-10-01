@@ -52,7 +52,8 @@ namespace WOTRMultiplayer.Services
                 else if (Hash(new NetworkCombatState { AreaEffects = [hostArea] })
                     != Hash(new NetworkCombatState { AreaEffects = [clientArea] }))
                 {
-                    differences.Add($"area:{id}");
+                    differences.Add(string.Equals(hostArea.BlueprintId, clientArea.BlueprintId,
+                        StringComparison.OrdinalIgnoreCase) ? $"area:{id}" : $"area:{id}:blueprint");
                 }
             }
 
@@ -75,6 +76,10 @@ namespace WOTRMultiplayer.Services
         private static string DescribeUnitDifference(string id, NetworkUnit expected, NetworkUnit actual)
         {
             var causes = new List<string>();
+            if (!string.Equals(expected.BlueprintId, actual.BlueprintId, StringComparison.OrdinalIgnoreCase))
+            {
+                causes.Add("blueprint");
+            }
             var expectedProne = expected.Descriptor?.State?.Prone;
             var actualProne = actual.Descriptor?.State?.Prone;
             if ((expectedProne?.Active ?? false) != (actualProne?.Active ?? false)

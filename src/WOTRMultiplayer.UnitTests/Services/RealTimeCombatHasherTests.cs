@@ -55,6 +55,19 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void UnitAndAreaBlueprintDivergence_ChangeHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var changedUnit = Sample();
+            changedUnit.Combat.Units[0].BlueprintId = "different-unit-blueprint";
+            var changedArea = Sample();
+            changedArea.Combat.AreaEffects[0].BlueprintId = "different-area-blueprint";
+
+            Assert.That(RealTimeCombatHasher.Compute(changedUnit), Is.Not.EqualTo(baseline));
+            Assert.That(RealTimeCombatHasher.Compute(changedArea), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
         public void AreaAndActiveOrderDivergence_ChangeHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());
