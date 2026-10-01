@@ -58,6 +58,8 @@ namespace WOTRMultiplayer.Services
         private readonly ConcurrentDictionary<string, ConcurrentQueue<NetworkAIAction>> _realTimeAIActions = new(StringComparer.Ordinal);
         private long _realTimeAISequenceEpoch;
         private long _lastRealTimeAISequence;
+        private NetworkRealTimeCombatState _localCriticalFaultState;
+        private long _localCriticalFaultEpoch;
         private volatile bool _disconnectedDuringRealTimeCombat;
 
         public Action OnNetworkError { get; set; }
@@ -152,6 +154,8 @@ namespace WOTRMultiplayer.Services
             if (!IsRealTimeCombatActive || Game.RealTimeCombat.Epoch != epoch
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
                 return;
+            _localCriticalFaultState = Game.RealTimeCombat;
+            _localCriticalFaultEpoch = epoch;
             Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
             try
             {
@@ -237,6 +241,7 @@ namespace WOTRMultiplayer.Services
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
             _disconnectedDuringRealTimeCombat = false;
+            _localCriticalFaultState = null;
 
             Game = null;
 
@@ -1461,11 +1466,18 @@ namespace WOTRMultiplayer.Services
                         || state.Phase == CombatSynchronizationPhase.Repairing)
                     && state.Mode == mode && state.CanonicalStateHash == message.CanonicalStateHash)
                 {
+                    if (mode == CombatMode.RealTimeWithPause
+                        && ReferenceEquals(_localCriticalFaultState, state)
+                        && _localCriticalFaultEpoch == message.Epoch)
+                        return;
                     state.PendingMode = null;
                     state.PreviousMode = null;
                     state.Phase = CombatSynchronizationPhase.Stable;
                     if (mode == CombatMode.TurnBased)
+                    {
                         _disconnectedDuringRealTimeCombat = false;
+                        _localCriticalFaultState = null;
+                    }
                     SendRealTimeModeAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
                     return;
@@ -1545,6 +1557,7 @@ namespace WOTRMultiplayer.Services
                     }
                     state.Epoch = message.Epoch;
                     state.LastAuthoritativeSequence = 0;
+                    _localCriticalFaultState = null;
                     _realTimeAIActions.Clear();
                     _realTimeAISequenceEpoch = message.Epoch;
                     _lastRealTimeAISequence = 0;

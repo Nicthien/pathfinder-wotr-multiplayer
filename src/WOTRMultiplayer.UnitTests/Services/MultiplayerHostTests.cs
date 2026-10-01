@@ -443,6 +443,57 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task CombatModeSwitch_CriticalNewRealTimeEpochFaultAbortsPendingCommit()
+        {
+            PrepareRealTimeRepairTest();
+            _multiplayerHost.Game.RealTimeCombat.Mode = CombatMode.TurnBased;
+            A.CallTo(() => _gameInteractionService.SetTurnBasedCombatModeAsync(false))
+                .Returns(Task.CompletedTask);
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause),
+                Is.True);
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(_networkServer)(42,
+                new ClientRealTimeModeTransitionAck
+                {
+                    Epoch = 1, PlayerId = 42,
+                    Stage = (int)RealTimeModeTransitionStage.Prepare, Applied = true
+                });
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Synchronizing));
+            var hash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash;
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(_networkServer)(42,
+                new ClientRealTimeModeTransitionAck
+                {
+                    Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Commit,
+                    Applied = true, CanonicalStateHash = hash
+                });
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Epoch == 1 && x.Stage == (int)RealTimeModeTransitionStage.Complete)))
+                .MustHaveHappenedOnceExactly();
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeAIActionFault>(_networkServer)(42,
+                new ClientRealTimeAIActionFault
+                {
+                    Epoch = 1, UnitId = "enemy-a", ActionId = "spell-a", Reason = "target-not-found"
+                });
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Epoch == 1 && x.Stage == (int)RealTimeModeTransitionStage.Abort
+                    && x.Mode == (int)CombatMode.TurnBased))).MustHaveHappenedOnceExactly();
+            var abortHash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash;
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(_networkServer)(42,
+                new ClientRealTimeModeTransitionAck
+                {
+                    Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Abort,
+                    Applied = true, CanonicalStateHash = abortHash
+                });
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Epoch == 1 && x.Stage == (int)RealTimeModeTransitionStage.Complete
+                    && x.Mode == (int)CombatMode.TurnBased))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public async Task CombatModeSwitch_HashMismatch_RollsBackThroughPausedAbort()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

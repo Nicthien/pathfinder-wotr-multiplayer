@@ -380,6 +380,7 @@ namespace WOTRMultiplayer.Services
             coordinator.AbortModeSwitch();
             _lastRealTimeModePrepare = null;
             _lastRealTimeModeCommit = null;
+            _lastRealTimeModeComplete = null;
             Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
             Game.RealTimeCombat.RequiredPlayers = requiredPlayers;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
@@ -2451,8 +2452,8 @@ namespace WOTRMultiplayer.Services
             }
             if ((state.Phase == CombatSynchronizationPhase.PreparingModeSwitch
                     || state.Phase == CombatSynchronizationPhase.Synchronizing)
-                && state.PreviousMode == CombatMode.RealTimeWithPause
-                && faultEpoch == state.Epoch - 1)
+                && (state.PreviousMode == CombatMode.RealTimeWithPause && faultEpoch == state.Epoch - 1
+                    || state.Mode == CombatMode.RealTimeWithPause && faultEpoch == state.Epoch))
             {
                 _realTimeCriticalFaulted = true;
                 _ = AbortRealTimeModeSwitchAsync();

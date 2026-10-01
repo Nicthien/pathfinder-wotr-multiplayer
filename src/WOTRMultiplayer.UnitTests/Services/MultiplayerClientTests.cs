@@ -637,6 +637,35 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeCriticalFault_DuplicateModeCompleteCannotReopenClientBarrier()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Epoch = 7,
+                    CanonicalStateHash = 123
+                }
+            };
+            _multiplayerClient.ReportRealTimeAIActionFault("enemy-a", "spell-a", "target-not-found");
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient)(-1,
+                new NotifyRealTimeModeTransition
+                {
+                    Epoch = 7, Stage = (int)RealTimeModeTransitionStage.Complete,
+                    Mode = (int)CombatMode.RealTimeWithPause, CanonicalStateHash = 123
+                });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _gameInteractionService.SetPause(false)).MustNotHaveHappened();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Complete))).MustNotHaveHappened();
+        }
+
+        [Test]
         public void RealTimeAI_ExplicitNoActionMarkerIsQueuedUntilConsumed()
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);
