@@ -96,6 +96,7 @@ namespace WOTRMultiplayer.Services
                 {
                     Logger.LogWarning("Client combat roll differed from host. Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Local={Local}, Host={Host}",
                         epoch, sequence, key, localResult, hostResult);
+                    EnterLocalCriticalFaultBarrier(epoch);
                     Send(new ClientRealTimeRuleRollFault
                     {
                         Epoch = epoch, Key = key, Sequence = sequence, Reason = "local-result-mismatch"
@@ -106,10 +107,13 @@ namespace WOTRMultiplayer.Services
             Logger.LogError("Authoritative combat roll unavailable; requesting paused repair. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
                 epoch, sequence, key);
             if (IsRealTimeCombatActive && Game.RealTimeCombat.Epoch == epoch)
+            {
+                EnterLocalCriticalFaultBarrier(epoch);
                 Send(new ClientRealTimeRuleRollFault
                 {
                     Epoch = epoch, Key = key, Sequence = sequence, Reason = "host-roll-timeout"
                 });
+            }
             return localResult;
         }
 
@@ -133,11 +137,30 @@ namespace WOTRMultiplayer.Services
             Logger.LogError("Authoritative entity ID unavailable; requesting protected fallback. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
                 epoch, sequence, key);
             if (IsRealTimeCombatActive && Game.RealTimeCombat.Epoch == epoch)
+            {
+                EnterLocalCriticalFaultBarrier(epoch);
                 Send(new ClientRealTimeEntityIdFault
                 {
                     Epoch = epoch, Key = key, Sequence = sequence, Reason = "host-id-timeout"
                 });
+            }
             return local;
+        }
+
+        private void EnterLocalCriticalFaultBarrier(long epoch)
+        {
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Epoch != epoch
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return;
+            Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
+            try
+            {
+                GameInteraction.SetPause(true);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to pause client after a critical real-time fault. Epoch={Epoch}", epoch);
+            }
         }
 
         protected override void ResetRealTimeRuleRolls()
@@ -245,11 +268,13 @@ namespace WOTRMultiplayer.Services
         {
             if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
                 return;
+            var epoch = Game.RealTimeCombat.Epoch;
             Logger.LogError("Authoritative real-time AI action cannot be applied. Epoch={Epoch}, UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
-                Game.RealTimeCombat.Epoch, unitId, actionId, reason);
+                epoch, unitId, actionId, reason);
+            EnterLocalCriticalFaultBarrier(epoch);
             Send(new ClientRealTimeAIActionFault
             {
-                Epoch = Game.RealTimeCombat.Epoch, UnitId = unitId, ActionId = actionId, Reason = reason
+                Epoch = epoch, UnitId = unitId, ActionId = actionId, Reason = reason
             });
         }
 

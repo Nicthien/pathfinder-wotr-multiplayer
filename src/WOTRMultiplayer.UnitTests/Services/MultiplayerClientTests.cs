@@ -144,6 +144,9 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(result, Is.EqualTo(19));
             Assert.That(localRolls, Is.EqualTo(1));
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRuleRollFault>.That.Matches(
                 fault => fault.Epoch == 7 && fault.Sequence == 1
                     && fault.Reason == "local-result-mismatch"))).MustHaveHappenedOnceExactly();
@@ -625,6 +628,9 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             _multiplayerClient.ReportRealTimeAIActionFault("enemy-a", "spell-a", "target-not-found");
 
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeAIActionFault>.That.Matches(x =>
                 x.Epoch == 7 && x.UnitId == "enemy-a" && x.ActionId == "spell-a"
                 && x.Reason == "target-not-found"))).MustHaveHappenedOnceExactly();

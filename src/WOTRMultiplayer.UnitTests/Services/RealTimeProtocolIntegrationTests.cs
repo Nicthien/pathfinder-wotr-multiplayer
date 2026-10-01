@@ -178,6 +178,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             Pump(queued, hostNetwork, clientNetwork);
 
             Assert.That(client.ResolveRealTimeEntityId("area:cloud", () => "client-id"), Is.EqualTo("client-id"));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
             var fault = (ClientRealTimeEntityIdFault)queued.Dequeue();
             Assert.That(fault.Reason, Is.EqualTo("host-id-timeout"));
             FakeUtils.GetNetworkReceiverHandler<ClientRealTimeEntityIdFault>(hostNetwork)(42, fault);

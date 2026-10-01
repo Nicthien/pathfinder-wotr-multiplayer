@@ -408,6 +408,41 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task CombatModeSwitch_CriticalOldEpochFaultAbortsThenStartsProtectedRepair()
+        {
+            PrepareRealTimeRepairTest();
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.PreparingModeSwitch));
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(_networkServer);
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeEntityIdFault>(_networkServer)(42,
+                new ClientRealTimeEntityIdFault
+                {
+                    Epoch = 0, Sequence = 1, Key = "unit:summon", Reason = "host-id-timeout"
+                });
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            var hash = _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash;
+            handler(42, new ClientRealTimeModeTransitionAck
+            {
+                Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Abort,
+                Applied = true, CanonicalStateHash = hash
+            });
+            handler(42, new ClientRealTimeModeTransitionAck
+            {
+                Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Complete,
+                Applied = true, CanonicalStateHash = hash
+            });
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Epoch, Is.EqualTo(2));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Epoch == 2 && x.Stage == (int)RealTimeRepairStage.Prepare)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public async Task CombatModeSwitch_HashMismatch_RollsBackThroughPausedAbort()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

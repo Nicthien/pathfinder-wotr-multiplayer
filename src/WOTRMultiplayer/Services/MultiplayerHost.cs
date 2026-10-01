@@ -217,12 +217,18 @@ namespace WOTRMultiplayer.Services
             var players = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).Distinct().ToList();
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             coordinator.RequestModeSwitch(mode, players);
+            var transitionState = Game.RealTimeCombat;
+            var transitionEpoch = transitionState.Epoch;
             _consecutiveMissingRealTimeReplies = 0;
             _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
             _realTimeModeRetransmissions = 0;
             try
             {
                 await GameInteraction.SetPauseAsync(true);
+                if (!ReferenceEquals(Game?.RealTimeCombat, transitionState)
+                    || transitionState.Epoch != transitionEpoch
+                    || transitionState.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                    return false;
                 _lastRealTimeModePrepare = new NotifyRealTimeModeTransition
                 {
                     Epoch = Game.RealTimeCombat.Epoch,
@@ -253,7 +259,13 @@ namespace WOTRMultiplayer.Services
             _realTimeModeCommitInProgress = true;
             try
             {
+                var transitionState = Game.RealTimeCombat;
+                var transitionEpoch = transitionState.Epoch;
                 var state = await CombatInteraction.GetRealTimeCombatStateAsync();
+                if (!ReferenceEquals(Game?.RealTimeCombat, transitionState)
+                    || transitionState.Epoch != transitionEpoch
+                    || transitionState.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
+                    return;
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
                 var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
                 coordinator.CommitModeSwitch(hash);
@@ -341,12 +353,25 @@ namespace WOTRMultiplayer.Services
             _lastRealTimeModeCommit = null;
             _lastRealTimeModeComplete = null;
             _lastRealTimeAbort = null;
-            GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+            if (_realTimeCriticalFaulted && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
+                && Game.Combat?.Stage == NetworkCombatStage.Running)
+            {
+                GameInteraction.SetPause(true);
+                _ = BeginRealTimeRepairAsync();
+            }
+            else
+            {
+                if (Game.RealTimeCombat.Mode == CombatMode.TurnBased)
+                    _realTimeCriticalFaulted = false;
+                GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+            }
         }
 
         private async Task AbortRealTimeModeSwitchAsync()
         {
-            if (Game?.RealTimeCombat == null || Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable)
+            if (Game?.RealTimeCombat == null
+                || (Game.RealTimeCombat.Phase != CombatSynchronizationPhase.PreparingModeSwitch
+                    && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Synchronizing))
             {
                 return;
             }
@@ -2379,14 +2404,11 @@ namespace WOTRMultiplayer.Services
         {
             _mainThreadAccessor.Post(() =>
             {
-                if (message == null || GetPlayer(receivedFrom) == null || !IsRealTimeCombatActive
-                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
-                    || message.Epoch != Game.RealTimeCombat.Epoch || message.Sequence <= 0)
+                if (message == null || message.Sequence <= 0
+                    || !TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch))
                     return;
-                Logger.LogWarning("Client could not obtain an authoritative combat roll; starting repair. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
+                Logger.LogWarning("Client could not confirm an authoritative combat roll. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.Sequence, message.Key, message.Reason);
-                _realTimeCriticalFaulted = true;
-                _ = BeginRealTimeRepairAsync();
             });
         }
 
@@ -2394,14 +2416,11 @@ namespace WOTRMultiplayer.Services
         {
             _mainThreadAccessor.Post(() =>
             {
-                if (message == null || GetPlayer(receivedFrom) == null || !IsRealTimeCombatActive
-                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
-                    || message.Epoch != Game.RealTimeCombat.Epoch || string.IsNullOrWhiteSpace(message.UnitId))
+                if (message == null || string.IsNullOrWhiteSpace(message.UnitId)
+                    || !TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch))
                     return;
-                Logger.LogWarning("Client could not apply authoritative combat AI action; starting protected fallback. PlayerId={PlayerId}, Epoch={Epoch}, UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
+                Logger.LogWarning("Client could not apply authoritative combat AI action. PlayerId={PlayerId}, Epoch={Epoch}, UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.UnitId, message.ActionId, message.Reason);
-                _realTimeCriticalFaulted = true;
-                _ = BeginRealTimeRepairAsync();
             });
         }
 
@@ -2409,15 +2428,49 @@ namespace WOTRMultiplayer.Services
         {
             _mainThreadAccessor.Post(() =>
             {
-                if (message == null || GetPlayer(receivedFrom) == null || !IsRealTimeCombatActive
-                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
-                    || message.Epoch != Game.RealTimeCombat.Epoch || message.Sequence <= 0)
+                if (message == null || message.Sequence <= 0
+                    || !TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch))
                     return;
-                Logger.LogWarning("Client could not obtain host entity ID; starting protected fallback. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
+                Logger.LogWarning("Client could not obtain host entity ID. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.Sequence, message.Key, message.Reason);
+            });
+        }
+
+        private bool TryHandleRealTimeCriticalFault(long receivedFrom, long faultEpoch)
+        {
+            if (GetPlayer(receivedFrom) == null || Game?.Combat?.Stage != NetworkCombatStage.Running
+                || Game.RealTimeCombat == null)
+                return false;
+            var state = Game.RealTimeCombat;
+            if (state.Phase == CombatSynchronizationPhase.Stable
+                && state.Mode == CombatMode.RealTimeWithPause && faultEpoch == state.Epoch)
+            {
                 _realTimeCriticalFaulted = true;
                 _ = BeginRealTimeRepairAsync();
-            });
+                return true;
+            }
+            if ((state.Phase == CombatSynchronizationPhase.PreparingModeSwitch
+                    || state.Phase == CombatSynchronizationPhase.Synchronizing)
+                && state.PreviousMode == CombatMode.RealTimeWithPause
+                && faultEpoch == state.Epoch - 1)
+            {
+                _realTimeCriticalFaulted = true;
+                _ = AbortRealTimeModeSwitchAsync();
+                return true;
+            }
+            if (state.Phase == CombatSynchronizationPhase.Repairing
+                && state.Mode == CombatMode.RealTimeWithPause
+                && (faultEpoch == state.Epoch || faultEpoch == state.Epoch - 1))
+            {
+                _realTimeCriticalFaulted = true;
+                if (_realTimeRepairStage.HasValue && _realTimeRepairStage != RealTimeRepairStage.Prepare)
+                {
+                    new RealTimeCombatCoordinator(state).ForceFallbackAfterUntrustedRuleResult();
+                    _ = StartRealTimeRepairFallbackAsync();
+                }
+                return true;
+            }
+            return false;
         }
 
         private void ProcessClientRealTimeStateHash(long receivedFrom, ClientRealTimeStateHash message)
