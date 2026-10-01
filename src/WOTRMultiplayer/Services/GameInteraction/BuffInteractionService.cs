@@ -128,6 +128,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 return;
             }
 
+            var baseTime = BuffBaseTime;
             foreach (var group in hostGroups)
             {
                 var matches = localGroups[group.Key];
@@ -143,10 +144,17 @@ namespace WOTRMultiplayer.Services.GameInteraction
                             unit.UniqueId, local.Count, local.Type);
                         return;
                     }
+                    if (duration.HasValue && group.Value.Count > 1
+                        && Math.Abs((decimal)duration.Value.Ticks - (local.EndTime.Value - baseTime).Ticks)
+                            > TimeSpan.FromSeconds(1).Ticks)
+                    {
+                        _logger.LogWarning("Ambiguous negative level timer repair refused. UnitId={UnitId}, Count={Count}, DrainType={DrainType}, Matches={Matches}",
+                            unit.UniqueId, local.Count, local.Type, group.Value.Count);
+                        return;
+                    }
                 }
             }
 
-            var baseTime = BuffBaseTime;
             foreach (var group in hostGroups)
             {
                 var matches = localGroups[group.Key];
