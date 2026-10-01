@@ -855,6 +855,83 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeAI_ReorderedHostChoicesWaitForMissingSequence()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(_networkClient);
+            handler.Invoke(-1, new NotifyAIActionSelected
+            {
+                RealTimeEpoch = 3, RealTimeSequence = 2,
+                Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "second" }
+            });
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out _), Is.False);
+
+            handler.Invoke(-1, new NotifyAIActionSelected
+            {
+                RealTimeEpoch = 3, RealTimeSequence = 1,
+                Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "first" }
+            });
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out var first), Is.True);
+            Assert.That(first.Id, Is.EqualTo("first"));
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out var second), Is.True);
+            Assert.That(second.Id, Is.EqualTo("second"));
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out _), Is.False);
+        }
+
+        [Test]
+        public void RealTimeAI_SequenceOverflowEntersRepairBarrier()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(_networkClient)(-1,
+                new NotifyAIActionSelected
+                {
+                    RealTimeEpoch = 3, RealTimeSequence = 130,
+                    Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "future" }
+                });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeAIActionFault>.That.Matches(x =>
+                x.Epoch == 3 && x.ActionId == "future"
+                && x.Reason == "host-choice-sequence-overflow"))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void RealTimeAI_UnfilledSequenceGapTimesOutIntoRepair()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(_networkClient)(-1,
+                new NotifyAIActionSelected
+                {
+                    RealTimeEpoch = 3, RealTimeSequence = 2,
+                    Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a", Id = "future" }
+                });
+
+            Assert.That(SpinWait.SpinUntil(() =>
+                _multiplayerClient.Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing,
+                TimeSpan.FromSeconds(7)), Is.True);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeAIActionFault>.That.Matches(x =>
+                x.Epoch == 3 && x.Reason == "host-choice-sequence-gap"))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void RealTimeAI_UnresolvableChoiceReportsEpochScopedFault()
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);

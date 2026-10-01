@@ -56,8 +56,14 @@ namespace WOTRMultiplayer.Services
         private long _realTimePauseRequestEpoch;
         private long _nextRealTimePauseRequestSequence;
         private readonly ConcurrentDictionary<string, ConcurrentQueue<NetworkAIAction>> _realTimeAIActions = new(StringComparer.Ordinal);
+        private readonly SortedDictionary<long, NetworkAIAction> _pendingRealTimeAIChoices = [];
+        private readonly object _realTimeAIChoiceLock = new();
+        private const int MaxPendingRealTimeAIChoices = 128;
+        private const int RealTimeAIChoiceGapTimeoutMs = 5000;
         private long _realTimeAISequenceEpoch;
         private long _lastRealTimeAISequence;
+        private long _realTimeAIChoiceGapExpectedSequence;
+        private long _realTimeAIChoiceGeneration;
         private NetworkGame _lastRealTimeDeathSession;
         private long _lastRealTimeDeathEpoch;
         private readonly HashSet<long> _appliedRealTimeDeathSequences = [];
@@ -257,19 +263,33 @@ namespace WOTRMultiplayer.Services
             }
 
             _networkClient?.Reset();
-            _realTimeAIActions.Clear();
-            _realTimeAISequenceEpoch = 0;
-            _lastRealTimeAISequence = 0;
+            ResetRealTimeAIChoices(0);
+        }
+
+        private void ResetRealTimeAIChoices(long epoch)
+        {
+            lock (_realTimeAIChoiceLock)
+            {
+                _realTimeAIActions.Clear();
+                _pendingRealTimeAIChoices.Clear();
+                _realTimeAISequenceEpoch = epoch;
+                _lastRealTimeAISequence = 0;
+                _realTimeAIChoiceGapExpectedSequence = 0;
+                _realTimeAIChoiceGeneration++;
+            }
         }
 
         public bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action)
         {
             action = null;
-            return IsRealTimeCombatActive && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
-                && _realTimeAISequenceEpoch == Game.RealTimeCombat.Epoch
-                && !string.IsNullOrWhiteSpace(unitId)
-                && _realTimeAIActions.TryGetValue(unitId, out var queue)
-                && queue.TryDequeue(out action);
+            lock (_realTimeAIChoiceLock)
+            {
+                return IsRealTimeCombatActive && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                    && _realTimeAISequenceEpoch == Game.RealTimeCombat.Epoch
+                    && !string.IsNullOrWhiteSpace(unitId)
+                    && _realTimeAIActions.TryGetValue(unitId, out var queue)
+                    && queue.TryDequeue(out action);
+            }
         }
 
         public void ReportRealTimeAIActionFault(string unitId, string actionId, string reason)
@@ -1496,9 +1516,7 @@ namespace WOTRMultiplayer.Services
                     state.PendingMode = mode;
                     state.Epoch = message.Epoch;
                     state.LastAuthoritativeSequence = 0;
-                    _realTimeAIActions.Clear();
-                    _realTimeAISequenceEpoch = message.Epoch;
-                    _lastRealTimeAISequence = 0;
+                    ResetRealTimeAIChoices(message.Epoch);
                     state.Phase = CombatSynchronizationPhase.PreparingModeSwitch;
                     var paused = await PauseClientAtProjectileSafePointAsync(session, state, message.Epoch);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
@@ -1514,9 +1532,7 @@ namespace WOTRMultiplayer.Services
                 {
                     state.Epoch = message.Epoch;
                     state.LastAuthoritativeSequence = 0;
-                    _realTimeAIActions.Clear();
-                    _realTimeAISequenceEpoch = message.Epoch;
-                    _lastRealTimeAISequence = 0;
+                    ResetRealTimeAIChoices(message.Epoch);
                 }
 
                 if (message.Epoch != state.Epoch)
@@ -1722,9 +1738,7 @@ namespace WOTRMultiplayer.Services
                     state.Epoch = message.Epoch;
                     state.LastAuthoritativeSequence = 0;
                     _localCriticalFaultState = null;
-                    _realTimeAIActions.Clear();
-                    _realTimeAISequenceEpoch = message.Epoch;
-                    _lastRealTimeAISequence = 0;
+                    ResetRealTimeAIChoices(message.Epoch);
                     state.Phase = CombatSynchronizationPhase.Repairing;
                     await GameInteraction.SetPauseAsync(true);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
@@ -1739,9 +1753,7 @@ namespace WOTRMultiplayer.Services
                 {
                     state.Epoch = message.Epoch;
                     state.LastAuthoritativeSequence = 0;
-                    _realTimeAIActions.Clear();
-                    _realTimeAISequenceEpoch = message.Epoch;
-                    _lastRealTimeAISequence = 0;
+                    ResetRealTimeAIChoices(message.Epoch);
                     state.Phase = CombatSynchronizationPhase.Repairing;
                     await GameInteraction.SetPauseAsync(true);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
@@ -1895,26 +1907,63 @@ namespace WOTRMultiplayer.Services
             if (Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause)
             {
                 if (message?.Action == null || message.RealTimeEpoch != Game.RealTimeCombat.Epoch
-                    || message.RealTimeSequence <= 0)
+                    || message.RealTimeSequence <= 0
+                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
                 {
                     return;
                 }
-                if (_realTimeAISequenceEpoch != message.RealTimeEpoch)
-                {
-                    _realTimeAISequenceEpoch = message.RealTimeEpoch;
-                    _lastRealTimeAISequence = 0;
-                    _realTimeAIActions.Clear();
-                }
-                if (message.RealTimeSequence <= _lastRealTimeAISequence)
-                {
-                    return;
-                }
-                _lastRealTimeAISequence = message.RealTimeSequence;
                 var authoritativeAction = Mapper.Map<NetworkAIAction>(message.Action);
-                if (!string.IsNullOrWhiteSpace(authoritativeAction.UnitId))
+                if (authoritativeAction == null || string.IsNullOrWhiteSpace(authoritativeAction.UnitId))
                 {
-                    _realTimeAIActions.GetOrAdd(authoritativeAction.UnitId, _ => new ConcurrentQueue<NetworkAIAction>()).Enqueue(authoritativeAction);
+                    ReportRealTimeAIActionFault(null, null, "host-choice-unit-missing");
+                    return;
                 }
+                var overflow = false;
+                long gapExpectedSequence = 0;
+                long gapGeneration = 0;
+                NetworkGame gapSession = null;
+                lock (_realTimeAIChoiceLock)
+                {
+                    if (Game.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause
+                        || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                        || Game.RealTimeCombat.Epoch != message.RealTimeEpoch)
+                        return;
+                    if (_realTimeAISequenceEpoch != message.RealTimeEpoch)
+                        ResetRealTimeAIChoices(message.RealTimeEpoch);
+                    if (message.RealTimeSequence <= _lastRealTimeAISequence
+                        || _pendingRealTimeAIChoices.ContainsKey(message.RealTimeSequence))
+                        return;
+                    if (message.RealTimeSequence - _lastRealTimeAISequence > MaxPendingRealTimeAIChoices
+                        || _pendingRealTimeAIChoices.Count >= MaxPendingRealTimeAIChoices)
+                    {
+                        overflow = true;
+                    }
+                    else
+                    {
+                        _pendingRealTimeAIChoices.Add(message.RealTimeSequence, authoritativeAction);
+                        while (_pendingRealTimeAIChoices.TryGetValue(_lastRealTimeAISequence + 1, out var next))
+                        {
+                            _pendingRealTimeAIChoices.Remove(++_lastRealTimeAISequence);
+                            _realTimeAIActions.GetOrAdd(next.UnitId,
+                                _ => new ConcurrentQueue<NetworkAIAction>()).Enqueue(next);
+                        }
+                        var expected = _pendingRealTimeAIChoices.Count > 0
+                            ? _lastRealTimeAISequence + 1 : 0;
+                        if (expected != _realTimeAIChoiceGapExpectedSequence)
+                        {
+                            _realTimeAIChoiceGapExpectedSequence = expected;
+                            gapExpectedSequence = expected;
+                            gapGeneration = _realTimeAIChoiceGeneration;
+                            gapSession = Game;
+                        }
+                    }
+                }
+                if (overflow)
+                    ReportRealTimeAIActionFault(authoritativeAction.UnitId, authoritativeAction.Id,
+                        "host-choice-sequence-overflow");
+                if (gapExpectedSequence > 0)
+                    _ = CheckRealTimeAIChoiceGapAsync(gapSession, message.RealTimeEpoch,
+                        gapExpectedSequence, gapGeneration);
                 return;
             }
 
@@ -1922,6 +1971,26 @@ namespace WOTRMultiplayer.Services
 
             var aiAction = Mapper.Map<NetworkAIAction>(message.Action);
             Game.Combat.Turn.AIActions.Add(aiAction);
+        }
+
+        private async Task CheckRealTimeAIChoiceGapAsync(NetworkGame session, long epoch,
+            long expectedSequence, long generation)
+        {
+            await Task.Delay(RealTimeAIChoiceGapTimeoutMs);
+            bool gapStillOpen;
+            lock (_realTimeAIChoiceLock)
+            {
+                gapStillOpen = ReferenceEquals(Game, session)
+                    && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
+                    && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                    && Game.RealTimeCombat.Epoch == epoch
+                    && _realTimeAISequenceEpoch == epoch
+                    && _realTimeAIChoiceGeneration == generation
+                    && _realTimeAIChoiceGapExpectedSequence == expectedSequence
+                    && _pendingRealTimeAIChoices.Count > 0;
+            }
+            if (gapStillOpen)
+                ReportRealTimeAIActionFault(null, null, "host-choice-sequence-gap");
         }
 
         private async void OnNotifyGlobalMapCommonPopupShown(long receivedFrom, NotifyGlobalMapCommonPopupShown message)
