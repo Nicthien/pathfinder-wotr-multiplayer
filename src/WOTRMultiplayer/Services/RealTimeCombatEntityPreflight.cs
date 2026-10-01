@@ -18,12 +18,21 @@ namespace WOTRMultiplayer.Services
                     : hasUnit == null ? nameof(hasUnit) : nameof(hasArea));
             }
 
-            var missing = new List<string>();
+            var missing = new HashSet<string>(StringComparer.Ordinal);
             foreach (var unit in checkpoint.Units ?? [])
             {
                 if (unit?.Id == null || !hasUnit(unit.Id))
                 {
                     missing.Add($"missing-unit:{unit?.Id ?? "<null>"}");
+                }
+                if (unit?.Id == null) { continue; }
+                foreach (var engagement in (unit.CombatState?.EngagedUnits ?? [])
+                    .Concat(unit.CombatState?.EngagedBy ?? []))
+                {
+                    if (engagement?.UnitId == null || !hasUnit(engagement.UnitId))
+                    {
+                        missing.Add($"missing-engagement-target:{unit.Id}:{engagement?.UnitId ?? "<null>"}");
+                    }
                 }
             }
             foreach (var area in checkpoint.AreaEffects ?? [])
@@ -32,13 +41,20 @@ namespace WOTRMultiplayer.Services
                 {
                     missing.Add($"missing-area:{area?.Id ?? "<null>"}");
                 }
+                if (area?.Id == null) { continue; }
+                foreach (var unitId in area.UnitsInside ?? [])
+                {
+                    if (unitId == null || !hasUnit(unitId))
+                    {
+                        missing.Add($"missing-area-unit:{area.Id}:{unitId ?? "<null>"}");
+                    }
+                }
             }
             if (missing.Count == 0)
             {
                 return null;
             }
-            missing.Sort(StringComparer.Ordinal);
-            var visible = missing.Take(12).ToList();
+            var visible = missing.OrderBy(x => x, StringComparer.Ordinal).Take(12).ToList();
             if (missing.Count > visible.Count)
             {
                 visible.Add($"and-{missing.Count - visible.Count}-more");

@@ -34,5 +34,43 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
                 _ => false, _ => false), Is.EqualTo("missing-area:cloud,missing-unit:summon"));
         }
+
+        [Test]
+        public void MissingAreaOccupantAndEngagementTarget_BlockCheckpointBeforeMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [new NetworkUnit
+                {
+                    Id = "hero",
+                    CombatState = new NetworkUnitCombatState
+                    {
+                        EngagedUnits = [new NetworkUnitEngagement { UnitId = "missing-enemy" }]
+                    }
+                }],
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud",
+                    UnitsInside = ["missing-summon"]
+                }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                id => id == "hero", area => area.Id == "cloud"),
+                Is.EqualTo("missing-area-unit:cloud:missing-summon,missing-engagement-target:hero:missing-enemy"));
+        }
+
+        [Test]
+        public void RepeatedMissingReferences_AreReportedOnce()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", UnitsInside = ["missing", "missing"] }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => false, area => area.Id == "cloud"),
+                Is.EqualTo("missing-area-unit:cloud:missing"));
+        }
     }
 }

@@ -46,6 +46,8 @@ Repair completion likewise holds the host paused and blocks saving until each co
 
 Before applying any RTwP checkpoint, the client now verifies that every referenced unit and area-effect entity exists locally. If a summon or effect is absent, no partial checkpoint is applied; the failure reply includes bounded entity IDs and the host enters paused repair. This improves diagnosis and safety, but does not yet create the missing entity; a repeatedly missing entity still causes the protected turn-based fallback stop.
 
+The preflight also validates units referenced inside active areas and by combat engagements. A missing area occupant or engagement target is rejected before any unit, buff or area mutation, with a bounded cause such as `missing-area-unit:cloud:summon` or `missing-engagement-target:hero:enemy`.
+
 The moving fingerprint now also contains a bounded ledger of the last 32 orders accepted by the host, including a digest of each move/attack/ability payload. The client records an order only after successfully executing the host's accepted message. This detects missing or altered command traffic; it is not yet a complete projection of all currently executing Unity commands.
 
 Protocol version 15 additionally fingerprints prone state and both sides of unit engagement, so a knockdown or attack-of-opportunity relationship mismatch enters the same repair path. Engagement collections are sorted canonically before hashing. Elapsed engagement rounds are deliberately omitted from the moving hash because the game derives them from local game time and host/client snapshot reads are not simultaneous.
