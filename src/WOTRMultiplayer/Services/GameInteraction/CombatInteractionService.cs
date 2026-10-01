@@ -1186,7 +1186,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 try
                 {
                     var failure = TurnEndUnitUpdatePreflight.FindFailure(networkUnits,
-                        id => _gameStateLookupService.GetUnitEntity(id) != null, updatePosition);
+                        id => _gameStateLookupService.GetUnitEntity(id) != null, updatePosition,
+                        id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
+                        id => _gameStateLookupService.GetUnitEntity(id)?.HoldingState?.SceneName);
                     if (failure != null)
                     {
                         _logger.LogError("Turn-end unit checkpoint rejected before mutation. Reason={Reason}", failure);

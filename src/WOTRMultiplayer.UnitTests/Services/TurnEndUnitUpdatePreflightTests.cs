@@ -11,7 +11,8 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public void CompleteExistingUnit_IsAccepted()
         {
-            Assert.That(TurnEndUnitUpdatePreflight.FindFailure([Sample()], id => id == "hero", true), Is.Null);
+            Assert.That(TurnEndUnitUpdatePreflight.FindFailure([Sample()], id => id == "hero", true,
+                _ => "unit-blueprint", _ => "scene-a"), Is.Null);
         }
 
         [Test]
@@ -36,9 +37,20 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Is.EqualTo("invalid-position:hero"));
         }
 
+        [Test]
+        public void WrongBlueprintOrScene_IsRejectedBeforeMutation()
+        {
+            Assert.That(TurnEndUnitUpdatePreflight.FindFailure([Sample()], _ => true, true,
+                _ => "another-blueprint", _ => "scene-a"), Is.EqualTo("wrong-blueprint:hero"));
+            Assert.That(TurnEndUnitUpdatePreflight.FindFailure([Sample()], _ => true, true,
+                _ => "unit-blueprint", _ => "scene-b"), Is.EqualTo("wrong-scene:hero"));
+        }
+
         private static NetworkUnit Sample() => new()
         {
             Id = "hero",
+            BlueprintId = "unit-blueprint",
+            SceneName = "scene-a",
             Position = new NetworkVector3(),
             Descriptor = new NetworkUnitDescriptor
             {
