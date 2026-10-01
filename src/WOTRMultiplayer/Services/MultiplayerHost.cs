@@ -692,17 +692,22 @@ namespace WOTRMultiplayer.Services
             var incompatiblePlayer = Game.Players.FirstOrDefault(p =>
                 p.ContentState.RealTimeProtocolVersion != NetworkRealTimeCombatState.ProtocolVersion
                 || (hostContent != null && !string.Equals(p.ContentState.GameVersion, hostContent.GameVersion, StringComparison.OrdinalIgnoreCase))
+                || string.IsNullOrWhiteSpace(p.ContentState.RealTimeBuildFingerprint)
+                || (hostContent != null && !string.Equals(p.ContentState.RealTimeBuildFingerprint,
+                    hostContent.RealTimeBuildFingerprint, StringComparison.OrdinalIgnoreCase))
                 || p.ContentState.DiscrepantDLCs.Any()
                 || p.ContentState.DiscrepantMods.Any());
             if (incompatiblePlayer != null)
             {
                 Logger.LogWarning(
-                    "Cannot start lobby: incompatible content. PlayerId={PlayerId}, HostGameVersion={HostGameVersion}, ClientGameVersion={ClientGameVersion}, HostProtocol={HostProtocol}, ClientProtocol={ClientProtocol}, DLCs={DLCs}, Mods={Mods}",
+                    "Cannot start lobby: incompatible content. PlayerId={PlayerId}, HostGameVersion={HostGameVersion}, ClientGameVersion={ClientGameVersion}, HostProtocol={HostProtocol}, ClientProtocol={ClientProtocol}, HostBuild={HostBuild}, ClientBuild={ClientBuild}, DLCs={DLCs}, Mods={Mods}",
                     incompatiblePlayer.Id,
                     hostContent?.GameVersion,
                     incompatiblePlayer.ContentState.GameVersion,
                     NetworkRealTimeCombatState.ProtocolVersion,
                     incompatiblePlayer.ContentState.RealTimeProtocolVersion,
+                    hostContent?.RealTimeBuildFingerprint,
+                    incompatiblePlayer.ContentState.RealTimeBuildFingerprint,
                     string.Join(", ", incompatiblePlayer.ContentState.DiscrepantDLCs.Select(x => $"{x.DLC?.Id}:{x.Reason}")),
                     string.Join(", ", incompatiblePlayer.ContentState.DiscrepantMods.Select(x => $"{x.Id}:{x.Reason}:host={x.HostVersion}:client={x.Version}")));
                 PlayerNotification.ShowModalMessage(WellKnownKeys.MultiplayerWindow.ExternalServers.Errors.ModConflict.Key);

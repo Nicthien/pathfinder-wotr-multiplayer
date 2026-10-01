@@ -2956,9 +2956,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public NetworkContentState GetInstalledContent()
         {
+            string buildFingerprint = null;
+            try
+            {
+                buildFingerprint = RealTimeBuildFingerprint.Compute(Main.ModManagerSettings.ModFolder);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unable to fingerprint installed multiplayer build; lobby compatibility will fail closed");
+            }
             var state = new NetworkContentState
             {
                 GameVersion = GameVersion.Cached,
+                RealTimeBuildFingerprint = buildFingerprint,
                 DLCs = GetInstalledDLCs(),
                 Mods = GetInstalledMods()
             };

@@ -9,6 +9,22 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void ContentState_RoundTripsExactBuildFingerprint()
+        {
+            var source = new NetworkContentState
+            {
+                GameVersion = "2.7.0",
+                RealTimeProtocolVersion = 30,
+                RealTimeBuildFingerprint = "ABCD1234"
+            };
+
+            var copy = Serializer.DeepClone(source);
+
+            Assert.That(copy.RealTimeProtocolVersion, Is.EqualTo(30));
+            Assert.That(copy.RealTimeBuildFingerprint, Is.EqualTo("ABCD1234"));
+        }
+
+        [Test]
         public void Snapshot_RoundTripsEpochSequenceHashAndCombatState()
         {
             var source = new NotifyRealTimeCombatSnapshot

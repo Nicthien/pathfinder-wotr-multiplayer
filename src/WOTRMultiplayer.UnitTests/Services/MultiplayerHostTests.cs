@@ -191,6 +191,27 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void Start_RejectsDifferentBuildFingerprintBeforeSaveTransfer()
+        {
+            var startUp = new NetworkGameStartUp { SavePath = Guid.NewGuid().ToString(), IsNewGameSequence = false };
+            A.CallTo(() => _multiplayerSettingsProvider.GetSettings()).Returns(new NetworkMultiplayerSettings());
+            _multiplayerHost.Create(Guid.NewGuid().ToString(), null, null, startUp);
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(-1)
+            {
+                IsHost = true,
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeBuildFingerprint = "host-build" }
+            });
+            _multiplayerHost.Game.Players.Add(new NetworkPlayer(42)
+            {
+                ContentState = new NetworkContentState { GameVersion = "2.7", RealTimeBuildFingerprint = "other-build" }
+            });
+
+            Assert.That(_multiplayerHost.Start(), Is.False);
+            Assert.That(_multiplayerHost.Game.Stage, Is.EqualTo(NetworkLobbyStage.Lobby));
+            A.CallTo(() => _fileSystemService.GetRawFileContent(A<string>._)).MustNotHaveHappened();
+        }
+
+        [Test]
         public void RealTimeSnapshot_IsPublishedOnlyDuringStableRealTimeCombat()
         {
             _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
