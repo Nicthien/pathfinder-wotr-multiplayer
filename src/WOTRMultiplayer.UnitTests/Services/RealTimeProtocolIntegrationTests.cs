@@ -209,6 +209,49 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_CombatMessagesDuringModeBarrier_DoNotMutateClient()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(hostNetwork)(42,
+                (ClientRealTimeModeTransitionAck)queued.Dequeue());
+            DeliverToClient(clientNetwork, (NotifyRealTimeModeTransition)queued.Dequeue());
+
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Synchronizing));
+            var epoch = client.Game.RealTimeCombat.Epoch;
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(clientNetwork)(
+                NetworkConstants.HostPlayerId, new NotifyRealTimeCombatSnapshot
+            {
+                Epoch = epoch,
+                Sequence = 1,
+                State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
+            });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(clientNetwork)(
+                NetworkConstants.HostPlayerId, new NotifyRealTimeCombatCommandAccepted
+            {
+                Epoch = epoch,
+                AuthoritativeSequence = 1,
+                Kind = (int)RealTimeCommandKind.Move,
+                Movement = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkUnitMoveTo
+                {
+                    InitiatorUnitId = "guest-unit"
+                }
+            });
+
+            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .MustHaveHappenedOnceExactly(); // Commit only; not the reordered moving snapshot.
+            A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
+                A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))
+                .MustNotHaveHappened();
+            Assert.That(client.Game.RealTimeCombat.LastAuthoritativeSequence, Is.Zero);
+
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+        }
+
+        [Test]
         public async Task TwoActors_LostAbortComplete_RemainsPausedUntilAcknowledged()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
