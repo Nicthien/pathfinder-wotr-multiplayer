@@ -2518,12 +2518,19 @@ namespace WOTRMultiplayer.Services
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
             _realTimeRepairRetransmissions = 0;
+            var session = Game;
+            var combat = session.RealTimeCombat;
+            var epoch = combat.Epoch;
             try
             {
                 await GameInteraction.SetPauseAsync(true);
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, combat)
+                    || combat.Epoch != epoch || combat.Phase != CombatSynchronizationPhase.Repairing
+                    || _realTimeRepairStage != RealTimeRepairStage.Prepare)
+                    return;
                 _lastRealTimeRepairMessage = new NotifyRealTimeRepair
                 {
-                    Epoch = Game.RealTimeCombat.Epoch,
+                    Epoch = epoch,
                     Stage = (int)RealTimeRepairStage.Prepare,
                     Mode = (int)CombatMode.RealTimeWithPause
                 };

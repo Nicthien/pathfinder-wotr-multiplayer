@@ -531,6 +531,34 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task RealTimeRepair_DelayedPauseCannotPublishPrepareForReplacedSession()
+        {
+            PrepareRealTimeRepairTest();
+            var pause = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).Returns(pause.Task);
+
+            var repair = _multiplayerHost.BeginRealTimeRepairAsync();
+            var oldSession = _multiplayerHost.Game;
+            Assert.That(oldSession.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause,
+                    Epoch = oldSession.RealTimeCombat.Epoch,
+                    Phase = CombatSynchronizationPhase.Repairing
+                }
+            };
+            pause.SetResult(true);
+            await repair;
+
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Prepare))).MustNotHaveHappened();
+        }
+
+        [Test]
         public async Task RealTimeRepair_OldSessionSampleCannotVerifyNewSessionWithSameEpoch()
         {
             PrepareRealTimeRepairTest();
