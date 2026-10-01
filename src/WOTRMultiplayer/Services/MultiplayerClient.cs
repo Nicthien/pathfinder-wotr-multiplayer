@@ -1139,8 +1139,9 @@ namespace WOTRMultiplayer.Services
                 Game.RealTimeCombat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
 
                 var state = Mapper.Map<NetworkCombatState>(message.State);
-                await CombatInteraction.UpdateRealTimeCombatStateAsync(state);
-                var actual = await CombatInteraction.GetRealTimeCombatStateAsync();
+                // Apply and sample inside one main-thread dispatch. A game tick between two
+                // separate dispatches makes a moving unit appear divergent even after correction.
+                var actual = await CombatInteraction.ApplyAndReadRealTimeCombatStateAsync(state);
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
                 {
                     Combat = actual,

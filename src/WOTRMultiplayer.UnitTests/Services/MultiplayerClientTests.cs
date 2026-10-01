@@ -210,9 +210,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
             };
-            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
-                .Returns(Task.CompletedTask);
-            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
+            A.CallTo(() => _combatInteractionService.ApplyAndReadRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .Returns(Task.FromResult(new NetworkCombatState()));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
 
             handler.Invoke(-1, new NotifyRealTimeCombatSnapshot
@@ -229,6 +228,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
             Assert.That(_multiplayerClient.Game.RealTimeCombat.ResponseTimeMs, Is.EqualTo(42));
             Assert.That(_multiplayerClient.Game.RealTimeCombat.MissingSnapshotReplies, Is.EqualTo(3));
+            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .MustNotHaveHappened();
         }
 
         [Test]
@@ -238,8 +239,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
             };
-            A.CallTo(() => _combatInteractionService.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
-                .Returns(Task.FromException(new InvalidOperationException("missing unit")));
+            A.CallTo(() => _combatInteractionService.ApplyAndReadRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .Returns(Task.FromException<NetworkCombatState>(new InvalidOperationException("missing unit")));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
 
             handler.Invoke(-1, new NotifyRealTimeCombatSnapshot

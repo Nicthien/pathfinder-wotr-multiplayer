@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using ProtoBuf;
 using WOTRMultiplayer.Entities.Combat.RealTime;
@@ -50,6 +52,24 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeAcceptedOrderLedger.Snapshot(state), Is.Empty);
             RealTimeAcceptedOrderLedger.Record(state, Move(4, 1, 1));
             Assert.That(RealTimeAcceptedOrderLedger.Snapshot(state).Length, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ConcurrentRecordAndSnapshot_RetainLatestOrderedCommands()
+        {
+            var state = new NetworkRealTimeCombatState { Epoch = 3 };
+
+            Parallel.For(1, 129, sequence =>
+            {
+                RealTimeAcceptedOrderLedger.Record(state, Move(3, sequence, sequence));
+                var current = RealTimeAcceptedOrderLedger.Snapshot(state);
+                Assert.That(current.Length, Is.LessThanOrEqualTo(32));
+                Assert.That(current.Select(order => order.Sequence), Is.Ordered);
+            });
+
+            var retained = RealTimeAcceptedOrderLedger.Snapshot(state);
+            Assert.That(retained.Select(order => order.Sequence),
+                Is.EqualTo(Enumerable.Range(97, 32).Select(value => (long)value)));
         }
 
         private static NotifyRealTimeCombatCommandAccepted Move(long epoch, long sequence, float x) => new()

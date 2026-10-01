@@ -4,7 +4,7 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 27;
+        public const int ProtocolVersion = 28;
 
         public List<RealTimeCommandEnvelope> AcceptedOrders { get; set; } = [];
 

@@ -78,5 +78,32 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(task.IsCompleted, Is.True);
             Assert.That(task.IsFaulted, Is.True);
         }
+
+        [Test]
+        public void ApplyAndReadRealTimeCombatStateAsync_MissingEntityFaultsInOneMainThreadDispatch()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            var dispatches = 0;
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) =>
+            {
+                dispatches++;
+                action();
+            });
+            var lookup = A.Fake<IGameStateLookupService>();
+            A.CallTo(() => lookup.GetAreaEffect(A<NetworkAreaEffect>._)).Returns(null);
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+
+            var task = service.ApplyAndReadRealTimeCombatStateAsync(new NetworkCombatState
+            {
+                AreaEffects = [new NetworkAreaEffect { Id = "missing-area" }]
+            });
+
+            Assert.That(dispatches, Is.EqualTo(1));
+            Assert.That(task.IsFaulted, Is.True);
+            Assert.That(task.Exception?.GetBaseException().Message, Is.EqualTo("missing-area:missing-area"));
+        }
     }
 }

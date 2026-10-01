@@ -44,6 +44,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         Task UpdateRealTimeCombatStateAsync(NetworkCombatState networkCombatState);
 
+        Task<NetworkCombatState> ApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState);
+
         void InitializeCrusadeArmyCombat();
 
         int GetCrusadeArmyCombatAreaSeed();

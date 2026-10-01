@@ -15,7 +15,7 @@ namespace WOTRMultiplayer.Services
 
         public static void Record(NetworkRealTimeCombatState state, NotifyRealTimeCombatCommandAccepted accepted)
         {
-            if (state == null || accepted == null || accepted.Epoch != state.Epoch
+            if (state == null || accepted == null
                 || accepted.AuthoritativeSequence <= 0)
             {
                 return;
@@ -28,31 +28,36 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
-            state.AcceptedOrders.RemoveAll(order => order.Epoch != state.Epoch);
-            if (state.AcceptedOrders.Any(order => order.Sequence == accepted.AuthoritativeSequence))
-            {
-                return;
-            }
             using var bytes = new MemoryStream();
             Serializer.Serialize(bytes, accepted);
             using var sha = SHA256.Create();
-            state.AcceptedOrders.Add(new RealTimeCommandEnvelope
+            var payload = Convert.ToBase64String(sha.ComputeHash(bytes.ToArray()));
+            lock (state)
             {
-                Epoch = accepted.Epoch,
-                Sequence = accepted.AuthoritativeSequence,
-                PlayerId = accepted.PlayerId,
-                UnitId = unitId,
-                Kind = (RealTimeCommandKind)accepted.Kind,
-                Payload = Convert.ToBase64String(sha.ComputeHash(bytes.ToArray()))
-            });
-            state.AcceptedOrders.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
-            if (state.AcceptedOrders.Count > RetainedOrders)
-            {
-                state.AcceptedOrders.RemoveRange(0, state.AcceptedOrders.Count - RetainedOrders);
+                if (accepted.Epoch != state.Epoch) return;
+                state.AcceptedOrders.RemoveAll(order => order.Epoch != state.Epoch);
+                if (state.AcceptedOrders.Any(order => order.Sequence == accepted.AuthoritativeSequence))
+                    return;
+                state.AcceptedOrders.Add(new RealTimeCommandEnvelope
+                {
+                    Epoch = accepted.Epoch,
+                    Sequence = accepted.AuthoritativeSequence,
+                    PlayerId = accepted.PlayerId,
+                    UnitId = unitId,
+                    Kind = (RealTimeCommandKind)accepted.Kind,
+                    Payload = payload
+                });
+                state.AcceptedOrders.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+                if (state.AcceptedOrders.Count > RetainedOrders)
+                    state.AcceptedOrders.RemoveRange(0, state.AcceptedOrders.Count - RetainedOrders);
             }
         }
 
-        public static RealTimeCommandEnvelope[] Snapshot(NetworkRealTimeCombatState state) =>
-            state?.AcceptedOrders?.Where(order => order.Epoch == state.Epoch).ToArray() ?? [];
+        public static RealTimeCommandEnvelope[] Snapshot(NetworkRealTimeCombatState state)
+        {
+            if (state == null) return [];
+            lock (state)
+                return state.AcceptedOrders?.Where(order => order.Epoch == state.Epoch).ToArray() ?? [];
+        }
     }
 }

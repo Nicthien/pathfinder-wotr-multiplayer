@@ -658,6 +658,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
                 .Returns(Task.CompletedTask);
+            A.CallTo(() => clientCombat.ApplyAndReadRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .Returns(Task.FromResult(new NetworkCombatState()));
             A.CallTo(() => clientCombat.ExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._))
                 .Returns(Task.FromResult(true));

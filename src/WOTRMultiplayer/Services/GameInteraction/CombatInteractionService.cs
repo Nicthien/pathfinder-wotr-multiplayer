@@ -352,36 +352,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
-                        id => _gameStateLookupService.GetUnitEntity(id) != null,
-                        area => _gameStateLookupService.GetAreaEffect(area) != null,
-                        area => _gameStateLookupService.GetAreaEffect(area)?.View != null,
-                        id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
-                        area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString(),
-                        id => _gameStateLookupService.GetUnitEntity(id)?.HoldingState?.SceneName,
-                        area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName,
-                        getLocalBuffs: id => _buffInteractionService.GetUnitBuffs(
-                            _gameStateLookupService.GetUnitEntity(id)).Buffs,
-                        canRecreateBuff: _buffInteractionService.CanRecreateBuff,
-                        getLocalArea: area => _mapper.Map<NetworkAreaEffect>(
-                            _gameStateLookupService.GetAreaEffect(area)));
-                    if (missing != null)
-                    {
-                        throw new InvalidOperationException(missing);
-                    }
-                    // Only enumerate live combat entities after basic validation. This also
-                    // keeps missing-entity failures independent of an initialized game world.
-                    var localCombatState = GetRealTimeCombatState();
-                    var extra = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
-                        id => _gameStateLookupService.GetUnitEntity(id) != null,
-                        area => _gameStateLookupService.GetAreaEffect(area) != null,
-                        localCombatUnitIds: localCombatState.Units.Select(unit => unit.Id),
-                        localAreaIds: localCombatState.AreaEffects.Select(area => area.Id));
-                    if (extra != null)
-                    {
-                        throw new InvalidOperationException(extra);
-                    }
-                    UpdateCombatState(networkCombatState, requiresFullUpdate: false);
+                    ApplyRealTimeCombatState(networkCombatState);
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)
@@ -391,6 +362,57 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 }
             });
             return completion.Task;
+        }
+
+        public Task<NetworkCombatState> ApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
+        {
+            var completion = new TaskCompletionSource<NetworkCombatState>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    ApplyRealTimeCombatState(networkCombatState);
+                    completion.TrySetResult(GetRealTimeCombatState());
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to apply and sample real-time combat checkpoint");
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
+        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState)
+        {
+            var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
+                id => _gameStateLookupService.GetUnitEntity(id) != null,
+                area => _gameStateLookupService.GetAreaEffect(area) != null,
+                area => _gameStateLookupService.GetAreaEffect(area)?.View != null,
+                id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
+                area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString(),
+                id => _gameStateLookupService.GetUnitEntity(id)?.HoldingState?.SceneName,
+                area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName,
+                getLocalBuffs: id => _buffInteractionService.GetUnitBuffs(
+                    _gameStateLookupService.GetUnitEntity(id)).Buffs,
+                canRecreateBuff: _buffInteractionService.CanRecreateBuff,
+                getLocalArea: area => _mapper.Map<NetworkAreaEffect>(
+                    _gameStateLookupService.GetAreaEffect(area)));
+            if (missing != null)
+                throw new InvalidOperationException(missing);
+
+            // Only enumerate live combat entities after basic validation. This also keeps
+            // missing-entity failures independent of an initialized game world.
+            var localCombatState = GetRealTimeCombatState();
+            var extra = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
+                id => _gameStateLookupService.GetUnitEntity(id) != null,
+                area => _gameStateLookupService.GetAreaEffect(area) != null,
+                localCombatUnitIds: localCombatState.Units.Select(unit => unit.Id),
+                localAreaIds: localCombatState.AreaEffects.Select(area => area.Id));
+            if (extra != null)
+                throw new InvalidOperationException(extra);
+
+            UpdateCombatState(networkCombatState, requiresFullUpdate: false);
         }
 
         public void RunTacticalUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand)
