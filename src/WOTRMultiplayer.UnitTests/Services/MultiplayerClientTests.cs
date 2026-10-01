@@ -93,6 +93,9 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(result, Is.EqualTo(19));
             Assert.That(localRolls, Is.EqualTo(1));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRuleRollFault>.That.Matches(
+                fault => fault.Epoch == 7 && fault.Sequence == 1
+                    && fault.Reason == "local-result-mismatch"))).MustHaveHappenedOnceExactly();
         }
 
         [SetUp]

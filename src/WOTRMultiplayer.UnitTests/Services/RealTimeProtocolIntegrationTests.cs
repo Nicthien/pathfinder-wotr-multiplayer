@@ -68,9 +68,29 @@ namespace WOTRMultiplayer.UnitTests.Services
             FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRuleRoll>(clientNetwork)
                 (NetworkConstants.HostPlayerId, first);
 
-            Assert.That(client.ResolveRealTimeDiceRoll("attack:d20", () => 1), Is.EqualTo(12));
-            Assert.That(client.ResolveRealTimeDiceRoll("attack:d20", () => 1), Is.EqualTo(18));
+            Assert.That(client.ResolveRealTimeDiceRoll("attack:d20", () => 12), Is.EqualTo(12));
+            Assert.That(client.ResolveRealTimeDiceRoll("attack:d20", () => 18), Is.EqualTo(18));
             Assert.That(queued, Is.Empty);
+        }
+
+        [Test]
+        public async Task TwoActors_DivergentLocalRoll_UsesHostResultAndStartsProtectedFallback()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.ResolveRealTimeDiceRoll("save:d20", () => 18), Is.EqualTo(18));
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRuleRoll>(clientNetwork)
+                (NetworkConstants.HostPlayerId, (NotifyRealTimeRuleRoll)queued.Dequeue());
+            Assert.That(client.ResolveRealTimeDiceRoll("save:d20", () => 7), Is.EqualTo(18));
+            var fault = (ClientRealTimeRuleRollFault)queued.Dequeue();
+            Assert.That(fault.Reason, Is.EqualTo("local-result-mismatch"));
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRuleRollFault>(hostNetwork)(42, fault);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
         }
 
         [Test]

@@ -88,8 +88,14 @@ namespace WOTRMultiplayer.Services
                 out var sequence, out var hostResult))
             {
                 if (hostResult != localResult)
+                {
                     Logger.LogWarning("Client combat roll differed from host. Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Local={Local}, Host={Host}",
                         epoch, sequence, key, localResult, hostResult);
+                    Send(new ClientRealTimeRuleRollFault
+                    {
+                        Epoch = epoch, Key = key, Sequence = sequence, Reason = "local-result-mismatch"
+                    });
+                }
                 return hostResult;
             }
             Logger.LogError("Authoritative combat roll unavailable; requesting paused repair. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
@@ -1153,7 +1159,8 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyRealTimeRuleRoll(long receivedFrom, NotifyRealTimeRuleRoll message)
         {
-            if (message == null || !IsRealTimeCombatActive || Game.RealTimeCombat.Epoch != message.Epoch)
+            if (message == null || receivedFrom != NetworkConstants.HostPlayerId
+                || !IsRealTimeCombatActive || Game.RealTimeCombat.Epoch != message.Epoch)
                 return;
             if (!_realTimeRuleRolls.Receive(message.Epoch, message.Key, message.Sequence, message.Result))
                 Logger.LogWarning("Ignoring stale, duplicate or overflowing host combat roll. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
