@@ -25,13 +25,24 @@ $buildPath = Join-Path $repoPath 'src\WOTRMultiplayer\bin\Release\net481'
 $backupRoot = Join-Path $repoPath 'local-artifacts\backups'
 $runtimeReadyPath = Join-Path $repoPath 'local-artifacts\RTWP_RUNTIME_VALIDATED.json'
 
-function Assert-RuntimeReady {
+function Assert-RuntimeReady([string]$packageFingerprint) {
     if (-not (Test-Path -LiteralPath $runtimeReadyPath)) {
         throw 'Installation RTwP bloquée : le moteur de combat temps réel et ses tests en jeu ne sont pas encore validés. Build reste disponible sans toucher au jeu.'
     }
 
+    $protocolSource = Join-Path $repoPath 'src\WOTRMultiplayer\Entities\Combat\RealTime\NetworkRealTimeCombatState.cs'
+    $protocolMatch = [regex]::Match((Get-Content -LiteralPath $protocolSource -Raw),
+        'public const int ProtocolVersion\s*=\s*(\d+)\s*;')
+    if (-not $protocolMatch.Success) {
+        throw 'Version du protocole RTwP introuvable dans les sources : activation refusée.'
+    }
+    $currentProtocol = [int]$protocolMatch.Groups[1].Value
     $validation = Get-Content -LiteralPath $runtimeReadyPath -Raw | ConvertFrom-Json
-    if ($validation.protocolVersion -ne 32 -or $validation.twoInstanceCombatVerified -ne $true) {
+    $fingerprintMatches = -not [string]::IsNullOrWhiteSpace($packageFingerprint) -and
+        [string]::Equals($validation.experimentalBuildFingerprint, $packageFingerprint,
+            [StringComparison]::OrdinalIgnoreCase)
+    if ($validation.protocolVersion -ne $currentProtocol -or
+        $validation.twoInstanceCombatVerified -ne $true -or -not $fingerprintMatches) {
         throw 'Validation RTwP absente ou incompatible : installation refusée.'
     }
 }
@@ -95,7 +106,7 @@ function Get-ModInfo([string]$path) {
     return Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
 }
 
-function Get-ExperimentalFingerprint([string]$path) {
+function Get-ExperimentalFingerprint([string]$path, [string]$catalogRoot = $path) {
     $required = @(
         'WOTRMultiplayer.dll',
         'WOTRMultiplayer.Networking.dll',
@@ -105,7 +116,11 @@ function Get-ExperimentalFingerprint([string]$path) {
     )
     $manifest = [Text.StringBuilder]::new()
     foreach ($relative in $required) {
-        $file = Join-Path $path $relative
+        $file = if ($relative.StartsWith('localization\', [StringComparison]::Ordinal)) {
+            Join-Path $catalogRoot $relative
+        } else {
+            Join-Path $path $relative
+        }
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
         $normalized = $relative.Replace('\', '/')
         [void]$manifest.Append($normalized).Append(':').Append(
@@ -132,6 +147,8 @@ function Show-Status {
     $experimentalSlot = if (Test-Path -LiteralPath $experimentalPath) { $experimentalPath } else { $disabledExperimentalPath }
     $fingerprint = Get-ExperimentalFingerprint $experimentalSlot
     if ($fingerprint) { Write-Output "Empreinte du paquet expérimental : $fingerprint" }
+    $buildFingerprint = Get-ExperimentalFingerprint $buildPath $repoPath
+    if ($buildFingerprint) { Write-Output "Empreinte du build local : $buildFingerprint" }
 
     if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $experimentalPath)) {
         throw 'Les variantes stable et expérimentale sont actives simultanément. Corrigez avec EnableStable ou EnableExperimental.'
@@ -235,8 +252,8 @@ function Backup-Mod([string]$path, [string]$name) {
 function Install-Experimental([bool]$testOnly) {
     if ($testOnly) {
         Assert-UnvalidatedTestRequested
-    } else {
-        Assert-RuntimeReady
+    } elseif (-not (Test-Path -LiteralPath $runtimeReadyPath -PathType Leaf)) {
+        throw 'Installation RTwP bloquée : les tests en jeu à deux instances ne sont pas encore validés.'
     }
     Assert-GameStopped
     Assert-GameInstallation
@@ -253,6 +270,9 @@ function Install-Experimental([bool]$testOnly) {
     }
     Assert-SafeModPath $targetPath
     Build-Experimental
+    if (-not $testOnly) {
+        Assert-RuntimeReady (Get-ExperimentalFingerprint $buildPath $repoPath)
+    }
     Backup-Mod $targetPath 'experimental'
     if (Test-Path -LiteralPath $targetPath) {
         Remove-Item -LiteralPath $targetPath -Recurse
@@ -292,8 +312,6 @@ function Enable-Experimental([bool]$testOnly) {
     if ($testOnly) {
         Assert-UnvalidatedTestRequested
         Write-Warning 'Variante non validée : uniquement pour une session de test sur une copie de sauvegarde. Revenez à EnableStable après le test.'
-    } else {
-        Assert-RuntimeReady
     }
     Assert-GameStopped
     Assert-GameInstallation
@@ -304,6 +322,10 @@ function Enable-Experimental([bool]$testOnly) {
     Assert-SafeModPath $disabledExperimentalPath
     if (-not (Test-Path -LiteralPath $experimentalPath) -and -not (Test-Path -LiteralPath $disabledExperimentalPath)) {
         throw "La variante expérimentale n'est pas installée. Lancez d'abord Install."
+    }
+    if (-not $testOnly) {
+        $candidatePath = if (Test-Path -LiteralPath $experimentalPath) { $experimentalPath } else { $disabledExperimentalPath }
+        Assert-RuntimeReady (Get-ExperimentalFingerprint $candidatePath)
     }
     if ((Test-Path -LiteralPath $experimentalPath) -and (Test-Path -LiteralPath $disabledExperimentalPath)) {
         throw "Activation expérimentale refusée : les deux dossiers existent déjà : $experimentalPath et $disabledExperimentalPath"
