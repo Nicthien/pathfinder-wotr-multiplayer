@@ -904,6 +904,30 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
+        public Task<bool?> TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind,
+            NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability,
+            Func<bool> canExecute)
+        {
+            if (canExecute == null)
+                throw new ArgumentNullException(nameof(canExecute));
+            var completion = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    completion.TrySetResult(canExecute()
+                        ? ExecuteRealTimeCombatCommand(kind, movement, attack, ability)
+                        : null);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to apply authoritative real-time command. Kind={Kind}", kind);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
         public bool IsRiderActive()
         {
             try

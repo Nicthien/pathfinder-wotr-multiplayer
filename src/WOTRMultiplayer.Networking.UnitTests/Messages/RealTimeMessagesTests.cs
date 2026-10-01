@@ -122,6 +122,18 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         }
 
         [Test]
+        public void CombatCommandFault_RoundTrips()
+        {
+            var copy = Serializer.DeepClone(new ClientRealTimeCommandFault
+            {
+                Epoch = 7, AuthoritativeSequence = 12, Reason = "authoritative-command-rejected"
+            });
+
+            Assert.That((copy.Epoch, copy.AuthoritativeSequence, copy.Reason),
+                Is.EqualTo((7L, 12L, "authoritative-command-rejected")));
+        }
+
+        [Test]
         public void HostEntityIdAndClientFault_RoundTrip()
         {
             var published = Serializer.DeepClone(new NotifyRealTimeEntityId

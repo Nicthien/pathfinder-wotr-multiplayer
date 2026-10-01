@@ -355,8 +355,8 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public void AcceptedRealTimeCommand_IsAppliedOnceAndStaleRepeatIsIgnored()
         {
-            A.CallTo(() => _combatInteractionService.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
-                A<NetworkUnitMoveTo>._, null, null)).Returns(Task.FromResult(true));
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                A<NetworkUnitMoveTo>._, null, null, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
@@ -378,8 +378,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             handler.Invoke(-1, accepted);
             handler.Invoke(-1, accepted);
 
-            A.CallTo(() => _combatInteractionService.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
-                A<NetworkUnitMoveTo>.That.Matches(x => x.InitiatorUnitId == "unit-a"), null, null))
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                A<NetworkUnitMoveTo>.That.Matches(x => x.InitiatorUnitId == "unit-a"), null, null, A<Func<bool>>._))
                 .MustHaveHappenedOnceExactly();
             Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(1));
         }
@@ -387,13 +387,14 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public void FailedRealTimeCommand_DoesNotAdvanceAuthoritativeSequence()
         {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
             };
-            A.CallTo(() => _combatInteractionService.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
-                A<NetworkUnitMoveTo>._, null, null)).Returns(Task.FromResult(false));
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                A<NetworkUnitMoveTo>._, null, null, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(false));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(_networkClient);
 
             handler.Invoke(-1, new NotifyRealTimeCombatCommandAccepted
@@ -409,19 +410,63 @@ namespace WOTRMultiplayer.UnitTests.Services
             });
 
             Assert.That(_multiplayerClient.Game.RealTimeCombat.LastAuthoritativeSequence, Is.Zero);
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCommandFault>.That.Matches(x =>
+                x.Epoch == 5 && x.AuthoritativeSequence == 1
+                    && x.Reason == "authoritative-command-rejected"))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void AcceptedRealTimeCommand_ReplacedSessionBeforeQueuedExecutionIsIgnored()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause, Epoch = 5
+                }
+            };
+            var replacement = new NetworkGame(new NetworkGameStartUp());
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(
+                RealTimeCommandKind.Move, A<NetworkUnitMoveTo>._, null, null, A<Func<bool>>._))
+                .ReturnsLazily((RealTimeCommandKind _, NetworkUnitMoveTo movement,
+                    NetworkUnitAttack attack, NetworkAbilityUse ability, Func<bool> canExecute) =>
+                {
+                    _multiplayerClient.Game = replacement;
+                    Assert.That(canExecute(), Is.False);
+                    return Task.FromResult<bool?>(null);
+                });
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(_networkClient)(-1,
+                new NotifyRealTimeCombatCommandAccepted
+                {
+                    Epoch = 5, AuthoritativeSequence = 1,
+                    Kind = (int)RealTimeCommandKind.Move,
+                    Movement = new Networking.Messages.Contracts.NetworkUnitMoveTo
+                    {
+                        InitiatorUnitId = "unit-a",
+                        Destination = new Networking.Messages.Contracts.NetworkVector3(1, 2, 3)
+                    }
+                });
+
+            Assert.That(_multiplayerClient.Game, Is.SameAs(replacement));
+            Assert.That(replacement.RealTimeCombat.LastAuthoritativeSequence, Is.Zero);
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCommandFault>._))
+                .MustNotHaveHappened();
         }
 
         [Test]
         public void AcceptedRealTimeCommand_WaitsForMainThreadApplicationBeforeAdvancing()
         {
-            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
             };
-            A.CallTo(() => _combatInteractionService.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
-                A<NetworkUnitMoveTo>._, null, null)).Returns(completion.Task);
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                A<NetworkUnitMoveTo>._, null, null, A<Func<bool>>._)).Returns(completion.Task);
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(_networkClient);
 
             handler.Invoke(-1, new NotifyRealTimeCombatCommandAccepted

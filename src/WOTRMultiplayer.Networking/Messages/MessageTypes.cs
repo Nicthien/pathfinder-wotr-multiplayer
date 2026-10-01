@@ -312,7 +312,8 @@
             ClientRealTimeRuleRollFault,
             ClientRealTimeAIActionFault,
             NotifyRealTimeEntityId,
-            ClientRealTimeEntityIdFault
+            ClientRealTimeEntityIdFault,
+            ClientRealTimeCommandFault
         }
 
         public static class Mods

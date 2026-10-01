@@ -1280,6 +1280,8 @@ namespace WOTRMultiplayer.Services
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null) return;
             await _realTimeSnapshotGate.WaitAsync();
+            NetworkGame session = null;
+            NetworkRealTimeCombatState combat = null;
             try
             {
                 if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause
@@ -1289,42 +1291,70 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
-                Task<bool> execution;
+                session = Game;
+                combat = session.RealTimeCombat;
+                Func<bool> canExecute = () => IsCurrentRealTimeMessage(session, combat, message.Epoch)
+                    && session.Combat?.Stage == NetworkCombatStage.Running
+                    && new RealTimeCombatCoordinator(combat).IsCurrent(message.Epoch, message.AuthoritativeSequence);
+                Task<bool?> execution;
                 switch ((RealTimeCommandKind)message.Kind)
                 {
                     case RealTimeCommandKind.Move when message.Movement != null:
-                        execution = CombatInteraction.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
-                            Mapper.Map<NetworkUnitMoveTo>(message.Movement), null, null);
+                        execution = CombatInteraction.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                            Mapper.Map<NetworkUnitMoveTo>(message.Movement), null, null, canExecute);
                         break;
                     case RealTimeCommandKind.Attack when message.Attack != null:
-                        execution = CombatInteraction.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Attack,
-                            null, Mapper.Map<NetworkUnitAttack>(message.Attack), null);
+                        execution = CombatInteraction.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Attack,
+                            null, Mapper.Map<NetworkUnitAttack>(message.Attack), null, canExecute);
                         break;
                     case RealTimeCommandKind.UseAbility when message.Ability != null:
-                        execution = CombatInteraction.ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.UseAbility,
-                            null, null, Mapper.Map<NetworkAbilityUse>(message.Ability));
+                        execution = CombatInteraction.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.UseAbility,
+                            null, null, Mapper.Map<NetworkAbilityUse>(message.Ability), canExecute);
                         break;
                     default:
-                        Logger.LogWarning("Ignoring malformed authoritative real-time command. Epoch={Epoch}, Sequence={Sequence}, Kind={Kind}", message.Epoch, message.AuthoritativeSequence, message.Kind);
+                        ReportRealTimeCommandFault(message.Epoch, message.AuthoritativeSequence,
+                            "malformed-authoritative-command");
                         return;
                 }
 
-                if (!await execution)
+                var applied = await execution;
+                if (!canExecute())
+                    return;
+                if (applied != true)
                 {
-                    Logger.LogError("Authoritative real-time command could not be executed locally. Epoch={Epoch}, Sequence={Sequence}, Kind={Kind}", message.Epoch, message.AuthoritativeSequence, message.Kind);
+                    ReportRealTimeCommandFault(message.Epoch, message.AuthoritativeSequence,
+                        "authoritative-command-rejected");
                     return;
                 }
-                Game.RealTimeCombat.LastAuthoritativeSequence = message.AuthoritativeSequence;
-                RealTimeAcceptedOrderLedger.Record(Game.RealTimeCombat, message);
+                combat.LastAuthoritativeSequence = message.AuthoritativeSequence;
+                RealTimeAcceptedOrderLedger.Record(combat, message);
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Unable to apply authoritative real-time command. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.AuthoritativeSequence);
+                if (session != null && combat != null
+                    && IsCurrentRealTimeMessage(session, combat, message.Epoch))
+                    ReportRealTimeCommandFault(message.Epoch, message.AuthoritativeSequence,
+                        "authoritative-command-exception");
             }
             finally
             {
                 _realTimeSnapshotGate.Release();
             }
+        }
+
+        private void ReportRealTimeCommandFault(long epoch, long sequence, string reason)
+        {
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                || Game.RealTimeCombat.Epoch != epoch || sequence <= 0)
+                return;
+            Logger.LogError("Authoritative real-time command cannot be applied. Epoch={Epoch}, Sequence={Sequence}, Reason={Reason}",
+                epoch, sequence, reason);
+            EnterLocalCriticalFaultBarrier(epoch);
+            Send(new ClientRealTimeCommandFault
+            {
+                Epoch = epoch, AuthoritativeSequence = sequence, Reason = reason
+            });
         }
 
         private void OnNotifyRealTimePauseChanged(long receivedFrom, NotifyRealTimePauseChanged message)

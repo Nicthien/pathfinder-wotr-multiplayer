@@ -494,6 +494,25 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void CriticalClientCommandFault_StartsPausedRepair()
+        {
+            PrepareRealTimeRepairTest();
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCommandFault>(_networkServer)(42,
+                new ClientRealTimeCommandFault
+                {
+                    Epoch = 0, AuthoritativeSequence = 1,
+                    Reason = "authoritative-command-rejected"
+                });
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Epoch == 1 && x.Stage == (int)RealTimeRepairStage.Prepare)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public async Task CombatModeSwitch_HashMismatch_RollsBackThroughPausedAbort()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

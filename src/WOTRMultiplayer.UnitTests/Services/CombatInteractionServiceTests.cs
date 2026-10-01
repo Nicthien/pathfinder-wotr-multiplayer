@@ -5,8 +5,10 @@ using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using WOTRMultiplayer.Abstractions.GameInteraction;
 using WOTRMultiplayer.Abstractions.Unity;
+using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Services.GameInteraction;
 
@@ -128,6 +130,31 @@ namespace WOTRMultiplayer.UnitTests.Services
             queued();
 
             Assert.That(task.IsCompleted, Is.True);
+            Assert.That(task.IsFaulted, Is.False);
+            Assert.That(task.Result, Is.Null);
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void TryExecuteRealTimeCombatCommandAsync_StaleQueuedOrderSkipsGameExecution()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            Action queued = null;
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => queued = action);
+            var lookup = A.Fake<IGameStateLookupService>();
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var current = true;
+
+            var task = service.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                new NetworkUnitMoveTo { InitiatorUnitId = "old-unit", Destination = new NetworkVector3() },
+                null, null, () => current);
+            Assert.That(queued, Is.Not.Null);
+            current = false;
+            queued();
+
             Assert.That(task.IsFaulted, Is.False);
             Assert.That(task.Result, Is.Null);
             A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();

@@ -2248,6 +2248,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimeRuleRollFault>(OnClientRealTimeRuleRollFault)
                .On<ClientRealTimeAIActionFault>(OnClientRealTimeAIActionFault)
                .On<ClientRealTimeEntityIdFault>(OnClientRealTimeEntityIdFault)
+               .On<ClientRealTimeCommandFault>(OnClientRealTimeCommandFault)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -2434,6 +2435,18 @@ namespace WOTRMultiplayer.Services
                     return;
                 Logger.LogWarning("Client could not obtain host entity ID. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.Sequence, message.Key, message.Reason);
+            });
+        }
+
+        private void OnClientRealTimeCommandFault(long receivedFrom, ClientRealTimeCommandFault message)
+        {
+            _mainThreadAccessor.Post(() =>
+            {
+                if (message == null || message.AuthoritativeSequence <= 0
+                    || !TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch))
+                    return;
+                Logger.LogWarning("Client could not apply an authoritative combat command. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Reason={Reason}",
+                    receivedFrom, message.Epoch, message.AuthoritativeSequence, message.Reason);
             });
         }
 

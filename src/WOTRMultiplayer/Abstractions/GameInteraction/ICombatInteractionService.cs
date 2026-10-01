@@ -73,6 +73,10 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         Task<bool> ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability);
 
+        Task<bool?> TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind,
+            NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability,
+            Func<bool> canExecute);
+
         Task<bool> StartCombatAsync(NetworkCombatState networkCombatState);
 
         Task<List<string>> EnsureUnitsInCombatAsync(List<string> units);
