@@ -347,6 +347,39 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_DelayedOldEpochPackets_CannotReenterRealTimeAfterFallback()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            var oldPrepare = (NotifyRealTimeModeTransition)queued.Peek();
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.RealTimeWithPause));
+
+            host.PublishRealTimeCombatSnapshot();
+            var oldSnapshot = (NotifyRealTimeCombatSnapshot)queued.Dequeue();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            var settledEpoch = client.Game.RealTimeCombat.Epoch;
+            var settledHash = client.Game.RealTimeCombat.CanonicalStateHash;
+
+            // Reordering and duplication can deliver old packets long after the next barrier.
+            DeliverToClient(clientNetwork, oldPrepare);
+            DeliverToClient(clientNetwork, oldPrepare);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(clientNetwork)
+                (NetworkConstants.HostPlayerId, oldSnapshot);
+
+            Assert.That(queued, Is.Empty);
+            Assert.That(client.Game.RealTimeCombat.Epoch, Is.EqualTo(settledEpoch));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.RealTimeCombat.CanonicalStateHash, Is.EqualTo(settledHash));
+            A.CallTo(() => clientCombat.UpdateRealTimeCombatStateAsync(A<NetworkCombatState>._))
+                .MustHaveHappenedTwiceExactly(); // One checkpoint for each legitimate mode commit.
+        }
+
+        [Test]
         public async Task TwoActors_CombatMessagesDuringModeBarrier_DoNotMutateClient()
         {
             var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
