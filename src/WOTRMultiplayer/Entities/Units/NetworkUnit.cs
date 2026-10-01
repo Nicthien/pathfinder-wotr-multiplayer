@@ -18,6 +18,8 @@ namespace WOTRMultiplayer.Entities.Units
 
         public string GroupId { get; set; }
 
+        public string SceneName { get; set; }
+
         public NetworkVector3 Position { get; set; }
 
         public float Orientation { get; set; }

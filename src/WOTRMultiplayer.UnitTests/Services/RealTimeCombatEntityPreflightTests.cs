@@ -156,6 +156,27 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void WrongLocalScenes_AreRejectedBeforeMutation()
+        {
+            var unit = CompleteUnit("hero");
+            unit.SceneName = "main-scene";
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [unit],
+                AreaEffects = [new NetworkAreaEffect
+                {
+                    Id = "cloud", BlueprintId = "cloud-type", Position = new NetworkVector3(),
+                    SceneName = "main-scene"
+                }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true, null, null, null,
+                _ => "other-scene", _ => "other-scene"),
+                Is.EqualTo("invalid-area:cloud:scene,invalid-unit:hero:scene"));
+        }
+
+        [Test]
         public void DuplicateEntityIds_AreRejectedBeforeMutation()
         {
             var checkpoint = new NetworkCombatState

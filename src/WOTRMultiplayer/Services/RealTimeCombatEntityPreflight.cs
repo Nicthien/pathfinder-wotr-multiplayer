@@ -13,7 +13,9 @@ namespace WOTRMultiplayer.Services
         public static string FindMissing(NetworkCombatState checkpoint, Func<string, bool> hasUnit,
             Func<NetworkAreaEffect, bool> hasArea, Func<NetworkAreaEffect, bool> hasAreaView = null,
             Func<string, string> getUnitBlueprintId = null,
-            Func<NetworkAreaEffect, string> getAreaBlueprintId = null)
+            Func<NetworkAreaEffect, string> getAreaBlueprintId = null,
+            Func<string, string> getUnitSceneName = null,
+            Func<NetworkAreaEffect, string> getAreaSceneName = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -41,6 +43,9 @@ namespace WOTRMultiplayer.Services
                         (getUnitBlueprintId != null && !string.Equals(unit.BlueprintId,
                             getUnitBlueprintId(unit.Id), StringComparison.OrdinalIgnoreCase)))
                         missing.Add($"invalid-unit:{unit.Id}:blueprint");
+                    if (getUnitSceneName != null && !string.Equals(unit.SceneName,
+                        getUnitSceneName(unit.Id), StringComparison.Ordinal))
+                        missing.Add($"invalid-unit:{unit.Id}:scene");
                     if (!IsFinite(unit.Position)) missing.Add($"invalid-unit:{unit.Id}:position");
                     if (float.IsNaN(unit.Orientation) || float.IsInfinity(unit.Orientation))
                         missing.Add($"invalid-unit:{unit.Id}:orientation");
@@ -82,6 +87,9 @@ namespace WOTRMultiplayer.Services
                         (getAreaBlueprintId != null && !string.Equals(area.BlueprintId,
                             getAreaBlueprintId(area), StringComparison.OrdinalIgnoreCase)))
                         missing.Add($"invalid-area:{area.Id}:blueprint");
+                    if (getAreaSceneName != null && !string.Equals(area.SceneName,
+                        getAreaSceneName(area), StringComparison.Ordinal))
+                        missing.Add($"invalid-area:{area.Id}:scene");
                     if (hasAreaView != null && !hasAreaView(area))
                         missing.Add($"invalid-area:{area.Id}:view");
                     if (!IsFinite(area.Position)) missing.Add($"invalid-area:{area.Id}:position");

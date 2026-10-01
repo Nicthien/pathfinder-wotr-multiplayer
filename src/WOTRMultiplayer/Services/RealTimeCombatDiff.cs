@@ -105,6 +105,8 @@ namespace WOTRMultiplayer.Services
                 || !string.Equals(expected.SourceAbilityBlueprintId, actual.SourceAbilityBlueprintId,
                     StringComparison.OrdinalIgnoreCase))
                 causes.Add("context");
+            if (!string.Equals(expected.SceneName, actual.SceneName, StringComparison.Ordinal))
+                causes.Add("scene");
             if (!SameVector(expected.Position, actual.Position)) causes.Add("position");
             if (expected.Type != actual.Type) causes.Add("type");
             if (!(expected.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal)
@@ -130,6 +132,8 @@ namespace WOTRMultiplayer.Services
             {
                 causes.Add("origin");
             }
+            if (!string.Equals(expected.SceneName, actual.SceneName, StringComparison.Ordinal))
+                causes.Add("scene");
             if (!SameVector(expected.Position, actual.Position)
                 || !SameFloat(expected.Orientation, actual.Orientation))
                 causes.Add("position");

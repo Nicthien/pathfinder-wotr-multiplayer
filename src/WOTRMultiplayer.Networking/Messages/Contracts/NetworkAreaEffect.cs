@@ -39,6 +39,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(11)]
         public long? DurationTicks { get; set; }
 
+        [ProtoMember(12)]
+        public string SceneName { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

@@ -99,6 +99,24 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void Summarize_IdentifiesWrongEntityScenes()
+        {
+            var host = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "summon", SceneName = "main-scene" }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", SceneName = "main-scene" }]
+            };
+            var client = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "summon", SceneName = "other-scene" }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", SceneName = "other-scene" }]
+            };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client),
+                Is.EqualTo("unit:summon:scene,area:cloud:scene"));
+        }
+
+        [Test]
         public void Summarize_IdentifiesBuffsAndAreaOccupants()
         {
             var host = new NetworkCombatState

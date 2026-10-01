@@ -357,7 +357,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         area => _gameStateLookupService.GetAreaEffect(area) != null,
                         area => _gameStateLookupService.GetAreaEffect(area)?.View != null,
                         id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
-                        area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString());
+                        area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString(),
+                        id => _gameStateLookupService.GetUnitEntity(id)?.HoldingState?.SceneName,
+                        area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName);
                     if (missing != null)
                     {
                         throw new InvalidOperationException(missing);
@@ -1098,6 +1100,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     SourceAbilityBlueprintId = unitEntity.Context?.SourceAbility?.AssetGuid.ToString(),
                     MasterUnitId = unitEntity.Master?.UniqueId,
                     GroupId = unitEntity.GroupId,
+                    SceneName = unitEntity.HoldingState?.SceneName,
                     Position = unitEntity.Position.ToNetworkVector3(),
                     Orientation = unitEntity.Orientation,
                     TurnBasedInfo = includeTurnBasedInfo ? GetUnitTurnBasedInfo(unitEntity) : null,

@@ -88,6 +88,19 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void EntitySceneDivergence_ChangesHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var unit = Sample();
+            unit.Combat.Units[0].SceneName = "other-scene";
+            var area = Sample();
+            area.Combat.AreaEffects[0].SceneName = "other-scene";
+
+            Assert.That(RealTimeCombatHasher.Compute(unit), Is.Not.EqualTo(baseline));
+            Assert.That(RealTimeCombatHasher.Compute(area), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
         public void AreaLifetimeMetadata_DoesNotCauseFalseMovingDivergence()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

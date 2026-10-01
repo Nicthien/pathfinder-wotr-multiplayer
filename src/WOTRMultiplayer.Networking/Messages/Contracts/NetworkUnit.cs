@@ -54,6 +54,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(15)]
         public string GroupId { get; set; }
 
+        [ProtoMember(16)]
+        public string SceneName { get; set; }
+
         public override string ToString()
         {
             return Id?.ToString();

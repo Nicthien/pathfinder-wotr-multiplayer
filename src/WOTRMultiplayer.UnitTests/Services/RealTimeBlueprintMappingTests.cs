@@ -21,13 +21,14 @@ namespace WOTRMultiplayer.UnitTests.Services
                 {
                     Id = "summon", BlueprintId = "unit-blueprint", OriginalBlueprintId = "original-unit",
                     CasterUnitId = "caster", SourceAbilityBlueprintId = "summon-spell",
-                    MasterUnitId = "master", GroupId = "summoned-group"
+                    MasterUnitId = "master", GroupId = "summoned-group", SceneName = "combat-scene"
                 }],
                 AreaEffects = [new NetworkAreaEffect
                 {
                     Id = "cloud", BlueprintId = "area-blueprint", CasterUnitId = "caster",
                     OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability",
-                    CreationGameTimeTicks = 123456, DurationTicks = 60000000
+                    CreationGameTimeTicks = 123456, DurationTicks = 60000000,
+                    SceneName = "combat-scene"
                 }]
             };
 
@@ -41,12 +42,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(restored.Units[0].CasterUnitId, Is.EqualTo("caster"));
             Assert.That(restored.Units[0].MasterUnitId, Is.EqualTo("master"));
             Assert.That(restored.Units[0].GroupId, Is.EqualTo("summoned-group"));
+            Assert.That(restored.Units[0].SceneName, Is.EqualTo("combat-scene"));
             Assert.That(restored.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
             Assert.That(wire.AreaEffects[0].CasterUnitId, Is.EqualTo("caster"));
             Assert.That(restored.AreaEffects[0].OwnerUnitId, Is.EqualTo("owner"));
             Assert.That(restored.AreaEffects[0].SourceAbilityBlueprintId, Is.EqualTo("source-ability"));
             Assert.That(restored.AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(123456));
             Assert.That(restored.AreaEffects[0].DurationTicks, Is.EqualTo(60000000));
+            Assert.That(restored.AreaEffects[0].SceneName, Is.EqualTo("combat-scene"));
         }
     }
 }
