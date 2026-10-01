@@ -109,6 +109,8 @@ namespace WOTRMultiplayer.Services
         public bool IsSavingBlockedByCombatSync => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsSavingBlockedByCombatSync)
             || _multiplayerActorAccessor.Client.IsSavingBlockedByCombatSync;
 
+        public bool IsSavingBlockedAfterRealTimeDisconnect => _multiplayerActorAccessor.Client.IsSavingBlockedAfterRealTimeDisconnect;
+
         public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
         {
             if (_multiplayerActorAccessor.Host.IsRealTimeCombatActive

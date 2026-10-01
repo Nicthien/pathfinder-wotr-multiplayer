@@ -14,6 +14,7 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
+using WOTRMultiplayer.Networking;
 using WOTRMultiplayer.Networking.Abstractions;
 using WOTRMultiplayer.Networking.Messages.Game;
 using WOTRMultiplayer.Services;
@@ -67,6 +68,25 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.True);
             _multiplayerClient.Game.Combat = null;
             Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.False);
+        }
+
+        [Test]
+        public void DisconnectDuringRealTimeCombat_BlocksSavingUntilSessionReset()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+
+            _networkClient.OnError(new NetworkError(NetworkErrorType.Disconnected));
+            _multiplayerClient.Game.Combat = null;
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.True);
+            Assert.That(_multiplayerClient.IsSavingBlockedAfterRealTimeDisconnect, Is.True);
+
+            _multiplayerClient.Reset();
+            Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.False);
+            Assert.That(_multiplayerClient.IsSavingBlockedAfterRealTimeDisconnect, Is.False);
         }
 
         [Test]

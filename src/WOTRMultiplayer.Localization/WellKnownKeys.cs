@@ -1522,6 +1522,12 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("saveBlockedAfterDisconnect")]
+            public static class SaveBlockedAfterDisconnect
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("start")]
             public static class Start
             {

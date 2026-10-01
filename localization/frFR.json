@@ -165,6 +165,7 @@
       "combat": {
         "unitAutokilled": "Mort de l'unité « {0} » ({1}) appliquée automatiquement : elle est morte chez {2}.",
         "saveBlockedDuringSynchronization": "Sauvegarde indisponible pendant un combat multijoueur en temps réel ou une synchronisation. Passez en tour par tour ou attendez la fin du combat.",
+        "saveBlockedAfterDisconnect": "Sauvegarde bloquée après une déconnexion en combat temps réel : cet état peut être différent de celui de l'hôte. Revenez au menu principal et rechargez une sauvegarde sûre.",
         "start": {
           "desyncedStartup": { "host": "Réparation du démarrage du combat : les états ne correspondent pas.\nCause : {0}", "client": "L'hôte a lancé une réparation du combat.\nCause : {0}" },
           "surpriseOverride": "L'hôte a corrigé l'état du round de surprise : {0} → {1}."

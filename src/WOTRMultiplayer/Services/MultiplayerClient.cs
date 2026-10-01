@@ -57,6 +57,7 @@ namespace WOTRMultiplayer.Services
         private readonly ConcurrentDictionary<string, ConcurrentQueue<NetworkAIAction>> _realTimeAIActions = new(StringComparer.Ordinal);
         private long _realTimeAISequenceEpoch;
         private long _lastRealTimeAISequence;
+        private bool _disconnectedDuringRealTimeCombat;
 
         public Action OnNetworkError { get; set; }
 
@@ -72,10 +73,13 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat != null && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable;
 
-        public bool IsSavingBlockedByCombatSync => IsActive && Game?.RealTimeCombat != null
-            && (Game.RealTimeCombat.BlocksSaving
-                || Game.Combat?.Stage == NetworkCombatStage.Running
-                    && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause);
+        public bool IsSavingBlockedByCombatSync => _disconnectedDuringRealTimeCombat
+            || IsActive && Game?.RealTimeCombat != null
+                && (Game.RealTimeCombat.BlocksSaving
+                    || Game.Combat?.Stage == NetworkCombatStage.Running
+                        && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause);
+
+        public bool IsSavingBlockedAfterRealTimeDisconnect => _disconnectedDuringRealTimeCombat;
 
         public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
         {
@@ -174,6 +178,7 @@ namespace WOTRMultiplayer.Services
         {
             Logger.LogInformation("Resetting");
             _realTimeRuleRolls.Reset();
+            _disconnectedDuringRealTimeCombat = false;
 
             Game = null;
 
@@ -2492,6 +2497,14 @@ namespace WOTRMultiplayer.Services
                     InvokeOnNetworkError(WellKnownKeys.MultiplayerClient.Errors.NetworkError.Key, networkError.Reason);
                     break;
                 case NetworkErrorType.Disconnected:
+                    if (Game?.RealTimeCombat != null
+                        && (Game.RealTimeCombat.BlocksSaving
+                            || Game.Combat?.Stage == NetworkCombatStage.Running
+                                && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause))
+                    {
+                        _disconnectedDuringRealTimeCombat = true;
+                        Logger.LogWarning("Disconnected during real-time combat. Saving remains blocked until this game session is closed.");
+                    }
                     if (Game?.Players != null)
                     {
                         // TODO: make a proper cleanup to unblock all possible UI elements as client is in single-player now

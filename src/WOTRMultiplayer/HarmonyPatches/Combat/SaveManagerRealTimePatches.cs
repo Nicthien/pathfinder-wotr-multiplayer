@@ -27,7 +27,10 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 return true;
             }
 
-            Main.PlayerNotification?.ShowWarningNotification(WellKnownKeys.GameNotifications.Combat.SaveBlockedDuringSynchronization.Key);
+            var messageKey = Main.Multiplayer?.IsSavingBlockedAfterRealTimeDisconnect == true
+                ? WellKnownKeys.GameNotifications.Combat.SaveBlockedAfterDisconnect.Key
+                : WellKnownKeys.GameNotifications.Combat.SaveBlockedDuringSynchronization.Key;
+            Main.PlayerNotification?.ShowWarningNotification(messageKey);
             __result = EmptyRoutine().GetEnumerator();
             return false;
         }
