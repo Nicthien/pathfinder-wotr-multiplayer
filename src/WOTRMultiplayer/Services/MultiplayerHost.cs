@@ -79,7 +79,7 @@ namespace WOTRMultiplayer.Services
         private RealTimeRepairStage? _realTimeRepairStage;
         private NotifyRealTimeRepair _lastRealTimeRepairMessage;
         private int _realTimeRepairRetransmissions;
-        private int _realTimeRepairVerificationInProgress;
+        private object _realTimeRepairVerificationOwner;
         private NetworkCombatState _realTimeRepairCheckpoint;
         private bool _realTimeRepairHasMismatch;
         private bool _realTimeCriticalFaulted;
@@ -558,6 +558,7 @@ namespace WOTRMultiplayer.Services
 
         public void Create(string gameId, string gamePassword, Entities.Connectivity.ExternalServer externalServer, NetworkGameStartUp gameStartUp)
         {
+            Interlocked.Exchange(ref _realTimeRepairVerificationOwner, null);
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
@@ -667,6 +668,7 @@ namespace WOTRMultiplayer.Services
         public void Reset()
         {
             Logger.LogInformation("Resetting");
+            Interlocked.Exchange(ref _realTimeRepairVerificationOwner, null);
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
@@ -2487,9 +2489,10 @@ namespace WOTRMultiplayer.Services
 
         private async Task StartRealTimeRepairVerificationAsync()
         {
+            var owner = new object();
             if (Game?.RealTimeCombat?.Phase != CombatSynchronizationPhase.Repairing
                 || _realTimeRepairStage != RealTimeRepairStage.Prepare
-                || Interlocked.CompareExchange(ref _realTimeRepairVerificationInProgress, 1, 0) != 0)
+                || Interlocked.CompareExchange(ref _realTimeRepairVerificationOwner, owner, null) != null)
             {
                 return;
             }
@@ -2503,12 +2506,21 @@ namespace WOTRMultiplayer.Services
                     _ = StartRealTimeRepairFallbackAsync();
                     return;
                 }
-                var epoch = Game.RealTimeCombat.Epoch;
+                var session = Game;
+                var combat = session.RealTimeCombat;
+                var epoch = combat.Epoch;
                 var checkpoint = await CombatInteraction.GetRealTimeCombatStateAsync();
-                if (Game?.RealTimeCombat?.Epoch != epoch
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, combat)
+                    || combat.Epoch != epoch
                     || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Repairing
                     || _realTimeRepairStage != RealTimeRepairStage.Prepare)
                     return;
+                if (_realTimeCriticalFaulted)
+                {
+                    new RealTimeCombatCoordinator(combat).ForceFallbackAfterUntrustedRuleResult();
+                    _ = StartRealTimeRepairFallbackAsync();
+                    return;
+                }
                 _realTimeRepairCheckpoint = checkpoint;
                 Game.RealTimeCombat.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = _realTimeRepairCheckpoint });
                 _realTimeRepairHasMismatch = false;
@@ -2538,7 +2550,7 @@ namespace WOTRMultiplayer.Services
             }
             finally
             {
-                Interlocked.Exchange(ref _realTimeRepairVerificationInProgress, 0);
+                Interlocked.CompareExchange(ref _realTimeRepairVerificationOwner, null, owner);
             }
         }
 

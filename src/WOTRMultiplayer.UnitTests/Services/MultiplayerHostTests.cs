@@ -496,6 +496,34 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task RealTimeRepair_OldSessionSampleCannotVerifyNewSessionWithSameEpoch()
+        {
+            PrepareRealTimeRepairTest();
+            A.CallTo(() => _combatInteractionService.GetRealTimeCombatStateAsync()).ReturnsLazily(() =>
+            {
+                _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+                {
+                    LocalPlayerId = NetworkConstants.HostPlayerId,
+                    Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                    RealTimeCombat = new NetworkRealTimeCombatState
+                    {
+                        Mode = CombatMode.RealTimeWithPause,
+                        Epoch = 1,
+                        Phase = CombatSynchronizationPhase.Repairing
+                    }
+                };
+                return Task.FromResult(new NetworkCombatState());
+            });
+
+            await _multiplayerHost.BeginRealTimeRepairAsync();
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(_networkServer)
+                (42, RepairAck(1, RealTimeRepairStage.Prepare, 0));
+
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Verify))).MustNotHaveHappened();
+        }
+
+        [Test]
         public async Task RealTimeRepair_MismatchThenMatchingSnapshot_ResumesRealTime()
         {
             PrepareRealTimeRepairTest();
