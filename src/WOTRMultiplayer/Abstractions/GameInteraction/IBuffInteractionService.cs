@@ -7,6 +7,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
     {
         NetworkUnitBuffCollection GetUnitBuffs(UnitEntityData combatUnit);
 
+        bool CanRecreateBuff(NetworkBuff buff);
+
         void UpdateUnitBuffs(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
     }
 }

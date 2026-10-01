@@ -4,6 +4,7 @@ using System.Linq;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Units;
 
 namespace WOTRMultiplayer.Services
 {
@@ -17,7 +18,9 @@ namespace WOTRMultiplayer.Services
             Func<string, string> getUnitSceneName = null,
             Func<NetworkAreaEffect, string> getAreaSceneName = null,
             IEnumerable<string> localCombatUnitIds = null,
-            IEnumerable<string> localAreaIds = null)
+            IEnumerable<string> localAreaIds = null,
+            Func<string, IEnumerable<NetworkBuff>> getLocalBuffs = null,
+            Func<NetworkBuff, bool> canRecreateBuff = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -58,6 +61,18 @@ namespace WOTRMultiplayer.Services
                     else if (unit.BuffCollection.Buffs.Any(buff => buff == null) ||
                              unit.BuffCollection.NegativeLevels.Any(level => level == null))
                         missing.Add($"invalid-unit:{unit.Id}:buff-entry");
+                    else if (getLocalBuffs != null && canRecreateBuff != null)
+                    {
+                        var localBuffs = (getLocalBuffs(unit.Id) ?? []).ToList();
+                        foreach (var buff in unit.BuffCollection.Buffs)
+                        {
+                            if (localBuffs.Any(local => local != null &&
+                                    (string.Equals(local.Id, buff.Id, StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(local.BlueprintId, buff.BlueprintId, StringComparison.OrdinalIgnoreCase)))
+                                || canRecreateBuff(buff)) continue;
+                            missing.Add($"unreconstructable-buff:{unit.Id}:{buff.Id ?? buff.BlueprintId ?? "<null>"}");
+                        }
+                    }
                     if (unit.CombatState != null &&
                         (unit.CombatState.EngagedUnits == null || unit.CombatState.EngagedBy == null ||
                          unit.CombatState.EngagedUnits.Any(engagement => engagement == null) ||

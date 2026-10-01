@@ -230,6 +230,43 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void UnreconstructableMissingBuff_IsRejectedBeforeAnyEntityMutation()
+        {
+            var unit = CompleteUnit("hero");
+            unit.BuffCollection.Buffs.Add(new NetworkBuff
+            {
+                Id = "host-buff", BlueprintId = "complex-buff"
+            });
+            var checkpoint = new NetworkCombatState { Units = [unit] };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true,
+                getLocalBuffs: _ => [], canRecreateBuff: _ => false),
+                Is.EqualTo("unreconstructable-buff:hero:host-buff"));
+        }
+
+        [Test]
+        public void ExistingOrExplicitlyRecreatableBuff_PermitsCheckpoint()
+        {
+            var unit = CompleteUnit("hero");
+            unit.BuffCollection.Buffs.Add(new NetworkBuff
+            {
+                Id = "host-buff", BlueprintId = "same-blueprint"
+            });
+            unit.BuffCollection.Buffs.Add(new NetworkBuff
+            {
+                Id = "new-buff", BlueprintId = "safe-blueprint"
+            });
+            var checkpoint = new NetworkCombatState { Units = [unit] };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true,
+                getLocalBuffs: _ => [new NetworkBuff { Id = "LOCAL-BUFF", BlueprintId = "SAME-BLUEPRINT" }],
+                canRecreateBuff: buff => buff.BlueprintId == "safe-blueprint"),
+                Is.Null);
+        }
+
+        [Test]
         public void InvalidCoordinatesAndOrientation_AreRejectedBeforeMutation()
         {
             var hero = CompleteUnit("hero");

@@ -359,7 +359,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
                         area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString(),
                         id => _gameStateLookupService.GetUnitEntity(id)?.HoldingState?.SceneName,
-                        area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName);
+                        area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName,
+                        getLocalBuffs: id => _buffInteractionService.GetUnitBuffs(
+                            _gameStateLookupService.GetUnitEntity(id)).Buffs,
+                        canRecreateBuff: _buffInteractionService.CanRecreateBuff);
                     if (missing != null)
                     {
                         throw new InvalidOperationException(missing);

@@ -63,6 +63,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return collection;
         }
 
+        public bool CanRecreateBuff(NetworkBuff buff) => buff != null
+            && !string.IsNullOrEmpty(buff.BlueprintId)
+            && _recreatableBuffs.ContainsKey(buff.BlueprintId);
+
         public void UpdateUnitBuffs(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection)
         {
             var buffBaseTime = BuffBaseTime;
