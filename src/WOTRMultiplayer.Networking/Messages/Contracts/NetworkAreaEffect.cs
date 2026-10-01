@@ -33,6 +33,12 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(9)]
         public string SourceAbilityBlueprintId { get; set; }
 
+        [ProtoMember(10)]
+        public long CreationGameTimeTicks { get; set; }
+
+        [ProtoMember(11)]
+        public long? DurationTicks { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

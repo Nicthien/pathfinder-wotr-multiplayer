@@ -14,6 +14,10 @@ namespace WOTRMultiplayer.Entities.AreaEffects
 
         public string SourceAbilityBlueprintId { get; set; }
 
+        public long CreationGameTimeTicks { get; set; }
+
+        public long? DurationTicks { get; set; }
+
         public string Name { get; set; }
 
         public NetworkVector3 Position { get; set; }

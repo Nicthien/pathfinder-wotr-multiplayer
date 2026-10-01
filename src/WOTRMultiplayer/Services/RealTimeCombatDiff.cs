@@ -94,6 +94,16 @@ namespace WOTRMultiplayer.Services
             {
                 causes.Add("blueprint");
             }
+            if (!string.Equals(expected.OriginalBlueprintId, actual.OriginalBlueprintId,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(expected.CasterUnitId, actual.CasterUnitId, StringComparison.Ordinal)
+                || !string.Equals(expected.SourceAbilityBlueprintId, actual.SourceAbilityBlueprintId,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(expected.MasterUnitId, actual.MasterUnitId, StringComparison.Ordinal)
+                || !string.Equals(expected.GroupId, actual.GroupId, StringComparison.Ordinal))
+            {
+                causes.Add("origin");
+            }
             var expectedProne = expected.Descriptor?.State?.Prone;
             var actualProne = actual.Descriptor?.State?.Prone;
             if ((expectedProne?.Active ?? false) != (actualProne?.Active ?? false)

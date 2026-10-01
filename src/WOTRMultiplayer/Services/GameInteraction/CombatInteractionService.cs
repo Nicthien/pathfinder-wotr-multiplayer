@@ -1093,6 +1093,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 {
                     Id = unitEntity.UniqueId,
                     BlueprintId = unitEntity.Blueprint?.AssetGuid.ToString(),
+                    OriginalBlueprintId = unitEntity.OriginalBlueprint?.AssetGuid.ToString(),
+                    CasterUnitId = unitEntity.Context?.MaybeCaster?.UniqueId,
+                    SourceAbilityBlueprintId = unitEntity.Context?.SourceAbility?.AssetGuid.ToString(),
+                    MasterUnitId = unitEntity.Master?.UniqueId,
+                    GroupId = unitEntity.GroupId,
                     Position = unitEntity.Position.ToNetworkVector3(),
                     Orientation = unitEntity.Orientation,
                     TurnBasedInfo = includeTurnBasedInfo ? GetUnitTurnBasedInfo(unitEntity) : null,

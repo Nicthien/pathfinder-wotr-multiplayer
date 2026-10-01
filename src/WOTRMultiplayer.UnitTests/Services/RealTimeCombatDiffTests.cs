@@ -82,5 +82,20 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("area:cloud:context"));
         }
+
+        [Test]
+        public void Summarize_IdentifiesSummonOriginMismatch()
+        {
+            var host = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "summon", MasterUnitId = "host-master" }]
+            };
+            var client = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "summon", MasterUnitId = "client-master" }]
+            };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("unit:summon:origin"));
+        }
     }
 }

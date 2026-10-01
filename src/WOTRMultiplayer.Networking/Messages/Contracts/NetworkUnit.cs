@@ -39,6 +39,21 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(10)]
         public string BlueprintId { get; set; }
 
+        [ProtoMember(11)]
+        public string OriginalBlueprintId { get; set; }
+
+        [ProtoMember(12)]
+        public string CasterUnitId { get; set; }
+
+        [ProtoMember(13)]
+        public string SourceAbilityBlueprintId { get; set; }
+
+        [ProtoMember(14)]
+        public string MasterUnitId { get; set; }
+
+        [ProtoMember(15)]
+        public string GroupId { get; set; }
+
         public override string ToString()
         {
             return Id?.ToString();

@@ -17,11 +17,17 @@ namespace WOTRMultiplayer.UnitTests.Services
                 configuration.AddProfile<NetworkMessagesProfile>()).CreateMapper();
             var source = new NetworkCombatState
             {
-                Units = [new NetworkUnit { Id = "summon", BlueprintId = "unit-blueprint" }],
+                Units = [new NetworkUnit
+                {
+                    Id = "summon", BlueprintId = "unit-blueprint", OriginalBlueprintId = "original-unit",
+                    CasterUnitId = "caster", SourceAbilityBlueprintId = "summon-spell",
+                    MasterUnitId = "master", GroupId = "summoned-group"
+                }],
                 AreaEffects = [new NetworkAreaEffect
                 {
                     Id = "cloud", BlueprintId = "area-blueprint", CasterUnitId = "caster",
-                    OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability"
+                    OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability",
+                    CreationGameTimeTicks = 123456, DurationTicks = 60000000
                 }]
             };
 
@@ -31,10 +37,16 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(wire.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
             Assert.That(wire.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
             Assert.That(restored.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
+            Assert.That(restored.Units[0].OriginalBlueprintId, Is.EqualTo("original-unit"));
+            Assert.That(restored.Units[0].CasterUnitId, Is.EqualTo("caster"));
+            Assert.That(restored.Units[0].MasterUnitId, Is.EqualTo("master"));
+            Assert.That(restored.Units[0].GroupId, Is.EqualTo("summoned-group"));
             Assert.That(restored.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
             Assert.That(wire.AreaEffects[0].CasterUnitId, Is.EqualTo("caster"));
             Assert.That(restored.AreaEffects[0].OwnerUnitId, Is.EqualTo("owner"));
             Assert.That(restored.AreaEffects[0].SourceAbilityBlueprintId, Is.EqualTo("source-ability"));
+            Assert.That(restored.AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(123456));
+            Assert.That(restored.AreaEffects[0].DurationTicks, Is.EqualTo(60000000));
         }
     }
 }

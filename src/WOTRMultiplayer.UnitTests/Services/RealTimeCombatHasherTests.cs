@@ -78,6 +78,27 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void SummonOriginDivergence_ChangesHash()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var changed = Sample();
+            changed.Combat.Units[0].MasterUnitId = "different-master";
+
+            Assert.That(RealTimeCombatHasher.Compute(changed), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
+        public void AreaLifetimeMetadata_DoesNotCauseFalseMovingDivergence()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var changed = Sample();
+            changed.Combat.AreaEffects[0].CreationGameTimeTicks = 123456;
+            changed.Combat.AreaEffects[0].DurationTicks = 60000000;
+
+            Assert.That(RealTimeCombatHasher.Compute(changed), Is.EqualTo(baseline));
+        }
+
+        [Test]
         public void AreaAndActiveOrderDivergence_ChangeHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

@@ -20,11 +20,17 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 MissingReplies = 3,
                 State = new NetworkCombatState
                 {
-                    Units = [new NetworkUnit { Id = "unit-a", BlueprintId = "unit-blueprint" }],
+                    Units = [new NetworkUnit
+                    {
+                        Id = "unit-a", BlueprintId = "unit-blueprint", OriginalBlueprintId = "original-unit",
+                        CasterUnitId = "caster", SourceAbilityBlueprintId = "summon-spell",
+                        MasterUnitId = "master", GroupId = "summoned-group"
+                    }],
                     AreaEffects = [new NetworkAreaEffect
                     {
                         Id = "area-a", BlueprintId = "area-blueprint", CasterUnitId = "caster",
-                        OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability"
+                        OwnerUnitId = "owner", SourceAbilityBlueprintId = "source-ability",
+                        CreationGameTimeTicks = 123456, DurationTicks = 60000000
                     }]
                 }
             };
@@ -38,10 +44,17 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.MissingReplies, Is.EqualTo(3));
             Assert.That(copy.State.Units[0].Id, Is.EqualTo("unit-a"));
             Assert.That(copy.State.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
+            Assert.That(copy.State.Units[0].OriginalBlueprintId, Is.EqualTo("original-unit"));
+            Assert.That(copy.State.Units[0].CasterUnitId, Is.EqualTo("caster"));
+            Assert.That(copy.State.Units[0].SourceAbilityBlueprintId, Is.EqualTo("summon-spell"));
+            Assert.That(copy.State.Units[0].MasterUnitId, Is.EqualTo("master"));
+            Assert.That(copy.State.Units[0].GroupId, Is.EqualTo("summoned-group"));
             Assert.That(copy.State.AreaEffects[0].BlueprintId, Is.EqualTo("area-blueprint"));
             Assert.That(copy.State.AreaEffects[0].CasterUnitId, Is.EqualTo("caster"));
             Assert.That(copy.State.AreaEffects[0].OwnerUnitId, Is.EqualTo("owner"));
             Assert.That(copy.State.AreaEffects[0].SourceAbilityBlueprintId, Is.EqualTo("source-ability"));
+            Assert.That(copy.State.AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(123456));
+            Assert.That(copy.State.AreaEffects[0].DurationTicks, Is.EqualTo(60000000));
         }
 
         [Test]

@@ -368,6 +368,8 @@ namespace WOTRMultiplayer.Config.Mapping
                 CasterUnitId = areaEffectEntityData.Context?.MaybeCaster?.UniqueId,
                 OwnerUnitId = areaEffectEntityData.Context?.MaybeOwner?.UniqueId,
                 SourceAbilityBlueprintId = areaEffectEntityData.Context?.SourceAbility?.AssetGuid.ToString(),
+                CreationGameTimeTicks = areaEffectEntityData.m_CreationTime.Ticks,
+                DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
                 Name = areaEffectEntityData.Blueprint.name,
                 Position = areaEffectEntityData.m_Position.ToNetworkVector3(),
                 UnitsInside = [.. areaEffectEntityData.m_UnitsInside.Select(x => x.Reference.UniqueId)],
