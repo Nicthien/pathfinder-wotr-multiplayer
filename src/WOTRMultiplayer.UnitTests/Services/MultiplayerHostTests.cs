@@ -512,6 +512,23 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustHaveHappenedOnceExactly();
         }
 
+        [Test]
+        public void RealTimeAI_HostPublishesNoActionMarker()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+
+            _multiplayerHost.OnAfterAISelectedAction(new NetworkAIAction { UnitId = "enemy-a" });
+
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyAIActionSelected>.That.Matches(x =>
+                x.RealTimeEpoch == 3 && x.RealTimeSequence == 1 && x.Action.UnitId == "enemy-a"
+                && x.Action.Id == null))).MustHaveHappenedOnceExactly();
+        }
+
         private void PrepareRealTimeRepairTest()
         {
             A.CallTo(() => _networkServer.IsActive).Returns(true);

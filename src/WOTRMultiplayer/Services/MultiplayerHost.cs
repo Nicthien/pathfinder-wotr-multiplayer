@@ -79,7 +79,7 @@ namespace WOTRMultiplayer.Services
         private int _realTimeRepairRetransmissions;
         private NetworkCombatState _realTimeRepairCheckpoint;
         private bool _realTimeRepairHasMismatch;
-        private bool _realTimeRuleRollFaulted;
+        private bool _realTimeCriticalFaulted;
         private long _realTimeAISequenceEpoch;
         private long _nextRealTimeAISequence;
         private NetworkCombat _autoModeAttemptCombat;
@@ -118,7 +118,7 @@ namespace WOTRMultiplayer.Services
         protected override void ResetRealTimeRuleRolls()
         {
             _realTimeRuleRolls.Reset();
-            _realTimeRuleRollFaulted = false;
+            _realTimeCriticalFaulted = false;
         }
 
         public void PublishRealTimeCombatSnapshot()
@@ -541,7 +541,7 @@ namespace WOTRMultiplayer.Services
         public void Create(string gameId, string gamePassword, Entities.Connectivity.ExternalServer externalServer, NetworkGameStartUp gameStartUp)
         {
             _realTimeRuleRolls.Reset();
-            _realTimeRuleRollFaulted = false;
+            _realTimeCriticalFaulted = false;
             if (_networkHost.IsActive)
             {
                 _networkHost.Reset();
@@ -649,7 +649,7 @@ namespace WOTRMultiplayer.Services
         {
             Logger.LogInformation("Resetting");
             _realTimeRuleRolls.Reset();
-            _realTimeRuleRollFaulted = false;
+            _realTimeCriticalFaulted = false;
             Game = null;
             _realTimeSnapshotHashes.Clear();
             _realTimeSnapshotSentAt.Clear();
@@ -2193,6 +2193,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimeModeTransitionAck>(OnClientRealTimeModeTransitionAck)
                .On<ClientRealTimeRepairAck>(OnClientRealTimeRepairAck)
                .On<ClientRealTimeRuleRollFault>(OnClientRealTimeRuleRollFault)
+               .On<ClientRealTimeAIActionFault>(OnClientRealTimeAIActionFault)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -2356,7 +2357,22 @@ namespace WOTRMultiplayer.Services
                     return;
                 Logger.LogWarning("Client could not obtain an authoritative combat roll; starting repair. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.Sequence, message.Key, message.Reason);
-                _realTimeRuleRollFaulted = true;
+                _realTimeCriticalFaulted = true;
+                _ = BeginRealTimeRepairAsync();
+            });
+        }
+
+        private void OnClientRealTimeAIActionFault(long receivedFrom, ClientRealTimeAIActionFault message)
+        {
+            _mainThreadAccessor.Post(() =>
+            {
+                if (message == null || GetPlayer(receivedFrom) == null || !IsRealTimeCombatActive
+                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                    || message.Epoch != Game.RealTimeCombat.Epoch || string.IsNullOrWhiteSpace(message.UnitId))
+                    return;
+                Logger.LogWarning("Client could not apply authoritative combat AI action; starting protected fallback. PlayerId={PlayerId}, Epoch={Epoch}, UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
+                    receivedFrom, message.Epoch, message.UnitId, message.ActionId, message.Reason);
+                _realTimeCriticalFaulted = true;
                 _ = BeginRealTimeRepairAsync();
             });
         }
@@ -2434,9 +2450,9 @@ namespace WOTRMultiplayer.Services
             {
                 return;
             }
-            if (_realTimeRuleRollFaulted)
+            if (_realTimeCriticalFaulted)
             {
-                Logger.LogWarning("A combat rule used an unconfirmed result; switching directly to the protected turn-based fallback. Epoch={Epoch}",
+                Logger.LogWarning("A combat rule or AI choice could not be confirmed; switching directly to the protected turn-based fallback. Epoch={Epoch}",
                     Game.RealTimeCombat.Epoch);
                 new RealTimeCombatCoordinator(Game.RealTimeCombat).ForceFallbackAfterUntrustedRuleResult();
                 _ = StartRealTimeRepairFallbackAsync();
@@ -2604,7 +2620,7 @@ namespace WOTRMultiplayer.Services
         private void CommitRealTimeRepairFallback()
         {
             new RealTimeCombatCoordinator(Game.RealTimeCombat).CommitFallback(Game.RealTimeCombat.CanonicalStateHash);
-            _realTimeRuleRollFaulted = false;
+            _realTimeCriticalFaulted = false;
             FinishRealTimeRepair(CombatMode.TurnBased);
         }
 

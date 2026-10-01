@@ -4125,6 +4125,11 @@ namespace WOTRMultiplayer.Services
             return _multiplayerActorAccessor.Client.TryConsumeAuthoritativeRealTimeAIAction(unitId, out action);
         }
 
+        public void ReportRealTimeAIActionFault(string unitId, string actionId, string reason)
+        {
+            _multiplayerActorAccessor.Client.ReportRealTimeAIActionFault(unitId, actionId, reason);
+        }
+
         public void OnAreaLoaded()
         {
             try

@@ -94,6 +94,18 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         }
 
         [Test]
+        public void AIActionFault_RoundTrips()
+        {
+            var copy = Serializer.DeepClone(new ClientRealTimeAIActionFault
+            {
+                Epoch = 7, UnitId = "enemy", ActionId = "spell", Reason = "target-not-found"
+            });
+
+            Assert.That((copy.Epoch, copy.UnitId, copy.ActionId, copy.Reason),
+                Is.EqualTo((7L, "enemy", "spell", "target-not-found")));
+        }
+
+        [Test]
         public void StateHashReply_ReportsApplicationFailure()
         {
             var copy = Serializer.DeepClone(new ClientRealTimeStateHash

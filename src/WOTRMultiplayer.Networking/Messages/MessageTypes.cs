@@ -309,7 +309,8 @@
             ClientRealTimeRepairAck,
             NotifyRealTimeCombatPreference,
             NotifyRealTimeRuleRoll,
-            ClientRealTimeRuleRollFault
+            ClientRealTimeRuleRollFault,
+            ClientRealTimeAIActionFault
         }
 
         public static class Mods

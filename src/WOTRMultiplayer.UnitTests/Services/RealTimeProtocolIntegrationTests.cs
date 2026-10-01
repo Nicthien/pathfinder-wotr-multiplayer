@@ -125,6 +125,44 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_UnresolvableHostAIChoice_UsesProtectedFallback()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            client.ReportRealTimeAIActionFault("enemy", "spell", "target-not-found");
+            var fault = (ClientRealTimeAIActionFault)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeAIActionFault>(hostNetwork)(42, fault);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+        }
+
+        [Test]
+        public async Task TwoActors_HostNoActionChoiceArrivesOnceWithoutClientDecision()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(client.TryConsumeAuthoritativeRealTimeAIAction("enemy", out _), Is.False);
+            host.OnAfterAISelectedAction(new NetworkAIAction { UnitId = "enemy" });
+            var choice = (NotifyAIActionSelected)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(clientNetwork)
+                (NetworkConstants.HostPlayerId, choice);
+            FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(clientNetwork)
+                (NetworkConstants.HostPlayerId, choice);
+
+            Assert.That(client.TryConsumeAuthoritativeRealTimeAIAction("enemy", out var selected), Is.True);
+            Assert.That(selected.Id, Is.Null);
+            Assert.That(client.TryConsumeAuthoritativeRealTimeAIAction("enemy", out _), Is.False);
+        }
+
+        [Test]
         public async Task Client_IgnoresRealTimeAuthorityMessagesFromNonHost()
         {
             var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();

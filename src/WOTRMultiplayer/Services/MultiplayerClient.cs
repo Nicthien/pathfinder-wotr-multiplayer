@@ -206,6 +206,18 @@ namespace WOTRMultiplayer.Services
                 && queue.TryDequeue(out action);
         }
 
+        public void ReportRealTimeAIActionFault(string unitId, string actionId, string reason)
+        {
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return;
+            Logger.LogError("Authoritative real-time AI action cannot be applied. Epoch={Epoch}, UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
+                Game.RealTimeCombat.Epoch, unitId, actionId, reason);
+            Send(new ClientRealTimeAIActionFault
+            {
+                Epoch = Game.RealTimeCombat.Epoch, UnitId = unitId, ActionId = actionId, Reason = reason
+            });
+        }
+
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
             if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)

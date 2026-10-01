@@ -35,5 +35,7 @@ namespace WOTRMultiplayer.Abstractions
         bool RequestRealTimePause(bool wantsPause);
 
         bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action);
+
+        void ReportRealTimeAIActionFault(string unitId, string actionId, string reason);
     }
 }

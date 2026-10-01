@@ -510,6 +510,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action);
 
+        void ReportRealTimeAIActionFault(string unitId, string actionId, string reason);
+
         void OnUnitMoveTo(NetworkUnitMoveTo unitMoveTo);
 
         void OnEnterKingdom(NetworkKingdomEntryPoint kingdomEntryPoint);

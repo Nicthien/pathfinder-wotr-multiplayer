@@ -21,6 +21,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
     [HarmonyPatch]
     public class AiBrainControllerPatches
     {
+        [ThreadStatic]
+        private static NetworkAIAction _selectionFromHost;
+
         [HarmonyPatch(typeof(CombatAiData), nameof(CombatAiData.UseAction))]
         [HarmonyTranspiler]
         public static IEnumerable<CodeInstruction> CombatAiData_UseAction_Transpiler(IEnumerable<CodeInstruction> instructions)
@@ -71,6 +74,51 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             }
         }
 
+        [HarmonyPatch(typeof(AiBrainController), nameof(AiBrainController.SelectAction))]
+        [HarmonyPrefix]
+        public static bool AiBrainController_SelectAction_Prefix(UnitEntityData unit, ref bool __result)
+        {
+            if (!Main.Multiplayer.IsRealTimeClientCombatActive)
+                return true;
+
+            __result = false;
+            _selectionFromHost = null;
+            if (unit == null || !Main.Multiplayer.TryConsumeAuthoritativeRealTimeAIAction(unit.UniqueId, out var action))
+            {
+                // The original SelectAction interrupts running AI commands when no choice exists.
+                // A delayed host choice must not cancel a command still active on the host.
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(action.Id))
+            {
+                _selectionFromHost = action;
+                return true; // Explicit host "no action" choice; the game may interrupt AI commands.
+            }
+
+            try
+            {
+                var available = Main.State.FindAIAction(unit, action) != null;
+                var targetAvailable = string.IsNullOrWhiteSpace(action.TargetId)
+                    || Main.State.GetUnitEntity(action.TargetId) != null;
+                if (available && targetAvailable && action.DecisionContext?.VectorPath != null)
+                {
+                    _selectionFromHost = action;
+                    return true;
+                }
+
+                Main.Multiplayer.ReportRealTimeAIActionFault(unit.UniqueId, action.Id,
+                    !available ? "action-not-found" : !targetAvailable ? "target-not-found" : "path-missing");
+            }
+            catch (Exception ex)
+            {
+                Main.GetLogger<AiBrainControllerPatches>().LogError(ex,
+                    "Unable to resolve host AI action before selection. UnitId={UnitId}, ActionId={ActionId}",
+                    unit.UniqueId, action.Id);
+                Main.Multiplayer.ReportRealTimeAIActionFault(unit.UniqueId, action.Id, "choice-resolution-exception");
+            }
+            return false;
+        }
+
         [HarmonyPatch(typeof(AiBrainController), nameof(AiBrainController.FindBestAction))]
         [HarmonyPrefix]
         public static bool AiBrainController_FindBestAction_Prefix(UnitEntityData unit, DecisionContext context, ref AiAction bestActionResult, ref UnitEntityData bestTargetResult)
@@ -82,30 +130,44 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
             bestActionResult = null;
             bestTargetResult = null;
-            if (unit == null || !Main.Multiplayer.TryConsumeAuthoritativeRealTimeAIAction(unit.UniqueId, out var action))
+            var action = _selectionFromHost;
+            _selectionFromHost = null;
+            if (unit == null || action == null)
             {
                 // The client must wait for the host's choice, never roll its own AI decision.
                 return false;
             }
 
-            var selectedAction = Main.State.FindAIAction(unit, action);
-            var target = string.IsNullOrWhiteSpace(action.TargetId) ? null : Main.State.GetUnitEntity(action.TargetId);
-            if (selectedAction == null || (!string.IsNullOrWhiteSpace(action.TargetId) && target == null))
-            {
-                Main.GetLogger<AiBrainControllerPatches>().LogError("Authoritative real-time AI choice cannot be resolved. UnitId={UnitId}, ActionId={ActionId}, TargetId={TargetId}", unit.UniqueId, action.Id, action.TargetId);
+            if (string.IsNullOrWhiteSpace(action.Id))
                 return false;
-            }
 
-            bestActionResult = selectedAction;
-            bestTargetResult = target;
-            if (action.DecisionContext != null)
+            try
             {
-                context.BestPath = new ForcedPath([.. action.DecisionContext.VectorPath.Select(x => x.ToUnityVector3())]);
-                context.BestEnableFiveFootStep = action.DecisionContext.BestEnableFiveFootStep;
-                if (action.DecisionContext.BestDestinationPoint != null)
+                var selectedAction = Main.State.FindAIAction(unit, action);
+                var target = string.IsNullOrWhiteSpace(action.TargetId) ? null : Main.State.GetUnitEntity(action.TargetId);
+                if (selectedAction == null || (!string.IsNullOrWhiteSpace(action.TargetId) && target == null))
                 {
-                    context.BestDestinationPoint = action.DecisionContext.BestDestinationPoint.ToUnityVector3();
+                    Main.Multiplayer.ReportRealTimeAIActionFault(unit.UniqueId, action.Id, "choice-became-unresolvable");
+                    return false;
                 }
+
+                if (action.DecisionContext != null)
+                {
+                    context.BestPath = new ForcedPath([.. action.DecisionContext.VectorPath.Select(x => x.ToUnityVector3())]);
+                    context.BestEnableFiveFootStep = action.DecisionContext.BestEnableFiveFootStep;
+                    if (action.DecisionContext.BestDestinationPoint != null)
+                        context.BestDestinationPoint = action.DecisionContext.BestDestinationPoint.ToUnityVector3();
+                }
+                bestActionResult = selectedAction;
+                bestTargetResult = target;
+            }
+            catch (Exception ex)
+            {
+                bestActionResult = null;
+                bestTargetResult = null;
+                Main.GetLogger<AiBrainControllerPatches>().LogError(ex,
+                    "Unable to apply host AI selection. UnitId={UnitId}, ActionId={ActionId}", unit.UniqueId, action.Id);
+                Main.Multiplayer.ReportRealTimeAIActionFault(unit.UniqueId, action.Id, "choice-application-exception");
             }
             return false;
         }
@@ -114,8 +176,15 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void AiBrainController_FindBestAction_Postfix(UnitEntityData unit, DecisionContext context, ref AiAction bestActionResult, ref UnitEntityData bestTargetResult)
         {
-            if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive || bestActionResult == null)
+            if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive || unit == null)
             {
+                return;
+            }
+
+            if (bestActionResult == null)
+            {
+                if (Main.Multiplayer.IsRealTimeCombatActive)
+                    Main.Multiplayer.OnAfterAISelectedAction(new NetworkAIAction { UnitId = unit.UniqueId });
                 return;
             }
 
@@ -156,10 +225,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 hasBeenModified = true;
             }
 
-            var previousTarget = bestTargetResult.UniqueId;
+            var previousTarget = bestTargetResult?.UniqueId;
             if (!string.Equals(possibleActionOverride.TargetId, previousTarget, StringComparison.OrdinalIgnoreCase))
             {
-                bestTargetResult = Main.State.GetUnitEntity(possibleActionOverride.TargetId);
+                bestTargetResult = string.IsNullOrWhiteSpace(possibleActionOverride.TargetId)
+                    ? null : Main.State.GetUnitEntity(possibleActionOverride.TargetId);
                 hasBeenModified = true;
             }
 
@@ -169,7 +239,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             if (hasBeenModified)
             {
                 Main.GetLogger<AiBrainControllerPatches>().LogWarning("AI action target has been overridden. UnitId={UnitId}, PreviousActionId={PreviousActionId}, PreviousActionName={PreviousActionName}, PreviousTarget={PreviousTarget}, NewActionId={NewActionId}, NewActionName={NewActionName}, NewTarget={NewTarget}",
-                    unit.UniqueId, previousAction.AssetGuid.ToString(), previousAction.name, previousTarget, possibleActionOverride.Id, possibleActionOverride.Name, bestTargetResult.UniqueId);
+                    unit.UniqueId, previousAction.AssetGuid.ToString(), previousAction.name, previousTarget, possibleActionOverride.Id, possibleActionOverride.Name, bestTargetResult?.UniqueId);
             }
         }
     }

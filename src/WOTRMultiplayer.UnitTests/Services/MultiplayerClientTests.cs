@@ -613,6 +613,44 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void RealTimeAI_UnresolvableChoiceReportsEpochScopedFault()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 7 }
+            };
+
+            _multiplayerClient.ReportRealTimeAIActionFault("enemy-a", "spell-a", "target-not-found");
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeAIActionFault>.That.Matches(x =>
+                x.Epoch == 7 && x.UnitId == "enemy-a" && x.ActionId == "spell-a"
+                && x.Reason == "target-not-found"))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void RealTimeAI_ExplicitNoActionMarkerIsQueuedUntilConsumed()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyAIActionSelected>(_networkClient);
+            handler.Invoke(-1, new NotifyAIActionSelected
+            {
+                RealTimeEpoch = 3, RealTimeSequence = 1,
+                Action = new Networking.Messages.Contracts.NetworkAIAction { UnitId = "enemy-a" }
+            });
+
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out var consumed), Is.True);
+            Assert.That(consumed.Id, Is.Null);
+            Assert.That(_multiplayerClient.TryConsumeAuthoritativeRealTimeAIAction("enemy-a", out _), Is.False);
+        }
+
+        [Test]
         public void RealTimePausePolicy_UpdatesInTurnBasedWithoutChangingGamePause()
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
