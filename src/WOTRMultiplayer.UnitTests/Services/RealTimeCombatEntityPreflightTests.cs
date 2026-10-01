@@ -122,6 +122,20 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Is.EqualTo("invalid-unit:hero:buff-entry,invalid-unit:hero:engagements,missing-engagement-target:hero:<null>"));
         }
 
+        [Test]
+        public void ExistingAreaWithoutView_IsRejectedBeforeMutation()
+        {
+            var checkpoint = new NetworkCombatState
+            {
+                Units = [CompleteUnit("hero")],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", Position = new NetworkVector3() }]
+            };
+
+            Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
+                _ => true, _ => true, _ => false),
+                Is.EqualTo("invalid-area:cloud:view"));
+        }
+
         private static NetworkUnit CompleteUnit(string id) => new NetworkUnit
         {
             Id = id,

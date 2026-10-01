@@ -10,7 +10,7 @@ namespace WOTRMultiplayer.Services
     public static class RealTimeCombatEntityPreflight
     {
         public static string FindMissing(NetworkCombatState checkpoint, Func<string, bool> hasUnit,
-            Func<NetworkAreaEffect, bool> hasArea)
+            Func<NetworkAreaEffect, bool> hasArea, Func<NetworkAreaEffect, bool> hasAreaView = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -63,6 +63,8 @@ namespace WOTRMultiplayer.Services
                 }
                 else
                 {
+                    if (hasAreaView != null && !hasAreaView(area))
+                        missing.Add($"invalid-area:{area.Id}:view");
                     if (area.Position == null) missing.Add($"invalid-area:{area.Id}:position");
                     if (area.UnitsInside == null) missing.Add($"invalid-area:{area.Id}:occupants");
                 }

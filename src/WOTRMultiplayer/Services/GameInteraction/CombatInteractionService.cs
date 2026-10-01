@@ -354,7 +354,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 {
                     var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
                         id => _gameStateLookupService.GetUnitEntity(id) != null,
-                        area => _gameStateLookupService.GetAreaEffect(area) != null);
+                        area => _gameStateLookupService.GetAreaEffect(area) != null,
+                        area => _gameStateLookupService.GetAreaEffect(area)?.View != null);
                     if (missing != null)
                     {
                         throw new InvalidOperationException(missing);
@@ -1702,7 +1703,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 unit.CombatState.PreventAttacksOfOpporunityNextFrame = true;
             }
-            unit.View.transform.position = newPosition;
+            if (unit.View != null)
+            {
+                unit.View.transform.position = newPosition;
+            }
             unit.Position = newPosition;
 
             var rider = unit.SaddledPart?.Rider;
