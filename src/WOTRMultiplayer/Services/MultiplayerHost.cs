@@ -279,7 +279,8 @@ namespace WOTRMultiplayer.Services
                             completion.TrySetResult(false);
                             return;
                         }
-                        if (CombatInteraction.HasActiveRealTimeProjectiles())
+                        if (CombatInteraction.HasActiveRealTimeProjectiles()
+                            || CombatInteraction.HasActiveRealTimeAtomicActions())
                         {
                             completion.TrySetResult(false);
                             return;
@@ -300,7 +301,7 @@ namespace WOTRMultiplayer.Services
                     return false;
                 await Task.Delay(50);
             }
-            Logger.LogWarning("Combat-mode request could not reach a projectile-safe pause within 30 seconds. Epoch={Epoch}",
+            Logger.LogWarning("Combat-mode request could not reach a projectile-and-action-safe pause within 30 seconds. Epoch={Epoch}",
                 transitionEpoch);
             return false;
         }

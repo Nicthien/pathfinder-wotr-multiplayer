@@ -595,6 +595,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 projectile != null && !projectile.Destroyed && !projectile.Cleared);
         }
 
+        public bool HasActiveRealTimeAtomicActions()
+        {
+            // Movement is continuous and its position is checkpointed. Other running
+            // commands may still apply a rule result or spawn an effect after the pause.
+            return Game.Instance.State.Units.InCombat().Any(unit =>
+                unit?.Commands?.Raw?.Any(command =>
+                    command != null && command.IsRunning && !command.IsFinished && !command.IsMoveUnit) == true);
+        }
+
         public Task<bool> TryPauseAtProjectileSafePointAsync(Func<bool> canPause, Action pause)
         {
             if (canPause == null)
@@ -606,7 +615,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    if (!canPause() || HasActiveRealTimeProjectiles())
+                    if (!canPause() || HasActiveRealTimeProjectiles() || HasActiveRealTimeAtomicActions())
                     {
                         completion.TrySetResult(false);
                         return;
@@ -616,7 +625,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Unable to pause at a projectile-safe point");
+                    _logger.LogError(ex, "Unable to pause at a combat-action-safe point");
                     completion.TrySetException(ex);
                 }
             });

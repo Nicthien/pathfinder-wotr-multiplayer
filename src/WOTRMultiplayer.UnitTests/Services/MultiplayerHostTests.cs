@@ -443,6 +443,22 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task CombatModeSwitch_WaitsForRunningNonMovementAction()
+        {
+            PrepareRealTimeRepairTest();
+            var checks = 0;
+            A.CallTo(() => _combatInteractionService.HasActiveRealTimeAtomicActions())
+                .ReturnsLazily(() => ++checks == 1);
+
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+
+            Assert.That(checks, Is.EqualTo(2));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public async Task CombatModeSwitch_ReplacedSessionDuringProjectileDrainCannotPublishPrepare()
         {
             PrepareRealTimeRepairTest();

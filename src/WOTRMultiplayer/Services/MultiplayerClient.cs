@@ -1609,7 +1609,7 @@ namespace WOTRMultiplayer.Services
                     return false;
                 await Task.Delay(50);
             }
-            Logger.LogWarning("Client could not reach a projectile-safe combat-mode pause within 10 seconds. Epoch={Epoch}",
+            Logger.LogWarning("Client could not reach a projectile-and-action-safe combat-mode pause within 10 seconds. Epoch={Epoch}",
                 epoch);
             return false;
         }
