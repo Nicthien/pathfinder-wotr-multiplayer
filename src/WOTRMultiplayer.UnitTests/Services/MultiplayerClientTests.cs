@@ -905,5 +905,32 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerClient.Game.RealTimeCombat.PausePolicy, Is.EqualTo(PausePolicy.HostOnly));
             A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
         }
+
+        [Test]
+        public void RealTimePauseChange_CannotUnpauseCriticalRepairBarrier()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause, Epoch = 7
+                }
+            };
+            _multiplayerClient.ReportRealTimeAIActionFault("enemy-a", "spell-a", "target-not-found");
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimePauseChanged>(_networkClient)(-1,
+                new NotifyRealTimePauseChanged
+                {
+                    Epoch = 7, Sequence = 1, IsPaused = false,
+                    Policy = (int)PausePolicy.AnyoneFreeResume, PausedPlayers = []
+                });
+
+            Assert.That(_multiplayerClient.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _gameInteractionService.SetPause(false)).MustNotHaveHappened();
+        }
     }
 }

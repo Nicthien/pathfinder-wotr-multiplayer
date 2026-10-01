@@ -1342,7 +1342,8 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.PausePolicy = (PausePolicy)message.Policy;
             Game.RealTimeCombat.PausedPlayers = [.. message.PausedPlayers];
             Game.RealTimeCombat.ResumeVotes = [.. message.ResumeVotes ?? []];
-            if (Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause)
+            if (Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
+                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable)
             {
                 GameInteraction.SetPause(message.IsPaused || Game.ForcedPause != null);
             }
