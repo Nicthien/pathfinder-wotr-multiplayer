@@ -2501,7 +2501,7 @@ namespace WOTRMultiplayer.Services
                 if (message == null || message.AuthoritativeSequence <= 0
                     || !TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch))
                     return;
-                Logger.LogWarning("Client could not apply an authoritative combat command. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Reason={Reason}",
+                Logger.LogWarning("Client could not apply an authoritative real-time combat event. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Reason={Reason}",
                     receivedFrom, message.Epoch, message.AuthoritativeSequence, message.Reason);
             });
         }

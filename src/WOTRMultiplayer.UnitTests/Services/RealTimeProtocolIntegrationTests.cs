@@ -299,6 +299,33 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_DelayedDeathFromPreviousEpoch_AppliesDuringModePrepare()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                    "enemy", A<NetworkPlayer>._, A<Func<bool>>._))
+                .Returns(Task.FromResult<bool?>(true));
+
+            host.OnUnitDeath("enemy", "enemy-group");
+            var delayedDeath = (NotifyRealTimeUnitKilled)queued.Dequeue();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+            var prepare = (NotifyRealTimeModeTransition)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(clientNetwork)(
+                NetworkConstants.HostPlayerId, prepare);
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.PreparingModeSwitch));
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                NetworkConstants.HostPlayerId, delayedDeath);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                "enemy", A<NetworkPlayer>._, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+        }
+
+        [Test]
         public async Task TwoActors_HostNoActionChoiceArrivesOnceWithoutClientDecision()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
