@@ -159,5 +159,26 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(task.Result, Is.Null);
             A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
         }
+
+        [Test]
+        public void TryPauseAtProjectileSafePointAsync_StaleSessionDoesNotPauseGame()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            Action queued = null;
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => queued = action);
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), A.Fake<IGameStateLookupService>(),
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var current = true;
+            var pauseCalls = 0;
+
+            var task = service.TryPauseAtProjectileSafePointAsync(() => current, () => pauseCalls++);
+            current = false;
+            queued();
+
+            Assert.That(task.Result, Is.False);
+            Assert.That(pauseCalls, Is.Zero);
+        }
     }
 }

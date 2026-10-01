@@ -595,6 +595,34 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 projectile != null && !projectile.Destroyed && !projectile.Cleared);
         }
 
+        public Task<bool> TryPauseAtProjectileSafePointAsync(Func<bool> canPause, Action pause)
+        {
+            if (canPause == null)
+                throw new ArgumentNullException(nameof(canPause));
+            if (pause == null)
+                throw new ArgumentNullException(nameof(pause));
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    if (!canPause() || HasActiveRealTimeProjectiles())
+                    {
+                        completion.TrySetResult(false);
+                        return;
+                    }
+                    pause();
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to pause at a projectile-safe point");
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
         public void MakeUnitUntargetable(string unitId)
         {
             var unit = _gameStateLookupService.GetUnitEntity(unitId);

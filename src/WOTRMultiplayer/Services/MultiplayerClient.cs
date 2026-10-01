@@ -1437,11 +1437,11 @@ namespace WOTRMultiplayer.Services
                     _realTimeAISequenceEpoch = message.Epoch;
                     _lastRealTimeAISequence = 0;
                     state.Phase = CombatSynchronizationPhase.PreparingModeSwitch;
-                    await GameInteraction.SetPauseAsync(true);
+                    var paused = await PauseClientAtProjectileSafePointAsync(session, state, message.Epoch);
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
                         return;
-                    SendRealTimeModeAck(message, true, 0);
+                    SendRealTimeModeAck(message, paused, 0);
                     return;
                 }
 
@@ -1590,6 +1590,28 @@ namespace WOTRMultiplayer.Services
             return ReferenceEquals(Game, session)
                 && ReferenceEquals(session.RealTimeCombat, state)
                 && state.Epoch == epoch;
+        }
+
+        private async Task<bool> PauseClientAtProjectileSafePointAsync(
+            NetworkGame session, NetworkRealTimeCombatState state, long epoch)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                Func<bool> canPause = () => IsCurrentRealTimeMessage(session, state, epoch)
+                    && state.Phase == CombatSynchronizationPhase.PreparingModeSwitch;
+                if (!canPause())
+                    return false;
+                if (await CombatInteraction.TryPauseAtProjectileSafePointAsync(canPause,
+                    () => GameInteraction.SetPause(true)))
+                    return canPause();
+                if (!canPause())
+                    return false;
+                await Task.Delay(50);
+            }
+            Logger.LogWarning("Client could not reach a projectile-safe combat-mode pause within 10 seconds. Epoch={Epoch}",
+                epoch);
+            return false;
         }
 
         private void SendRealTimeModeAck(NotifyRealTimeModeTransition message, bool applied, ulong hash)

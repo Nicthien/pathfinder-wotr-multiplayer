@@ -168,6 +168,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             _globalMapInteractionService = A.Fake<IGlobalMapInteractionService>();
             _pingInteractionService = A.Fake<IPingInteractionService>();
             _combatInteractionService = A.Fake<ICombatInteractionService>();
+            A.CallTo(() => _combatInteractionService.TryPauseAtProjectileSafePointAsync(
+                    A<Func<bool>>._, A<Action>._))
+                .ReturnsLazily((Func<bool> canPause, Action pause) =>
+                {
+                    if (!canPause()) return Task.FromResult(false);
+                    pause();
+                    return Task.FromResult(true);
+                });
             _multiplayerSettingsProvider = A.Fake<IMultiplayerSettingsService>();
             _fileSystemService = A.Fake<IFileSystemService>();
 
@@ -545,11 +553,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                 LocalPlayerId = 42,
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
             };
-            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).ReturnsLazily(() =>
-            {
-                _multiplayerClient.Game = replacement;
-                return Task.CompletedTask;
-            });
+            A.CallTo(() => _combatInteractionService.TryPauseAtProjectileSafePointAsync(
+                    A<Func<bool>>._, A<Action>._))
+                .ReturnsLazily((Func<bool> canPause, Action pause) =>
+                {
+                    _multiplayerClient.Game = replacement;
+                    return Task.FromResult(false);
+                });
 
             FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient)(-1,
                 new NotifyRealTimeModeTransition
@@ -562,6 +572,42 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(replacement.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>._))
                 .MustNotHaveHappened();
+        }
+
+        [Test]
+        public void CombatModeSwitch_WaitsForLocalProjectileBeforePrepareAcknowledgement()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            var checks = 0;
+            var acknowledged = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            A.CallTo(() => _combatInteractionService.TryPauseAtProjectileSafePointAsync(
+                    A<Func<bool>>._, A<Action>._))
+                .ReturnsLazily((Func<bool> canPause, Action pause) =>
+                {
+                    if (++checks == 1) return Task.FromResult(false);
+                    Assert.That(canPause(), Is.True);
+                    pause();
+                    return Task.FromResult(true);
+                });
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare && x.Applied)))
+                .Invokes(_ => acknowledged.TrySetResult(true));
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient)(-1,
+                new NotifyRealTimeModeTransition
+                {
+                    Epoch = 1, Stage = (int)RealTimeModeTransitionStage.Prepare,
+                    Mode = (int)CombatMode.TurnBased
+                });
+
+            Assert.That(acknowledged.Task.Wait(TimeSpan.FromSeconds(2)), Is.True);
+            Assert.That(checks, Is.EqualTo(2));
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
         }
 
         [Test]
@@ -718,7 +764,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             handler.Invoke(-1, prepare);
             handler.Invoke(-1, prepare);
 
-            A.CallTo(() => _gameInteractionService.SetPauseAsync(true)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
                 x.Stage == (int)RealTimeModeTransitionStage.Prepare && x.Applied))).MustHaveHappenedTwiceExactly();
         }

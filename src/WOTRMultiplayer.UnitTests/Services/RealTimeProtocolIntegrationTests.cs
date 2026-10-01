@@ -804,6 +804,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             var clientGame = A.Fake<IGameInteractionService>();
             var hostCombat = A.Fake<ICombatInteractionService>();
             var clientCombat = A.Fake<ICombatInteractionService>();
+            A.CallTo(() => clientCombat.TryPauseAtProjectileSafePointAsync(
+                    A<Func<bool>>._, A<Action>._))
+                .ReturnsLazily((Func<bool> canPause, Action pause) =>
+                {
+                    if (!canPause()) return Task.FromResult(false);
+                    pause();
+                    return Task.FromResult(true);
+                });
             A.CallTo(() => hostGame.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => clientGame.SetPauseAsync(true)).Returns(Task.CompletedTask);
             A.CallTo(() => hostGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
