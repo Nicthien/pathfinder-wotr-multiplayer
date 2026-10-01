@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 
@@ -23,8 +24,12 @@ namespace WOTRMultiplayer.Services
             var missing = new HashSet<string>(StringComparer.Ordinal);
             if (checkpoint.Units == null) missing.Add("invalid-combat:units");
             if (checkpoint.AreaEffects == null) missing.Add("invalid-combat:areas");
+            var unitIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var areaIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var unit in checkpoint.Units ?? [])
             {
+                if (unit?.Id != null && !unitIds.Add(unit.Id))
+                    missing.Add($"duplicate-unit:{unit.Id}");
                 var exists = unit?.Id != null && hasUnit(unit.Id);
                 if (!exists)
                 {
@@ -36,7 +41,9 @@ namespace WOTRMultiplayer.Services
                         (getUnitBlueprintId != null && !string.Equals(unit.BlueprintId,
                             getUnitBlueprintId(unit.Id), StringComparison.OrdinalIgnoreCase)))
                         missing.Add($"invalid-unit:{unit.Id}:blueprint");
-                    if (unit.Position == null) missing.Add($"invalid-unit:{unit.Id}:position");
+                    if (!IsFinite(unit.Position)) missing.Add($"invalid-unit:{unit.Id}:position");
+                    if (float.IsNaN(unit.Orientation) || float.IsInfinity(unit.Orientation))
+                        missing.Add($"invalid-unit:{unit.Id}:orientation");
                     if (unit.Descriptor?.State?.Prone == null) missing.Add($"invalid-unit:{unit.Id}:state");
                     if (unit.Descriptor?.Stats == null) missing.Add($"invalid-unit:{unit.Id}:stats");
                     if (unit.BuffCollection?.Buffs == null || unit.BuffCollection.NegativeLevels == null)
@@ -62,6 +69,8 @@ namespace WOTRMultiplayer.Services
             }
             foreach (var area in checkpoint.AreaEffects ?? [])
             {
+                if (area?.Id != null && !areaIds.Add(area.Id))
+                    missing.Add($"duplicate-area:{area.Id}");
                 var exists = area?.Id != null && hasArea(area);
                 if (!exists)
                 {
@@ -75,7 +84,7 @@ namespace WOTRMultiplayer.Services
                         missing.Add($"invalid-area:{area.Id}:blueprint");
                     if (hasAreaView != null && !hasAreaView(area))
                         missing.Add($"invalid-area:{area.Id}:view");
-                    if (area.Position == null) missing.Add($"invalid-area:{area.Id}:position");
+                    if (!IsFinite(area.Position)) missing.Add($"invalid-area:{area.Id}:position");
                     if (area.UnitsInside == null) missing.Add($"invalid-area:{area.Id}:occupants");
                 }
                 if (area?.Id == null) { continue; }
@@ -98,5 +107,10 @@ namespace WOTRMultiplayer.Services
             }
             return string.Join(",", visible);
         }
+
+        private static bool IsFinite(NetworkVector3 value) => value != null
+            && !float.IsNaN(value.X) && !float.IsInfinity(value.X)
+            && !float.IsNaN(value.Y) && !float.IsInfinity(value.Y)
+            && !float.IsNaN(value.Z) && !float.IsInfinity(value.Z);
     }
 }

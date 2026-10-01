@@ -23,7 +23,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Units = [new NetworkUnit { Id = "hero", Position = new NetworkVector3(2, 0, 0), Descriptor = new NetworkUnitDescriptor { Damage = 3 } }]
             };
 
-            Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("unit:hero,missing-area:cloud"));
+            Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("unit:hero:position+damage,missing-area:cloud"));
         }
 
         [Test]
@@ -96,6 +96,47 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
 
             Assert.That(RealTimeCombatDiff.Summarize(host, client), Is.EqualTo("unit:summon:origin"));
+        }
+
+        [Test]
+        public void Summarize_IdentifiesBuffsAndAreaOccupants()
+        {
+            var host = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "hero", BuffCollection = new NetworkUnitBuffCollection
+                {
+                    Buffs = [new NetworkBuff { Id = "bless", Rank = 2 }]
+                } }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud", UnitsInside = ["hero"] }]
+            };
+            var client = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "hero", BuffCollection = new NetworkUnitBuffCollection() }],
+                AreaEffects = [new NetworkAreaEffect { Id = "cloud" }]
+            };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client),
+                Is.EqualTo("unit:hero:buffs,area:cloud:occupants"));
+        }
+
+        [Test]
+        public void Summarize_ReportsDuplicateIdsAndInvalidCoordinatesWithoutThrowing()
+        {
+            var host = new NetworkCombatState
+            {
+                Units = [new NetworkUnit { Id = "hero", Position = new NetworkVector3() }]
+            };
+            var client = new NetworkCombatState
+            {
+                Units =
+                [
+                    new NetworkUnit { Id = "hero", Position = new NetworkVector3(float.NaN, 0, 0) },
+                    new NetworkUnit { Id = "hero" }
+                ]
+            };
+
+            Assert.That(RealTimeCombatDiff.Summarize(host, client),
+                Is.EqualTo("duplicate-client-unit:hero,unit:hero:position"));
         }
     }
 }

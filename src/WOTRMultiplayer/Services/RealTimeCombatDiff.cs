@@ -19,8 +19,8 @@ namespace WOTRMultiplayer.Services
             }
 
             var differences = new List<string>();
-            var expectedUnits = expected.Units?.Where(x => x?.Id != null).ToDictionary(x => x.Id) ?? [];
-            var actualUnits = actual.Units?.Where(x => x?.Id != null).ToDictionary(x => x.Id) ?? [];
+            var expectedUnits = Index(expected.Units, x => x.Id, "host-unit", differences);
+            var actualUnits = Index(actual.Units, x => x.Id, "client-unit", differences);
             foreach (var id in expectedUnits.Keys.Union(actualUnits.Keys).OrderBy(x => x, StringComparer.Ordinal))
             {
                 if (!expectedUnits.TryGetValue(id, out var hostUnit))
@@ -31,15 +31,15 @@ namespace WOTRMultiplayer.Services
                 {
                     differences.Add($"missing-unit:{id}");
                 }
-                else if (Hash(new NetworkCombatState { Units = [hostUnit] })
-                    != Hash(new NetworkCombatState { Units = [clientUnit] }))
+                else if (!SameHash(new NetworkCombatState { Units = [hostUnit] },
+                    new NetworkCombatState { Units = [clientUnit] }))
                 {
                     differences.Add(DescribeUnitDifference(id, hostUnit, clientUnit));
                 }
             }
 
-            var expectedAreas = expected.AreaEffects?.Where(x => x?.Id != null).ToDictionary(x => x.Id) ?? [];
-            var actualAreas = actual.AreaEffects?.Where(x => x?.Id != null).ToDictionary(x => x.Id) ?? [];
+            var expectedAreas = Index(expected.AreaEffects, x => x.Id, "host-area", differences);
+            var actualAreas = Index(actual.AreaEffects, x => x.Id, "client-area", differences);
             foreach (var id in expectedAreas.Keys.Union(actualAreas.Keys).OrderBy(x => x, StringComparer.Ordinal))
             {
                 if (!expectedAreas.TryGetValue(id, out var hostArea))
@@ -50,8 +50,8 @@ namespace WOTRMultiplayer.Services
                 {
                     differences.Add($"missing-area:{id}");
                 }
-                else if (Hash(new NetworkCombatState { AreaEffects = [hostArea] })
-                    != Hash(new NetworkCombatState { AreaEffects = [clientArea] }))
+                else if (!SameHash(new NetworkCombatState { AreaEffects = [hostArea] },
+                    new NetworkCombatState { AreaEffects = [clientArea] }))
                 {
                     differences.Add(DescribeAreaDifference(id, hostArea, clientArea));
                 }
@@ -73,6 +73,27 @@ namespace WOTRMultiplayer.Services
         private static ulong Hash(NetworkCombatState state) =>
             RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = state });
 
+        private static bool SameHash(NetworkCombatState expected, NetworkCombatState actual)
+        {
+            try { return Hash(expected) == Hash(actual); }
+            catch (InvalidOperationException) { return false; }
+            catch (OverflowException) { return false; }
+        }
+
+        private static Dictionary<string, T> Index<T>(IEnumerable<T> values, Func<T, string> getId,
+            string label, List<string> differences) where T : class
+        {
+            var indexed = new Dictionary<string, T>(StringComparer.Ordinal);
+            foreach (var value in values ?? [])
+            {
+                var id = value == null ? null : getId(value);
+                if (id == null) continue;
+                if (indexed.ContainsKey(id)) differences.Add($"duplicate-{label}:{id}");
+                else indexed.Add(id, value);
+            }
+            return indexed;
+        }
+
         private static string DescribeAreaDifference(string id,
             NetworkAreaEffect expected, NetworkAreaEffect actual)
         {
@@ -84,6 +105,11 @@ namespace WOTRMultiplayer.Services
                 || !string.Equals(expected.SourceAbilityBlueprintId, actual.SourceAbilityBlueprintId,
                     StringComparison.OrdinalIgnoreCase))
                 causes.Add("context");
+            if (!SameVector(expected.Position, actual.Position)) causes.Add("position");
+            if (expected.Type != actual.Type) causes.Add("type");
+            if (!(expected.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal)
+                .SequenceEqual((actual.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal)))
+                causes.Add("occupants");
             return causes.Count == 0 ? $"area:{id}" : $"area:{id}:{string.Join("+", causes)}";
         }
 
@@ -104,6 +130,15 @@ namespace WOTRMultiplayer.Services
             {
                 causes.Add("origin");
             }
+            if (!SameVector(expected.Position, actual.Position)
+                || !SameFloat(expected.Orientation, actual.Orientation))
+                causes.Add("position");
+            if ((expected.Descriptor?.Damage ?? 0) != (actual.Descriptor?.Damage ?? 0)
+                || (expected.Descriptor?.Stats?.DamageNonLethal ?? 0)
+                    != (actual.Descriptor?.Stats?.DamageNonLethal ?? 0))
+                causes.Add("damage");
+            if (!SameBuffs(expected.BuffCollection?.Buffs, actual.BuffCollection?.Buffs))
+                causes.Add("buffs");
             var expectedProne = expected.Descriptor?.State?.Prone;
             var actualProne = actual.Descriptor?.State?.Prone;
             if ((expectedProne?.Active ?? false) != (actualProne?.Active ?? false)
@@ -124,6 +159,34 @@ namespace WOTRMultiplayer.Services
         {
             return (expected ?? []).Select(x => x?.UnitId).OrderBy(x => x, StringComparer.Ordinal)
                 .SequenceEqual((actual ?? []).Select(x => x?.UnitId).OrderBy(x => x, StringComparer.Ordinal));
+        }
+
+        private static bool SameBuffs(IEnumerable<NetworkBuff> expected, IEnumerable<NetworkBuff> actual)
+        {
+            var left = (expected ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToArray();
+            var right = (actual ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToArray();
+            return left.Length == right.Length && left.Zip(right, (a, b) =>
+                string.Equals(a?.Id, b?.Id, StringComparison.Ordinal)
+                && string.Equals(a?.BlueprintId, b?.BlueprintId, StringComparison.Ordinal)
+                && string.Equals(a?.CasterId, b?.CasterId, StringComparison.Ordinal)
+                && a?.Rank == b?.Rank && a?.IsPermanent == b?.IsPermanent).All(x => x);
+        }
+
+        private static bool SameVector(WOTRMultiplayer.Entities.NetworkVector3 left,
+            WOTRMultiplayer.Entities.NetworkVector3 right) => left == null && right == null
+            || left != null && right != null
+            && SameFloat(left.X, right.X) && SameFloat(left.Y, right.Y) && SameFloat(left.Z, right.Z);
+
+        private static bool SameFloat(float left, float right)
+        {
+            if (float.IsNaN(left) || float.IsInfinity(left) || float.IsNaN(right) || float.IsInfinity(right))
+                return false;
+            try
+            {
+                return checked((long)Math.Round(left * 1000d, MidpointRounding.AwayFromZero))
+                    == checked((long)Math.Round(right * 1000d, MidpointRounding.AwayFromZero));
+            }
+            catch (OverflowException) { return false; }
         }
     }
 }
