@@ -95,6 +95,28 @@ function Get-ModInfo([string]$path) {
     return Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
 }
 
+function Get-ExperimentalFingerprint([string]$path) {
+    $required = @(
+        'WOTRMultiplayer.dll',
+        'WOTRMultiplayer.Networking.dll',
+        'WOTRMultiplayer.Localization.dll',
+        'localization\enGB.json',
+        'localization\frFR.json'
+    )
+    $manifest = [Text.StringBuilder]::new()
+    foreach ($relative in $required) {
+        $file = Join-Path $path $relative
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
+        $normalized = $relative.Replace('\', '/')
+        [void]$manifest.Append($normalized).Append(':').Append(
+            (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash).Append("`n")
+    }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($manifest.ToString())
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '') }
+    finally { $sha.Dispose() }
+}
+
 function Show-Status {
     $entries = @(
         [pscustomobject]@{ Slot = 'Stable'; Path = $stablePath; Enabled = Test-Path -LiteralPath $stablePath; Info = Get-ModInfo $stablePath }
@@ -106,6 +128,10 @@ function Show-Status {
     )
 
     $entries | Where-Object { $_.Info } | Select-Object Slot, Enabled, Path, @{Name='Id';Expression={$_.Info.id}}, @{Name='Version';Expression={$_.Info.version}}
+
+    $experimentalSlot = if (Test-Path -LiteralPath $experimentalPath) { $experimentalPath } else { $disabledExperimentalPath }
+    $fingerprint = Get-ExperimentalFingerprint $experimentalSlot
+    if ($fingerprint) { Write-Output "Empreinte du paquet expérimental : $fingerprint" }
 
     if ((Test-Path -LiteralPath $stablePath) -and (Test-Path -LiteralPath $experimentalPath)) {
         throw 'Les variantes stable et expérimentale sont actives simultanément. Corrigez avec EnableStable ou EnableExperimental.'
@@ -175,6 +201,9 @@ function Collect-Diagnostics {
         experimental = Get-ModInfo $experimentalPath
         disabledStable = Get-ModInfo $disabledStablePath
         disabledExperimental = Get-ModInfo $disabledExperimentalPath
+        experimentalBuildFingerprint = if (Test-Path -LiteralPath $experimentalPath) {
+            Get-ExperimentalFingerprint $experimentalPath
+        } else { Get-ExperimentalFingerprint $disabledExperimentalPath }
         logs = $copiedLogs
         savePath = if ($SavePath) { $resolvedSave } else { $null }
         saveSha256 = $saveHash
