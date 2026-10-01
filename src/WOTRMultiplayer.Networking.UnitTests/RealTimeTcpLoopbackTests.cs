@@ -37,6 +37,8 @@ namespace WOTRMultiplayer.Networking.UnitTests
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var receivedRepair = new TaskCompletionSource<NotifyRealTimeRepair>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
+            var receivedDeath = new TaskCompletionSource<NotifyRealTimeUnitKilled>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
             var receivedHash = new TaskCompletionSource<ClientRealTimeStateHash>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             client.OnConnected = _ => connected.TrySetResult(true);
@@ -49,6 +51,8 @@ namespace WOTRMultiplayer.Networking.UnitTests
                     receivedOrder.TrySetResult(order);
                 if (metadata.Message is NotifyRealTimeRepair repair)
                     receivedRepair.TrySetResult(repair);
+                if (metadata.Message is NotifyRealTimeUnitKilled death)
+                    receivedDeath.TrySetResult(death);
             };
             server.OnMessageReceived = metadata =>
             {
@@ -75,12 +79,26 @@ namespace WOTRMultiplayer.Networking.UnitTests
                     Stage = (int)RealTimeModeTransitionStage.Commit,
                     Mode = 1,
                     CanonicalStateHash = 0x12345678UL,
-                    State = new NetworkCombatState()
+                    State = new NetworkCombatState
+                    {
+                        Units =
+                        [
+                            new NetworkUnit
+                            {
+                                Id = "enemy",
+                                Descriptor = new NetworkUnitDescriptor
+                                {
+                                    State = new NetworkUnitState { IsFinallyDead = true }
+                                }
+                            }
+                        ]
+                    }
                 });
                 Assert.That(await Task.WhenAny(receivedMode.Task, Task.Delay(5000)), Is.SameAs(receivedMode.Task));
                 Assert.That(receivedMode.Task.Result.Epoch, Is.EqualTo(7));
                 Assert.That(receivedMode.Task.Result.CanonicalStateHash, Is.EqualTo(0x12345678UL));
                 Assert.That(receivedMode.Task.Result.State, Is.Not.Null);
+                Assert.That(receivedMode.Task.Result.State.Units[0].Descriptor.State.IsFinallyDead, Is.True);
 
                 server.Broadcast(new NotifyRealTimeCombatCommandAccepted
                 {
@@ -110,6 +128,14 @@ namespace WOTRMultiplayer.Networking.UnitTests
                 Assert.That(await Task.WhenAny(receivedRepair.Task, Task.Delay(5000)), Is.SameAs(receivedRepair.Task));
                 Assert.That(receivedRepair.Task.Result.Stage, Is.EqualTo((int)RealTimeRepairStage.Apply));
                 Assert.That(receivedRepair.Task.Result.CanonicalStateHash, Is.EqualTo(0xAABBCCDDUL));
+
+                server.Broadcast(new NotifyRealTimeUnitKilled
+                {
+                    Epoch = 8, Sequence = 10, UnitId = "enemy"
+                });
+                Assert.That(await Task.WhenAny(receivedDeath.Task, Task.Delay(5000)), Is.SameAs(receivedDeath.Task));
+                Assert.That(receivedDeath.Task.Result.UnitId, Is.EqualTo("enemy"));
+                Assert.That(receivedDeath.Task.Result.Sequence, Is.EqualTo(10));
 
                 client.Broadcast(new ClientRealTimeStateHash
                 {

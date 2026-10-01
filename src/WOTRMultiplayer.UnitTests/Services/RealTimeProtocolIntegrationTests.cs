@@ -238,6 +238,67 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_HostOnlyFinalDeaths_AcceptReorderingButRejectDuplicates()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                    A<string>._, A<NetworkPlayer>._, A<Func<bool>>._))
+                .Returns(Task.FromResult<bool?>(true));
+
+            client.OnUnitDeath("enemy", "enemy-group");
+            Assert.That(queued, Is.Empty);
+            host.OnUnitDeath("enemy", "enemy-group");
+            var death = (NotifyRealTimeUnitKilled)queued.Dequeue();
+            host.OnUnitDeath("second-enemy", "enemy-group");
+            var secondDeath = (NotifyRealTimeUnitKilled)queued.Dequeue();
+            Assert.That(death.Epoch, Is.EqualTo(host.Game.RealTimeCombat.Epoch));
+            Assert.That(death.Sequence, Is.GreaterThan(0));
+            Assert.That(secondDeath.Sequence, Is.GreaterThan(death.Sequence));
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                NetworkConstants.HostPlayerId, secondDeath);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                NetworkConstants.HostPlayerId, death);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                NetworkConstants.HostPlayerId, death);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(42,
+                new NotifyRealTimeUnitKilled
+                {
+                    Epoch = death.Epoch, Sequence = death.Sequence + 1, UnitId = "enemy"
+                });
+
+            A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                "enemy", A<NetworkPlayer>._, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                "second-enemy", A<NetworkPlayer>._, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+            Assert.That(queued, Is.Empty);
+        }
+
+        [Test]
+        public async Task TwoActors_UnappliedHostDeath_EntersProtectedFallback()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                    "enemy", A<NetworkPlayer>._, A<Func<bool>>._))
+                .Returns(Task.FromResult<bool?>(false));
+
+            host.OnUnitDeath("enemy", "enemy-group");
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                NetworkConstants.HostPlayerId, (NotifyRealTimeUnitKilled)queued.Dequeue());
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            var fault = (ClientRealTimeCommandFault)queued.Dequeue();
+            Assert.That(fault.Reason, Is.EqualTo("host-unit-death-not-applied"));
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCommandFault>(hostNetwork)(42, fault);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+        }
+
+        [Test]
         public async Task TwoActors_HostNoActionChoiceArrivesOnceWithoutClientDecision()
         {
             var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();

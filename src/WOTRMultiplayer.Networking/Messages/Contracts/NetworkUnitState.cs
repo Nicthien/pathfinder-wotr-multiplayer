@@ -13,5 +13,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(2)]
         [LogMe]
         public NetworkUnitProneState Prone { get; set; }
+
+        [ProtoMember(3)]
+        [LogMe]
+        public bool IsFinallyDead { get; set; }
     }
 }

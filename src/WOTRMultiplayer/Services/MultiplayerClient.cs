@@ -58,6 +58,9 @@ namespace WOTRMultiplayer.Services
         private readonly ConcurrentDictionary<string, ConcurrentQueue<NetworkAIAction>> _realTimeAIActions = new(StringComparer.Ordinal);
         private long _realTimeAISequenceEpoch;
         private long _lastRealTimeAISequence;
+        private NetworkGame _lastRealTimeDeathSession;
+        private long _lastRealTimeDeathEpoch;
+        private readonly HashSet<long> _appliedRealTimeDeathSequences = [];
         private NetworkRealTimeCombatState _localCriticalFaultState;
         private long _localCriticalFaultEpoch;
         private volatile bool _disconnectedDuringRealTimeCombat;
@@ -831,6 +834,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeCombatPreference>(OnNotifyRealTimeCombatPreference)
                .On<NotifyRealTimeRuleRoll>(OnNotifyRealTimeRuleRoll)
                .On<NotifyRealTimeEntityId>(OnNotifyRealTimeEntityId)
+               .On<NotifyRealTimeUnitKilled>(OnNotifyRealTimeUnitKilled)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -1274,6 +1278,65 @@ namespace WOTRMultiplayer.Services
             if (!_realTimeEntityIds.Receive(message.Epoch, message.Key, message.Sequence, message.EntityId))
                 Logger.LogWarning("Ignoring stale, duplicate or overflowing host entity ID. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
                     message.Epoch, message.Sequence, message.Key);
+        }
+
+        private async void OnNotifyRealTimeUnitKilled(long receivedFrom, NotifyRealTimeUnitKilled message)
+        {
+            if (receivedFrom != NetworkConstants.HostPlayerId || message == null
+                || message.Sequence <= 0 || string.IsNullOrEmpty(message.UnitId))
+                return;
+            await _realTimeSnapshotGate.WaitAsync();
+            try
+            {
+                var session = Game;
+                var state = session?.RealTimeCombat;
+                var combat = session?.Combat;
+                if (combat?.Stage != NetworkCombatStage.Running
+                    || state?.Mode != CombatMode.RealTimeWithPause
+                    || !(state.Epoch == message.Epoch
+                        || state.PreviousMode == CombatMode.RealTimeWithPause
+                            && state.Phase != CombatSynchronizationPhase.Stable
+                            && state.Epoch == message.Epoch + 1))
+                    return;
+                if (!ReferenceEquals(_lastRealTimeDeathSession, session)
+                    || _lastRealTimeDeathEpoch != message.Epoch)
+                {
+                    _lastRealTimeDeathSession = session;
+                    _lastRealTimeDeathEpoch = message.Epoch;
+                    _appliedRealTimeDeathSequences.Clear();
+                }
+                if (_appliedRealTimeDeathSequences.Contains(message.Sequence))
+                    return;
+                var player = GetPlayer(NetworkConstants.HostPlayerId);
+                var applied = await CombatInteraction.TryApplyRealTimeUnitDeathAsync(
+                    message.UnitId, player,
+                    () => ReferenceEquals(Game, session) && ReferenceEquals(Game?.RealTimeCombat, state)
+                        && ReferenceEquals(Game?.Combat, combat)
+                        && combat.Stage == NetworkCombatStage.Running);
+                if (!applied.HasValue)
+                    return;
+                if (!applied.Value)
+                    throw new InvalidOperationException("host-unit-death-not-applied");
+                _appliedRealTimeDeathSequences.Add(message.Sequence);
+                Logger.LogInformation("Applied host real-time unit death. Epoch={Epoch}, Sequence={Sequence}, UnitId={UnitId}",
+                    message.Epoch, message.Sequence, message.UnitId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to apply host real-time unit death. Epoch={Epoch}, Sequence={Sequence}, UnitId={UnitId}",
+                    message.Epoch, message.Sequence, message.UnitId);
+                EnterLocalCriticalFaultBarrier(message.Epoch);
+                Send(new ClientRealTimeCommandFault
+                {
+                    Epoch = message.Epoch,
+                    AuthoritativeSequence = message.Sequence,
+                    Reason = "host-unit-death-not-applied"
+                });
+            }
+            finally
+            {
+                _realTimeSnapshotGate.Release();
+            }
         }
 
         private async void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)

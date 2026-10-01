@@ -426,6 +426,17 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 throw new InvalidOperationException(extra);
 
             UpdateCombatState(networkCombatState, requiresFullUpdate: false);
+            foreach (var networkUnit in networkCombatState.Units)
+            {
+                if (networkUnit.Descriptor?.State?.IsFinallyDead != true)
+                    continue;
+                var localUnit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
+                if (localUnit != null && !localUnit.State.IsFinallyDead)
+                {
+                    GameHelper.KillUnit(localUnit);
+                    _logger.LogWarning("Applied host final death from real-time checkpoint. UnitId={UnitId}", networkUnit.Id);
+                }
+            }
         }
 
         public void RunTacticalUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand)
@@ -1006,6 +1017,38 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return KillUnit(player, unit);
         }
 
+        public Task<bool?> TryApplyRealTimeUnitDeathAsync(
+            string unitId, NetworkPlayer hostPlayer, Func<bool> canApply)
+        {
+            if (canApply == null)
+                throw new ArgumentNullException(nameof(canApply));
+            var completion = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    if (!canApply())
+                    {
+                        completion.TrySetResult(null);
+                        return;
+                    }
+                    var unit = _gameStateLookupService.GetUnitEntity(unitId);
+                    if (unit == null || hostPlayer == null)
+                    {
+                        completion.TrySetResult(false);
+                        return;
+                    }
+                    completion.TrySetResult(unit.State.IsFinallyDead || KillUnit(hostPlayer, unit));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to apply authoritative real-time unit death. UnitId={UnitId}", unitId);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
         public Task UpdateArmyCombatUnitsAsync(List<NetworkUnit> units)
         {
             var tcs = new TaskCompletionSource<bool>();
@@ -1379,6 +1422,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 State = new NetworkUnitState
                 {
                     IsCharging = combatUnit.Descriptor.State.IsCharging,
+                    IsFinallyDead = combatUnit.State.IsFinallyDead,
                     Prone = new NetworkUnitProneState
                     {
                         Active = combatUnit.Descriptor.State.Prone.Active,

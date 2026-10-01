@@ -4,6 +4,8 @@
     {
         public bool IsCharging { get; set; }
 
+        public bool IsFinallyDead { get; set; }
+
         public NetworkUnitProneState Prone { get; set; }
     }
 }

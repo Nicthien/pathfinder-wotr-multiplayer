@@ -99,6 +99,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         bool HasActiveRealTimeAtomicActions();
 
+        Task<bool?> TryApplyRealTimeUnitDeathAsync(string unitId, NetworkPlayer hostPlayer, Func<bool> canApply);
+
         Task<bool> TryPauseAtProjectileSafePointAsync(Func<bool> canPause, Action pause);
 
         void InteractWithUnit(NetworkUnitInteractWithUnit networkUnitInteractWithUnit);

@@ -86,6 +86,16 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void FinalDeathDivergence_ChangesHashEvenWhenDamageMatches()
+        {
+            var baseline = RealTimeCombatHasher.Compute(Sample());
+            var dead = Sample();
+            dead.Combat.Units[0].Descriptor.State = new NetworkUnitState { IsFinallyDead = true };
+
+            Assert.That(RealTimeCombatHasher.Compute(dead), Is.Not.EqualTo(baseline));
+        }
+
+        [Test]
         public void UnitAndAreaBlueprintDivergence_ChangeHash()
         {
             var baseline = RealTimeCombatHasher.Compute(Sample());

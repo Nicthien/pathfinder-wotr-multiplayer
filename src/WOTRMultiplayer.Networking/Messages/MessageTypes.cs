@@ -313,7 +313,8 @@
             ClientRealTimeAIActionFault,
             NotifyRealTimeEntityId,
             ClientRealTimeEntityIdFault,
-            ClientRealTimeCommandFault
+            ClientRealTimeCommandFault,
+            NotifyRealTimeUnitKilled
         }
 
         public static class Mods

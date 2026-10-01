@@ -180,5 +180,26 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(task.Result, Is.False);
             Assert.That(pauseCalls, Is.Zero);
         }
+
+        [Test]
+        public void TryApplyRealTimeUnitDeathAsync_StaleSessionDoesNotTouchWorld()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            var lookup = A.Fake<IGameStateLookupService>();
+            Action queued = null;
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => queued = action);
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var current = true;
+
+            var task = service.TryApplyRealTimeUnitDeathAsync("enemy", new NetworkPlayer(0), () => current);
+            current = false;
+            queued();
+
+            Assert.That(task.Result, Is.Null);
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
     }
 }

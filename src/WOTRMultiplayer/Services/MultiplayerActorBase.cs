@@ -23,6 +23,7 @@ using WOTRMultiplayer.Entities.ActionBar;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
 using WOTRMultiplayer.Entities.Content;
 using WOTRMultiplayer.Entities.Dialogs;
@@ -57,6 +58,8 @@ namespace WOTRMultiplayer.Services
         private SeedKind[] AllSeeds { get; } = [.. Enum.GetValues(typeof(SeedKind)).Cast<SeedKind>().Where(s => s != SeedKind.All)];
 
         private DateTime? _pauseCooldown;
+
+        private long _nextRealTimeUnitDeathSequence;
 
         public NetworkArea CurrentArea => Game.CurrentArea;
 
@@ -4706,6 +4709,27 @@ namespace WOTRMultiplayer.Services
 
         private void OnUnitDeathInCombat(string unitId, string groupId)
         {
+            if (Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause)
+            {
+                // The turn-based notification below has no turn to attach to in RTwP.
+                // Only the host publishes irreversible death; a client's local rule
+                // simulation may disagree and must not kill a host-owned unit.
+                if (Game.Combat?.Stage == NetworkCombatStage.Running
+                    && Game.LocalPlayerId == Networking.NetworkConstants.HostPlayerId)
+                {
+                    var state = Game.RealTimeCombat;
+                    var epoch = state.Phase == CombatSynchronizationPhase.PreparingModeSwitch
+                        && state.PreviousMode == CombatMode.RealTimeWithPause
+                        ? state.Epoch - 1 : state.Epoch;
+                    Send(new NotifyRealTimeUnitKilled
+                    {
+                        Epoch = epoch,
+                        Sequence = Interlocked.Increment(ref _nextRealTimeUnitDeathSequence),
+                        UnitId = unitId
+                    });
+                }
+                return;
+            }
             if (Game.Combat?.Turn == null)
             {
                 return;
