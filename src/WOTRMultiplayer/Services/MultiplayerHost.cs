@@ -53,6 +53,7 @@ namespace WOTRMultiplayer.Services
         private readonly IMainThreadAccessor _mainThreadAccessor;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), DateTime> _realTimeSnapshotSentAt = new();
+        private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
         private int _consecutiveMissingRealTimeReplies;
         private readonly object _realTimeCommandLock = new();
         private readonly object _realTimePauseLock = new();
@@ -78,6 +79,7 @@ namespace WOTRMultiplayer.Services
         private int _realTimeRepairRetransmissions;
         private NetworkCombatState _realTimeRepairCheckpoint;
         private bool _realTimeRepairHasMismatch;
+        private bool _realTimeRuleRollFaulted;
         private long _realTimeAISequenceEpoch;
         private long _nextRealTimeAISequence;
         private NetworkCombat _autoModeAttemptCombat;
@@ -98,6 +100,26 @@ namespace WOTRMultiplayer.Services
             && (Game.RealTimeCombat.BlocksSaving
                 || Game.Combat?.Stage == NetworkCombatStage.Running
                     && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause);
+
+        public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
+        {
+            var result = localRoll();
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return result;
+            var epoch = Game.RealTimeCombat.Epoch;
+            var sequence = _realTimeRuleRolls.Publish(epoch, key);
+            Send(new NotifyRealTimeRuleRoll
+            {
+                Epoch = epoch, Key = key, Sequence = sequence, Result = result
+            });
+            return result;
+        }
+
+        protected override void ResetRealTimeRuleRolls()
+        {
+            _realTimeRuleRolls.Reset();
+            _realTimeRuleRollFaulted = false;
+        }
 
         public void PublishRealTimeCombatSnapshot()
         {
@@ -518,6 +540,8 @@ namespace WOTRMultiplayer.Services
 
         public void Create(string gameId, string gamePassword, Entities.Connectivity.ExternalServer externalServer, NetworkGameStartUp gameStartUp)
         {
+            _realTimeRuleRolls.Reset();
+            _realTimeRuleRollFaulted = false;
             if (_networkHost.IsActive)
             {
                 _networkHost.Reset();
@@ -624,6 +648,8 @@ namespace WOTRMultiplayer.Services
         public void Reset()
         {
             Logger.LogInformation("Resetting");
+            _realTimeRuleRolls.Reset();
+            _realTimeRuleRollFaulted = false;
             Game = null;
             _realTimeSnapshotHashes.Clear();
             _realTimeSnapshotSentAt.Clear();
@@ -2166,6 +2192,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimePauseRequested>(OnClientRealTimePauseRequested)
                .On<ClientRealTimeModeTransitionAck>(OnClientRealTimeModeTransitionAck)
                .On<ClientRealTimeRepairAck>(OnClientRealTimeRepairAck)
+               .On<ClientRealTimeRuleRollFault>(OnClientRealTimeRuleRollFault)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)
@@ -2319,6 +2346,21 @@ namespace WOTRMultiplayer.Services
             _mainThreadAccessor.Post(() => ProcessClientRealTimeStateHash(receivedFrom, message));
         }
 
+        private void OnClientRealTimeRuleRollFault(long receivedFrom, ClientRealTimeRuleRollFault message)
+        {
+            _mainThreadAccessor.Post(() =>
+            {
+                if (message == null || GetPlayer(receivedFrom) == null || !IsRealTimeCombatActive
+                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
+                    || message.Epoch != Game.RealTimeCombat.Epoch || message.Sequence <= 0)
+                    return;
+                Logger.LogWarning("Client could not obtain an authoritative combat roll; starting repair. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Reason={Reason}",
+                    receivedFrom, message.Epoch, message.Sequence, message.Key, message.Reason);
+                _realTimeRuleRollFaulted = true;
+                _ = BeginRealTimeRepairAsync();
+            });
+        }
+
         private void ProcessClientRealTimeStateHash(long receivedFrom, ClientRealTimeStateHash message)
         {
             if (Game?.RealTimeCombat == null || message == null || GetPlayer(receivedFrom) == null)
@@ -2390,6 +2432,14 @@ namespace WOTRMultiplayer.Services
         {
             if (Game?.RealTimeCombat?.Phase != CombatSynchronizationPhase.Repairing)
             {
+                return;
+            }
+            if (_realTimeRuleRollFaulted)
+            {
+                Logger.LogWarning("A combat rule used an unconfirmed result; switching directly to the protected turn-based fallback. Epoch={Epoch}",
+                    Game.RealTimeCombat.Epoch);
+                new RealTimeCombatCoordinator(Game.RealTimeCombat).ForceFallbackAfterUntrustedRuleResult();
+                _ = StartRealTimeRepairFallbackAsync();
                 return;
             }
             _realTimeRepairCheckpoint = CombatInteraction.GetRealTimeCombatState();
@@ -2553,6 +2603,7 @@ namespace WOTRMultiplayer.Services
         private void CommitRealTimeRepairFallback()
         {
             new RealTimeCombatCoordinator(Game.RealTimeCombat).CommitFallback(Game.RealTimeCombat.CanonicalStateHash);
+            _realTimeRuleRollFaulted = false;
             FinishRealTimeRepair(CombatMode.TurnBased);
         }
 

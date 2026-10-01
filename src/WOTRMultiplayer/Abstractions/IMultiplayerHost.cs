@@ -17,6 +17,12 @@ namespace WOTRMultiplayer.Abstractions
 {
     public interface IMultiplayerHost : IMultiplayerActor
     {
+        bool IsRealTimeCombatActive { get; }
+
+        bool IsRealTimeCombatBarrierActive { get; }
+
+        int ResolveRealTimeDiceRoll(string key, System.Func<int> localRoll);
+
         System.Threading.Tasks.Task<bool> RequestRealTimeCombatModeAsync(CombatMode mode);
 
         System.Threading.Tasks.Task BeginRealTimeRepairAsync();

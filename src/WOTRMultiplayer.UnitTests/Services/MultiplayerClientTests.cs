@@ -69,6 +69,32 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerClient.IsSavingBlockedByCombatSync, Is.False);
         }
 
+        [Test]
+        public void RealTimeDiceRoll_UsesHostResultAndStillAdvancesLocalGenerator()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause, Epoch = 7
+                }
+            };
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRuleRoll>(_networkClient).Invoke(-1,
+                new NotifyRealTimeRuleRoll { Epoch = 7, Key = "attack:d20", Sequence = 1, Result = 19 });
+            var localRolls = 0;
+
+            var result = _multiplayerClient.ResolveRealTimeDiceRoll("attack:d20", () =>
+            {
+                localRolls++;
+                return 12;
+            });
+
+            Assert.That(result, Is.EqualTo(19));
+            Assert.That(localRolls, Is.EqualTo(1));
+        }
+
         [SetUp]
         public void SetUp()
         {

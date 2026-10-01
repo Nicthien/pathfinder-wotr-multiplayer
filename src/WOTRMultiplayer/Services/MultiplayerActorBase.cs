@@ -516,6 +516,8 @@ namespace WOTRMultiplayer.Services
             };
             Game.Id = gameId;
 
+            ResetRealTimeRuleRolls();
+
             lock (ActionLock)
             {
                 Game.ForcedPause = null;
@@ -531,6 +533,7 @@ namespace WOTRMultiplayer.Services
         public void CombatStarted()
         {
             Logger.LogInformation("Combat started");
+            ResetRealTimeRuleRolls();
             if (Game.Combat != null)
             {
                 Logger.LogWarning("Previous combat has not been disposed correctly");
@@ -554,6 +557,7 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
+                ResetRealTimeRuleRolls();
                 if (Game.Combat == null)
                 {
                     Logger.LogWarning("Combat has not been started correctly");
@@ -576,6 +580,8 @@ namespace WOTRMultiplayer.Services
                 throw;
             }
         }
+
+        protected virtual void ResetRealTimeRuleRolls() { }
 
         public void OnHandleDelayCombatTurn(string unitId, string targetUnitId)
         {
@@ -3066,6 +3072,7 @@ namespace WOTRMultiplayer.Services
 
         protected void LoadSavedGame()
         {
+            ResetRealTimeRuleRolls();
             ResetOnSaveLoad();
 
             Game.ForcedPause = null;

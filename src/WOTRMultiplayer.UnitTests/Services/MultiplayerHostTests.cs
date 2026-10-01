@@ -82,6 +82,29 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.False);
         }
 
+        [Test]
+        public void RealTimeDiceRoll_HostPublishesSequencedResult()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState
+                {
+                    Mode = CombatMode.RealTimeWithPause, Epoch = 7
+                }
+            };
+
+            Assert.That(_multiplayerHost.ResolveRealTimeDiceRoll("attack:d20", () => 12), Is.EqualTo(12));
+            Assert.That(_multiplayerHost.ResolveRealTimeDiceRoll("attack:d20", () => 18), Is.EqualTo(18));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRuleRoll>.That.Matches(x =>
+                x.Epoch == 7 && x.Key == "attack:d20" && x.Sequence == 1 && x.Result == 12)))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRuleRoll>.That.Matches(x =>
+                x.Epoch == 7 && x.Key == "attack:d20" && x.Sequence == 2 && x.Result == 18)))
+                .MustHaveHappenedOnceExactly();
+        }
+
         [SetUp]
         public void SetUp()
         {

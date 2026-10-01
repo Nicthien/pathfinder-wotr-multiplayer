@@ -542,9 +542,16 @@ namespace WOTRMultiplayer.Services
 
                 var seededContext = _multiplayerActorAccessor.Current.GetSeededContext();
                 var identifier = $"{rollIdentifier}_{seededContext.Id}";
-                var random = _valueGenerator.GetRandom(seededContext.Lifetime, identifier);
-                var result = diceFormula.Roll(random);
-                _logger.LogInformation("{RuleName} has been rolled deterministically. Type={Type}, UnitId={UnitId}, Result={Result}, Lifetime={Lifetime}, Identifier={Identifier}",
+                var key = $"{identifier}:{diceFormula.Rolls}:{(int)diceFormula.Dice}";
+                int LocalRoll() => diceFormula.Roll(_valueGenerator.GetRandom(seededContext.Lifetime, identifier));
+                var result = _multiplayerActorAccessor.Host.IsRealTimeCombatActive
+                        && !_multiplayerActorAccessor.Host.IsRealTimeCombatBarrierActive
+                    ? _multiplayerActorAccessor.Host.ResolveRealTimeDiceRoll(key, LocalRoll)
+                    : _multiplayerActorAccessor.Client.IsRealTimeCombatActive
+                        && !_multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive
+                        ? _multiplayerActorAccessor.Client.ResolveRealTimeDiceRoll(key, LocalRoll)
+                        : LocalRoll();
+                _logger.LogInformation("{RuleName} has been rolled. Type={Type}, UnitId={UnitId}, Result={Result}, Lifetime={Lifetime}, Identifier={Identifier}",
                     roll.RuleName, roll.RollType, roll.InitiatorId, result, seededContext.Lifetime, identifier);
 
                 return result;

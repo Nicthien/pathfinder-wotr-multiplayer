@@ -47,6 +47,8 @@ namespace WOTRMultiplayer.Services
     {
         private readonly INetworkClientConnection _networkClient;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
+        private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
+        private const int RealTimeRuleRollTimeoutMs = 2500;
         private readonly object _realTimeCommandSequenceLock = new();
         private long _realTimeCommandEpoch;
         private long _nextRealTimeCommandSequence;
@@ -74,6 +76,33 @@ namespace WOTRMultiplayer.Services
             && (Game.RealTimeCombat.BlocksSaving
                 || Game.Combat?.Stage == NetworkCombatStage.Running
                     && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause);
+
+        public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
+        {
+            // Advance the deterministic generator too; only the host's result enters the rule.
+            var localResult = localRoll();
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return localResult;
+            var epoch = Game.RealTimeCombat.Epoch;
+            if (_realTimeRuleRolls.TryConsume(epoch, key, RealTimeRuleRollTimeoutMs,
+                out var sequence, out var hostResult))
+            {
+                if (hostResult != localResult)
+                    Logger.LogWarning("Client combat roll differed from host. Epoch={Epoch}, Sequence={Sequence}, Key={Key}, Local={Local}, Host={Host}",
+                        epoch, sequence, key, localResult, hostResult);
+                return hostResult;
+            }
+            Logger.LogError("Authoritative combat roll unavailable; requesting paused repair. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
+                epoch, sequence, key);
+            if (IsRealTimeCombatActive && Game.RealTimeCombat.Epoch == epoch)
+                Send(new ClientRealTimeRuleRollFault
+                {
+                    Epoch = epoch, Key = key, Sequence = sequence, Reason = "host-roll-timeout"
+                });
+            return localResult;
+        }
+
+        protected override void ResetRealTimeRuleRolls() => _realTimeRuleRolls.Reset();
 
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
@@ -116,12 +145,14 @@ namespace WOTRMultiplayer.Services
 
         public void Connect(string address, int port)
         {
+            _realTimeRuleRolls.Reset();
             var settings = SettingsService.GetSettings();
             _networkClient.ConnectAsync(address, port, settings.NetworkAwaiterTimeout).ConfigureAwait(false);
         }
 
         public void Connect(string code, string password, Entities.Connectivity.ExternalServer externalServer)
         {
+            _realTimeRuleRolls.Reset();
             var settings = SettingsService.GetSettings();
             var externalServerConfiguration = new ExternalServerConfiguration
             {
@@ -136,6 +167,7 @@ namespace WOTRMultiplayer.Services
         public void Reset()
         {
             Logger.LogInformation("Resetting");
+            _realTimeRuleRolls.Reset();
 
             Game = null;
 
@@ -709,6 +741,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeModeTransition>(OnNotifyRealTimeModeTransition)
                .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
                .On<NotifyRealTimeCombatPreference>(OnNotifyRealTimeCombatPreference)
+               .On<NotifyRealTimeRuleRoll>(OnNotifyRealTimeRuleRoll)
 
                // global map & crusade combat
                .On<NotifyGlobalMapRestOpened>(OnNotifyGlobalMapRestOpened)
@@ -1116,6 +1149,15 @@ namespace WOTRMultiplayer.Services
             {
                 _realTimeSnapshotGate.Release();
             }
+        }
+
+        private void OnNotifyRealTimeRuleRoll(long receivedFrom, NotifyRealTimeRuleRoll message)
+        {
+            if (message == null || !IsRealTimeCombatActive || Game.RealTimeCombat.Epoch != message.Epoch)
+                return;
+            if (!_realTimeRuleRolls.Receive(message.Epoch, message.Key, message.Sequence, message.Result))
+                Logger.LogWarning("Ignoring stale, duplicate or overflowing host combat roll. Epoch={Epoch}, Sequence={Sequence}, Key={Key}",
+                    message.Epoch, message.Sequence, message.Key);
         }
 
         private async void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)

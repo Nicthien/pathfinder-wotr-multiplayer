@@ -121,6 +121,21 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void UntrustedRuleResult_ForcesTurnBasedFallbackWithoutRetryingRealTime()
+        {
+            var coordinator = CreateRealTime(10UL);
+            coordinator.BeginRepair();
+            var epoch = coordinator.State.Epoch;
+
+            coordinator.ForceFallbackAfterUntrustedRuleResult();
+
+            Assert.That(coordinator.State.Epoch, Is.EqualTo(epoch));
+            Assert.That(coordinator.State.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            Assert.That(coordinator.State.PendingMode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(coordinator.State.BlocksSaving, Is.True);
+        }
+
+        [Test]
         public void ModeSwitch_RequiresAConnectedPlayer()
         {
             Assert.Throws<InvalidOperationException>(() => Create().RequestModeSwitch(CombatMode.RealTimeWithPause, Array.Empty<long>()));

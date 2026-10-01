@@ -69,6 +69,24 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         }
 
         [Test]
+        public void HostRuleRollAndClientFault_RoundTrip()
+        {
+            var roll = Serializer.DeepClone(new NotifyRealTimeRuleRoll
+            {
+                Epoch = 7, Key = "attack:d20", Sequence = 3, Result = 19
+            });
+            var fault = Serializer.DeepClone(new ClientRealTimeRuleRollFault
+            {
+                Epoch = 7, Key = "attack:d20", Sequence = 4, Reason = "host-roll-timeout"
+            });
+
+            Assert.That((roll.Epoch, roll.Key, roll.Sequence, roll.Result),
+                Is.EqualTo((7L, "attack:d20", 3L, 19)));
+            Assert.That((fault.Epoch, fault.Key, fault.Sequence, fault.Reason),
+                Is.EqualTo((7L, "attack:d20", 4L, "host-roll-timeout")));
+        }
+
+        [Test]
         public void StateHashReply_ReportsApplicationFailure()
         {
             var copy = Serializer.DeepClone(new ClientRealTimeStateHash

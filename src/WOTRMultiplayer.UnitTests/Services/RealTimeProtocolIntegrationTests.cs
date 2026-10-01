@@ -53,6 +53,53 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task TwoActors_ReorderedHostRolls_AreConsumedInRuleOrder()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.ResolveRealTimeDiceRoll("attack:d20", () => 12), Is.EqualTo(12));
+            Assert.That(host.ResolveRealTimeDiceRoll("attack:d20", () => 18), Is.EqualTo(18));
+            var first = (NotifyRealTimeRuleRoll)queued.Dequeue();
+            var second = (NotifyRealTimeRuleRoll)queued.Dequeue();
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRuleRoll>(clientNetwork)
+                (NetworkConstants.HostPlayerId, second);
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRuleRoll>(clientNetwork)
+                (NetworkConstants.HostPlayerId, first);
+
+            Assert.That(client.ResolveRealTimeDiceRoll("attack:d20", () => 1), Is.EqualTo(12));
+            Assert.That(client.ResolveRealTimeDiceRoll("attack:d20", () => 1), Is.EqualTo(18));
+            Assert.That(queued, Is.Empty);
+        }
+
+        [Test]
+        public async Task TwoActors_MissingHostRoll_RequestsPausedRepair()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(client.ResolveRealTimeDiceRoll("save:d20", () => 11), Is.EqualTo(11));
+            var fault = (ClientRealTimeRuleRollFault)queued.Dequeue();
+            Assert.That(fault.Reason, Is.EqualTo("host-roll-timeout"));
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRuleRollFault>(hostNetwork)(42, fault);
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            var prepare = (NotifyRealTimeRepair)queued.Dequeue();
+            Assert.That(prepare.Stage, Is.EqualTo((int)RealTimeRepairStage.Prepare));
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRepair>(clientNetwork)
+                (NetworkConstants.HostPlayerId, prepare);
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRepairAck>(hostNetwork)
+                (42, (ClientRealTimeRepairAck)queued.Dequeue());
+
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            Assert.That(((NotifyRealTimeRepair)queued.Dequeue()).Stage,
+                Is.EqualTo((int)RealTimeRepairStage.Fallback));
+        }
+
+        [Test]
         public void Host_UnansweredSnapshot_AgesOutAsMissingApplicationReply()
         {
             var (host, _, _, _, queued, _) = CreatePair();
@@ -495,6 +542,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                         break;
                     case ClientRealTimeStateHash stateHash:
                         FakeUtils.GetNetworkReceiverHandler<ClientRealTimeStateHash>(hostNetwork)(42, stateHash);
+                        break;
+                    case NotifyRealTimeRuleRoll roll:
+                        FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeRuleRoll>(clientNetwork)
+                            (NetworkConstants.HostPlayerId, roll);
+                        break;
+                    case ClientRealTimeRuleRollFault fault:
+                        FakeUtils.GetNetworkReceiverHandler<ClientRealTimeRuleRollFault>(hostNetwork)(42, fault);
                         break;
                     default:
                         Assert.Fail($"Unexpected protocol message: {message.GetType().Name}");

@@ -26,6 +26,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool IsSavingBlockedByCombatSync { get; }
 
+        int ResolveRealTimeDiceRoll(string key, Func<int> localRoll);
+
         bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
 
         bool RequestRealTimePause(bool wantsPause);

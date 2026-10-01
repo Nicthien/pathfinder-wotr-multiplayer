@@ -233,5 +233,13 @@ namespace WOTRMultiplayer.Services
             _state.Phase = CombatSynchronizationPhase.Stable;
         }
 
+        public void ForceFallbackAfterUntrustedRuleResult()
+        {
+            if (_state.Phase != CombatSynchronizationPhase.Repairing)
+                throw new InvalidOperationException("No paused repair is active.");
+            _state.PendingMode = CombatMode.TurnBased;
+            _state.Phase = CombatSynchronizationPhase.FallingBackToTurnBased;
+        }
+
     }
 }
