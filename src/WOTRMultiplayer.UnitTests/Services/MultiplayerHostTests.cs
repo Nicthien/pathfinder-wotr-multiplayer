@@ -424,6 +424,25 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task CombatModeSwitch_ResetsPeerDeadlineAfterProjectileDrain()
+        {
+            PrepareRealTimeRepairTest();
+            var deadlineField = typeof(MultiplayerHost).GetField("_realTimeModeSwitchDeadline",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            A.CallTo(() => _combatInteractionService.HasActiveRealTimeProjectiles())
+                .ReturnsLazily(() =>
+                {
+                    deadlineField.SetValue(_multiplayerHost, DateTime.UtcNow.AddSeconds(-1));
+                    return false;
+                });
+
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+
+            var deadline = (DateTime)deadlineField.GetValue(_multiplayerHost);
+            Assert.That(deadline, Is.GreaterThan(DateTime.UtcNow.AddSeconds(25)));
+        }
+
+        [Test]
         public async Task CombatModeSwitch_ReplacedSessionDuringProjectileDrainCannotPublishPrepare()
         {
             PrepareRealTimeRepairTest();

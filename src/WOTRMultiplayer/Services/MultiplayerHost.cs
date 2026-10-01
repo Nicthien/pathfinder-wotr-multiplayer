@@ -241,6 +241,9 @@ namespace WOTRMultiplayer.Services
                     Stage = (int)RealTimeModeTransitionStage.Prepare,
                     Mode = (int)mode
                 };
+                // Projectile draining can use nearly all of the initial timeout.
+                // Give the peer a fresh acknowledgement window after Prepare is sent.
+                _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
                 Send(_lastRealTimeModePrepare);
                 if (coordinator.AcknowledgeBarrier(Game.LocalPlayerId, players))
                 {
