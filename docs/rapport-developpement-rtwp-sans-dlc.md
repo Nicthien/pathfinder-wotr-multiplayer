@@ -1,6 +1,6 @@
 # Rapport de développement — Multijoueur temps réel avec pause, sans DLC
 
-> Mise à jour du 4 octobre 2026 : dépôt retrouvé dans `D:\Codex\PathFinder\WotR-Multiplayer-RTwP`. Le prototype de présentation utilise désormais le protocole 40 et la version locale 0.4.16.2. Il reste désactivé par défaut et non validé en jeu. Voir le [bilan de l'étape A](a0-presentation-prototype-2026-10-04.md). Les résultats et le protocole 38 décrits ci-dessous constituent la référence historique, pas le statut courant du prototype.
+> Mise à jour du 4 octobre 2026 : dépôt retrouvé dans `D:\Codex\PathFinder\WotR-Multiplayer-RTwP`. Le prototype de présentation utilise désormais le protocole 41 et la version locale 0.4.16.3. Il reste désactivé par défaut et non validé en combat. Voir le [bilan de l'étape A](a0-presentation-prototype-2026-10-04.md). Les résultats et le protocole 38 décrits ci-dessous constituent la référence historique, pas le statut courant du prototype.
 
 Date : 1er octobre 2026, Europe/Paris.  
 Projet : `C:\AI\WotR-Multiplayer-RTwP`.  

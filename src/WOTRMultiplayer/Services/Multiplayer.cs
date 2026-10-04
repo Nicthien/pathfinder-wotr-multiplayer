@@ -103,12 +103,12 @@ namespace WOTRMultiplayer.Services
 
         public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
 
-        public void PublishRealTimeAttackPresentation(
-            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAttackPresentation presentation)
+        public void PublishRealTimeAuthoritativeEvent(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent)
         {
             if (RealTimePresentationRuntime.Enabled
                 && _multiplayerActorAccessor.Host is MultiplayerHost host)
-                host.PublishRealTimeAttackPresentation(presentation);
+                host.PublishRealTimeAuthoritativeEvent(authoritativeEvent);
         }
 
         public bool IsRealTimeCombatActive => _multiplayerActorAccessor.Host.IsRealTimeCombatActive

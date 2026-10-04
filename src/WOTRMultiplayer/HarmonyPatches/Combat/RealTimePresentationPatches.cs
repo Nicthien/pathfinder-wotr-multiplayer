@@ -42,22 +42,26 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 $"{attack.Executor?.UniqueId}:{Interlocked.Increment(ref _nextActionId)}");
             if (!string.IsNullOrWhiteSpace(attack.Executor?.UniqueId))
                 UnitActions[attack.Executor.UniqueId] = actionId;
-            Main.Multiplayer.PublishRealTimeAttackPresentation(new NotifyRealTimeAttackPresentation
+            Main.Multiplayer.PublishRealTimeAuthoritativeEvent(new NotifyRealTimeAuthoritativeEvent
             {
                 ActionId = actionId,
-                Stage = (int)RealTimePresentationStage.Start,
+                Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
                 UnitId = attack.Executor?.UniqueId,
                 TargetUnitId = attack.Target?.UniqueId,
-                AnimationType = (int)__0.Action.Type,
-                WeaponStyle = (int)__0.AttackWeaponStyle,
-                Variant = __0.Variant,
-                SpeedScale = __0.SpeedScale,
-                TargetDistance = __0.AttackTargetDistance,
-                IsCharge = __0.IsChargeAttack,
-                IsRend = __0.IsRendAttack,
-                IsMounted = __0.IsMounted,
-                SpecialAttackType = __0.Action is UnitAnimationActionSpecialAttack special ? (int)special.AttackType : 0,
-                HostGameTimeTicks = Game.Instance.TimeController.GameTime.Ticks
+                HostGameTimeTicks = Game.Instance.TimeController.GameTime.Ticks,
+                Attack = new RealTimeAttackPresentationPayload
+                {
+                    Stage = (int)RealTimePresentationStage.Start,
+                    AnimationType = (int)__0.Action.Type,
+                    WeaponStyle = (int)__0.AttackWeaponStyle,
+                    Variant = __0.Variant,
+                    SpeedScale = __0.SpeedScale,
+                    TargetDistance = __0.AttackTargetDistance,
+                    IsCharge = __0.IsChargeAttack,
+                    IsRend = __0.IsRendAttack,
+                    IsMounted = __0.IsMounted,
+                    SpecialAttackType = __0.Action is UnitAnimationActionSpecialAttack special ? (int)special.AttackType : 0
+                }
             });
         }
 
@@ -69,14 +73,18 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             if (!string.IsNullOrWhiteSpace(attack.Executor?.UniqueId))
                 UnitActions.TryRemove(attack.Executor.UniqueId, out _);
             if (!CanPublish) return;
-            Main.Multiplayer.PublishRealTimeAttackPresentation(new NotifyRealTimeAttackPresentation
+            Main.Multiplayer.PublishRealTimeAuthoritativeEvent(new NotifyRealTimeAuthoritativeEvent
             {
                 ActionId = actionId,
-                Stage = (int)(__instance.Result == UnitCommand.ResultType.Interrupt
-                    ? RealTimePresentationStage.Interrupt : RealTimePresentationStage.End),
+                Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
                 UnitId = attack.Executor?.UniqueId,
                 TargetUnitId = attack.Target?.UniqueId,
-                HostGameTimeTicks = Game.Instance.TimeController.GameTime.Ticks
+                HostGameTimeTicks = Game.Instance.TimeController.GameTime.Ticks,
+                Attack = new RealTimeAttackPresentationPayload
+                {
+                    Stage = (int)(__instance.Result == UnitCommand.ResultType.Interrupt
+                        ? RealTimePresentationStage.Interrupt : RealTimePresentationStage.End)
+                }
             });
         }
 
@@ -87,13 +95,17 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             var unitId = __instance?.Initiator?.UniqueId;
             if (!CanPublish || string.IsNullOrWhiteSpace(unitId)
                 || !UnitActions.TryGetValue(unitId, out var actionId)) return;
-            Main.Multiplayer.PublishRealTimeAttackPresentation(new NotifyRealTimeAttackPresentation
+            Main.Multiplayer.PublishRealTimeAuthoritativeEvent(new NotifyRealTimeAuthoritativeEvent
             {
                 ActionId = actionId,
-                Stage = (int)RealTimePresentationStage.Impact,
+                Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
                 UnitId = unitId,
                 TargetUnitId = __instance.Target?.UniqueId,
-                HostGameTimeTicks = Game.Instance.TimeController.GameTime.Ticks
+                HostGameTimeTicks = Game.Instance.TimeController.GameTime.Ticks,
+                Attack = new RealTimeAttackPresentationPayload
+                {
+                    Stage = (int)RealTimePresentationStage.Impact
+                }
             });
         }
     }
@@ -121,7 +133,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
     public class RealTimePresentationRulePatches
     {
         private static readonly string[] MutationPrefixes =
-            { "RuleAttack", "RuleDeal", "RuleHeal", "RuleCast", "RuleDrain", "RuleCombatManeuver" };
+            { "RuleAttack", "RuleDeal", "RuleHeal", "RuleCast", "RuleDrain", "RuleCombatManeuver", "RuleSummon" };
         public static bool IsMutation(Type type) => MutationPrefixes.Any(prefix => type.Name.StartsWith(prefix, StringComparison.Ordinal));
 
         [HarmonyTargetMethods]

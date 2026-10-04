@@ -860,7 +860,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeCombatSnapshot>(OnNotifyRealTimeCombatSnapshot)
                .On<NotifyRealTimeCombatCommandAccepted>(OnNotifyRealTimeCombatCommandAccepted)
                .On<NotifyRealTimeCombatCommandRejected>(OnNotifyRealTimeCombatCommandRejected)
-               .On<NotifyRealTimeAttackPresentation>(OnNotifyRealTimeAttackPresentation)
+               .On<NotifyRealTimeAuthoritativeEvent>(OnNotifyRealTimeAuthoritativeEvent)
                .On<NotifyRealTimePauseChanged>(OnNotifyRealTimePauseChanged)
                .On<NotifyRealTimeModeTransition>(OnNotifyRealTimeModeTransition)
                .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
@@ -1507,7 +1507,7 @@ namespace WOTRMultiplayer.Services
                     "presentation-sequence-gap");
         }
 
-        private async void OnNotifyRealTimeAttackPresentation(long receivedFrom, NotifyRealTimeAttackPresentation message)
+        private async void OnNotifyRealTimeAuthoritativeEvent(long receivedFrom, NotifyRealTimeAuthoritativeEvent message)
         {
             if (!RealTimePresentationRuntime.Enabled || receivedFrom != NetworkConstants.HostPlayerId
                 || message == null) return;
@@ -1520,6 +1520,14 @@ namespace WOTRMultiplayer.Services
                     || !IsCurrentRealTimeMessage(session, combat, message.Epoch)
                     || string.IsNullOrWhiteSpace(message.SessionId) || message.SessionId != session.Id
                     || message.LoadedSaveSeed != session.LoadedSaveSeed) return;
+                if (!string.Equals(message.EventId, $"{message.Epoch}:{message.Sequence}", StringComparison.Ordinal)
+                    || message.Kind != (int)RealTimeAuthoritativeEventKind.AttackPresentation
+                    || message.Attack == null)
+                {
+                    ReportRealTimeCommandFault(message.Epoch, Math.Max(1, message.Sequence),
+                        "malformed-authoritative-event");
+                    return;
+                }
                 if (!ReferenceEquals(_presentationSession, session)
                     || !ReferenceEquals(_presentationCombat, combat) || _presentationEpoch != combat.Epoch
                     || _presentationSaveSeed != session.LoadedSaveSeed)

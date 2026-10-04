@@ -104,26 +104,38 @@ namespace WOTRMultiplayer.Services
         private long _presentationEpoch;
         private long _presentationSequence;
 
-        public void PublishRealTimeAttackPresentation(NotifyRealTimeAttackPresentation presentation)
+        public void PublishRealTimeAuthoritativeEvent(NotifyRealTimeAuthoritativeEvent authoritativeEvent)
         {
-            if (!RealTimePresentationRuntime.Enabled || presentation == null
+            if (!RealTimePresentationRuntime.Enabled || authoritativeEvent == null
+                || authoritativeEvent.Kind != (int)RealTimeAuthoritativeEventKind.AttackPresentation
+                || authoritativeEvent.Attack == null
                 || !IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
                 return;
             var combat = Game.RealTimeCombat;
             EnsurePresentationLane(combat);
-            Send(new NotifyRealTimeAttackPresentation
+            var sequence = ++_presentationSequence;
+            Send(new NotifyRealTimeAuthoritativeEvent
             {
-                Epoch = combat.Epoch, Sequence = ++_presentationSequence,
+                Epoch = combat.Epoch, Sequence = sequence,
                 SessionId = Game.Id, LoadedSaveSeed = Game.LoadedSaveSeed,
-                UnitId = presentation.UnitId, TargetUnitId = presentation.TargetUnitId,
-                AnimationType = presentation.AnimationType, WeaponStyle = presentation.WeaponStyle,
-                Variant = presentation.Variant, SpeedScale = presentation.SpeedScale,
-                TargetDistance = presentation.TargetDistance, IsCharge = presentation.IsCharge,
-                IsRend = presentation.IsRend, IsMounted = presentation.IsMounted,
-                SpecialAttackType = presentation.SpecialAttackType,
-                HostGameTimeTicks = presentation.HostGameTimeTicks,
-                ActionId = presentation.ActionId,
-                Stage = presentation.Stage
+                EventId = $"{combat.Epoch}:{sequence}",
+                UnitId = authoritativeEvent.UnitId, TargetUnitId = authoritativeEvent.TargetUnitId,
+                HostGameTimeTicks = authoritativeEvent.HostGameTimeTicks,
+                ActionId = authoritativeEvent.ActionId,
+                Kind = authoritativeEvent.Kind,
+                Attack = new RealTimeAttackPresentationPayload
+                {
+                    Stage = authoritativeEvent.Attack.Stage,
+                    AnimationType = authoritativeEvent.Attack.AnimationType,
+                    WeaponStyle = authoritativeEvent.Attack.WeaponStyle,
+                    Variant = authoritativeEvent.Attack.Variant,
+                    SpeedScale = authoritativeEvent.Attack.SpeedScale,
+                    TargetDistance = authoritativeEvent.Attack.TargetDistance,
+                    IsCharge = authoritativeEvent.Attack.IsCharge,
+                    IsRend = authoritativeEvent.Attack.IsRend,
+                    IsMounted = authoritativeEvent.Attack.IsMounted,
+                    SpecialAttackType = authoritativeEvent.Attack.SpecialAttackType
+                }
             });
         }
 

@@ -29,8 +29,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
                 mainThread, A.Fake<IMapper>());
             var task = service.TryPresentRealTimeAttackAsync(
-                new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAttackPresentation
-                { UnitId = "unit-a", SpeedScale = float.NaN }, () => current);
+                new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent
+                {
+                    UnitId = "unit-a",
+                    Kind = (int)WOTRMultiplayer.Networking.Messages.Game.RealTimeAuthoritativeEventKind.AttackPresentation,
+                    Attack = new WOTRMultiplayer.Networking.Messages.Game.RealTimeAttackPresentationPayload
+                        { SpeedScale = float.NaN }
+                }, () => current);
             Assert.That(task.Result, Is.EqualTo(current ? (bool?)false : null));
             A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
         }

@@ -86,7 +86,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
-        public Task<bool?> TryPresentRealTimeAttackAsync(NotifyRealTimeAttackPresentation presentation, Func<bool> canPresent)
+        public Task<bool?> TryPresentRealTimeAttackAsync(NotifyRealTimeAuthoritativeEvent authoritativeEvent, Func<bool> canPresent)
         {
             if (canPresent == null) throw new ArgumentNullException(nameof(canPresent));
             var completion = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -96,7 +96,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 try
                 {
                     if (!canPresent()) { completion.TrySetResult(null); return; }
-                    if (presentation == null) { completion.TrySetResult(false); return; }
+                    if (authoritativeEvent == null
+                        || authoritativeEvent.Kind != (int)RealTimeAuthoritativeEventKind.AttackPresentation
+                        || authoritativeEvent.Attack == null)
+                    { completion.TrySetResult(false); return; }
+                    var presentation = authoritativeEvent.Attack;
                     var stage = (RealTimePresentationStage)presentation.Stage;
                     if (stage == RealTimePresentationStage.Impact)
                     {
@@ -105,19 +109,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     }
                     if (stage == RealTimePresentationStage.End || stage == RealTimePresentationStage.Interrupt)
                     {
-                        if (presentation != null && !string.IsNullOrWhiteSpace(presentation.UnitId)
-                            && !string.IsNullOrWhiteSpace(presentation.ActionId)
-                            && _presentedAttacks.TryGetValue(presentation.UnitId, out var active)
-                            && string.Equals(active.ActionId, presentation.ActionId, StringComparison.Ordinal))
+                        if (!string.IsNullOrWhiteSpace(authoritativeEvent.UnitId)
+                            && !string.IsNullOrWhiteSpace(authoritativeEvent.ActionId)
+                            && _presentedAttacks.TryGetValue(authoritativeEvent.UnitId, out var active)
+                            && string.Equals(active.ActionId, authoritativeEvent.ActionId, StringComparison.Ordinal))
                         {
                             active.Handle.Release(0f);
-                            _presentedAttacks.Remove(presentation.UnitId);
+                            _presentedAttacks.Remove(authoritativeEvent.UnitId);
                         }
                         completion.TrySetResult(true);
                         return;
                     }
-                    if (string.IsNullOrWhiteSpace(presentation.UnitId)
-                        || string.IsNullOrWhiteSpace(presentation.ActionId)
+                    if (string.IsNullOrWhiteSpace(authoritativeEvent.UnitId)
+                        || string.IsNullOrWhiteSpace(authoritativeEvent.ActionId)
                         || stage != RealTimePresentationStage.Start
                         || !Enum.IsDefined(typeof(UnitAnimationType), presentation.AnimationType)
                         || !Enum.IsDefined(typeof(WeaponAnimationStyle), presentation.WeaponStyle)
@@ -126,7 +130,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         || float.IsNaN(presentation.TargetDistance) || float.IsInfinity(presentation.TargetDistance)
                         || presentation.TargetDistance < 0)
                     { completion.TrySetResult(false); return; }
-                    var unit = _gameStateLookupService.GetUnitEntity(presentation.UnitId);
+                    var unit = _gameStateLookupService.GetUnitEntity(authoritativeEvent.UnitId);
                     var manager = unit?.View?.AnimationManager;
                     var type = (UnitAnimationType)presentation.AnimationType;
                     if (manager == null || (type != UnitAnimationType.MainHandAttack
@@ -152,12 +156,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     handle.IsChargeAttack = presentation.IsCharge;
                     handle.IsRendAttack = presentation.IsRend;
                     handle.IsMounted = presentation.IsMounted;
-                    if (_presentedAttacks.TryGetValue(presentation.UnitId, out var previous)) previous.Handle.Release(0f);
+                    if (_presentedAttacks.TryGetValue(authoritativeEvent.UnitId, out var previous)) previous.Handle.Release(0f);
                     manager.Execute(handle);
-                    _presentedAttacks[presentation.UnitId] = (presentation.ActionId, handle, DateTime.UtcNow);
+                    _presentedAttacks[authoritativeEvent.UnitId] = (authoritativeEvent.ActionId, handle, DateTime.UtcNow);
                     createdHandle = null;
                     _logger.LogInformation("Presented host attack without a local combat command. UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}",
-                        presentation.UnitId, presentation.Epoch, presentation.Sequence);
+                        authoritativeEvent.UnitId, authoritativeEvent.Epoch, authoritativeEvent.Sequence);
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)

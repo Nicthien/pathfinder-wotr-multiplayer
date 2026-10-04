@@ -315,7 +315,7 @@
             ClientRealTimeEntityIdFault,
             ClientRealTimeCommandFault,
             NotifyRealTimeUnitKilled,
-            NotifyRealTimeAttackPresentation,
+            NotifyRealTimeAuthoritativeEvent,
             NotifyRealTimeCombatCommandRejected
         }
 

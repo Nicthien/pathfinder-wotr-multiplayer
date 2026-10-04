@@ -132,10 +132,12 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 SessionId = "session-a", LoadedSaveSeed = 44, Epoch = 7,
                 PlayerId = 42, ClientSequence = 3, CommandId = "42:7:3", Reason = 4
             });
-            var presentation = Serializer.DeepClone(new NotifyRealTimeAttackPresentation
+            var presentation = Serializer.DeepClone(new NotifyRealTimeAuthoritativeEvent
             {
                 SessionId = "session-a", LoadedSaveSeed = 44, Epoch = 7, Sequence = 5,
-                ActionId = "hero:1", Stage = 2, UnitId = "hero"
+                EventId = "7:5", ActionId = "hero:1", UnitId = "hero",
+                Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
+                Attack = new RealTimeAttackPresentationPayload { Stage = 2 }
             });
             Assert.That(intent.CommandId, Is.EqualTo("42:7:3"));
             Assert.That(intent.ObservedStateHash, Is.EqualTo(99));
@@ -143,7 +145,9 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(rejected.CommandId, Is.EqualTo(intent.CommandId));
             Assert.That(rejected.Reason, Is.EqualTo(4));
             Assert.That(presentation.ActionId, Is.EqualTo("hero:1"));
-            Assert.That(presentation.Stage, Is.EqualTo(2));
+            Assert.That(presentation.EventId, Is.EqualTo("7:5"));
+            Assert.That(presentation.Kind, Is.EqualTo((int)RealTimeAuthoritativeEventKind.AttackPresentation));
+            Assert.That(presentation.Attack.Stage, Is.EqualTo(2));
         }
 
         [Test]

@@ -4,6 +4,7 @@ using System.Reflection;
 using Kingmaker.UnitLogic.Commands.Base;
 using Kingmaker.Visual.Animation.Kingmaker;
 using NUnit.Framework;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.HarmonyPatches.Combat;
 using WOTRMultiplayer.Networking.Messages.Game;
 using WOTRMultiplayer.Services;
@@ -12,13 +13,23 @@ namespace WOTRMultiplayer.UnitTests.Services
 {
     public class RealTimePresentationTests
     {
+        private static NotifyRealTimeAuthoritativeEvent Frame(long sequence,
+            RealTimePresentationStage stage = RealTimePresentationStage.Start, string actionId = "a") => new()
+        {
+            Sequence = sequence,
+            EventId = "event:" + sequence,
+            ActionId = actionId,
+            Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
+            Attack = new RealTimeAttackPresentationPayload { Stage = (int)stage }
+        };
+
         [Test]
         public void OutOfOrderFrames_AreAppliedOnceInOrder()
         {
             var inbox = new RealTimePresentationInbox();
-            Assert.That(inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 2 }), Is.True);
+            Assert.That(inbox.Enqueue(Frame(2)), Is.True);
             Assert.That(inbox.TryPeek(out _), Is.False);
-            Assert.That(inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 1 }), Is.True);
+            Assert.That(inbox.Enqueue(Frame(1)), Is.True);
             Assert.That(inbox.TryPeek(out var first), Is.True);
             Assert.That(first.Sequence, Is.EqualTo(1));
             inbox.Commit(first.Sequence);
@@ -34,7 +45,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void UnappliedFrame_DoesNotAdvanceSequence()
         {
             var inbox = new RealTimePresentationInbox();
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 1 });
+            inbox.Enqueue(Frame(1));
             Assert.That(inbox.TryPeek(out _), Is.True);
             Assert.That(inbox.AppliedSequence, Is.Zero);
             Assert.Throws<InvalidOperationException>(() => inbox.Commit(2));
@@ -43,13 +54,35 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void ReusedEventIdentityWithAnotherSequence_IsRejected()
+        {
+            var inbox = new RealTimePresentationInbox();
+            Assert.That(inbox.Enqueue(Frame(1, actionId: "same")), Is.True);
+            var conflicting = Frame(2, actionId: "same");
+            conflicting.EventId = "event:1";
+            Assert.That(inbox.Enqueue(conflicting), Is.False);
+            Assert.That(inbox.TryPeek(out var first), Is.True);
+            Assert.That(first.Sequence, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ReusedSequenceWithAnotherEventIdentity_IsRejected()
+        {
+            var inbox = new RealTimePresentationInbox();
+            Assert.That(inbox.Enqueue(Frame(1)), Is.True);
+            var conflicting = Frame(1);
+            conflicting.EventId = "different";
+            Assert.That(inbox.Enqueue(conflicting), Is.False);
+        }
+
+        [Test]
         public void Gap_IsBoundedAndExpiresUntilEarlierFrameArrives()
         {
             var inbox = new RealTimePresentationInbox();
-            Assert.That(inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 129 }), Is.False);
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 2 });
+            Assert.That(inbox.Enqueue(Frame(129)), Is.False);
+            inbox.Enqueue(Frame(2));
             Assert.That(inbox.HasExpiredGap(DateTime.UtcNow.AddSeconds(6)), Is.True);
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 1 });
+            inbox.Enqueue(Frame(1));
             inbox.Commit(1);
             Assert.That(inbox.HasExpiredGap(DateTime.UtcNow.AddSeconds(6)), Is.False);
         }
@@ -70,8 +103,8 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void ReferenceState_DropsIncludedEventsAndResumesAtFollowingSequence()
         {
             var inbox = new RealTimePresentationInbox();
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 2 });
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation { Sequence = 3 });
+            inbox.Enqueue(Frame(2));
+            inbox.Enqueue(Frame(3));
             inbox.RestoreBaseline(2);
             Assert.That(inbox.AppliedSequence, Is.EqualTo(2));
             Assert.That(inbox.TryPeek(out var next), Is.True);
@@ -82,16 +115,13 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void ActionLifecycle_RemainsOrderedWhenNetworkDeliveryIsReordered()
         {
             var inbox = new RealTimePresentationInbox();
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation
-                { Sequence = 3, ActionId = "a", Stage = (int)Entities.Combat.RealTime.RealTimePresentationStage.End });
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation
-                { Sequence = 2, ActionId = "a", Stage = (int)Entities.Combat.RealTime.RealTimePresentationStage.Impact });
-            inbox.Enqueue(new NotifyRealTimeAttackPresentation
-                { Sequence = 1, ActionId = "a", Stage = (int)Entities.Combat.RealTime.RealTimePresentationStage.Start });
+            inbox.Enqueue(Frame(3, RealTimePresentationStage.End));
+            inbox.Enqueue(Frame(2, RealTimePresentationStage.Impact));
+            inbox.Enqueue(Frame(1, RealTimePresentationStage.Start));
             var stages = new System.Collections.Generic.List<int>();
             while (inbox.TryPeek(out var frame))
             {
-                stages.Add(frame.Stage);
+                stages.Add(frame.Attack.Stage);
                 inbox.Commit(frame.Sequence);
             }
             Assert.That(stages, Is.EqualTo(new[]
