@@ -222,7 +222,9 @@ namespace WOTRMultiplayer.UnitTests.Services
                 {
                     Epoch = host.Game.RealTimeCombat.Epoch,
                     AuthoritativeSequence = 1,
-                    Kind = (int)RealTimeCommandKind.Move,
+                    // Presentation clients reject malformed host data, not commands
+                    // that they deliberately never execute locally.
+                    Kind = RealTimePresentationRuntime.Enabled ? -1 : (int)RealTimeCommandKind.Move,
                     Movement = new Networking.Messages.Contracts.NetworkUnitMoveTo
                     {
                         InitiatorUnitId = "hero",
@@ -553,10 +555,17 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(host.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(3));
             Assert.That(client.Game.RealTimeCombat.LastAuthoritativeSequence, Is.EqualTo(3));
-            A.CallTo(() => clientCombat.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
-                A<NetworkUnitMoveTo>._, null, null, A<Func<bool>>._)).MustHaveHappenedTwiceExactly();
-            A.CallTo(() => clientCombat.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Attack,
-                null, A<NetworkUnitAttack>._, null, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+            if (RealTimePresentationRuntime.Enabled)
+                A.CallTo(() => clientCombat.TryExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
+                    A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._,
+                    A<Func<bool>>._)).MustNotHaveHappened();
+            else
+            {
+                A.CallTo(() => clientCombat.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Move,
+                    A<NetworkUnitMoveTo>._, null, null, A<Func<bool>>._)).MustHaveHappenedTwiceExactly();
+                A.CallTo(() => clientCombat.TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind.Attack,
+                    null, A<NetworkUnitAttack>._, null, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+            }
             host.PublishRealTimeCombatSnapshot();
             Pump(queued, hostNetwork, clientNetwork);
             Assert.That(host.Game.RealTimeCombat.CanonicalStateHash,

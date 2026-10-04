@@ -314,7 +314,9 @@
             NotifyRealTimeEntityId,
             ClientRealTimeEntityIdFault,
             ClientRealTimeCommandFault,
-            NotifyRealTimeUnitKilled
+            NotifyRealTimeUnitKilled,
+            NotifyRealTimeAttackPresentation,
+            NotifyRealTimeCombatCommandRejected
         }
 
         public static class Mods

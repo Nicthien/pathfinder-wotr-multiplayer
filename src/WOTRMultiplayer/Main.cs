@@ -22,6 +22,7 @@ using WOTRMultiplayer.Config.DI;
 using WOTRMultiplayer.Localization;
 using WOTRMultiplayer.Networking.Abstractions.ExternalConnections;
 using WOTRMultiplayer.Services.PubSub;
+using WOTRMultiplayer.Services;
 using WOTRMultiplayer.Services.Settings;
 
 namespace WOTRMultiplayer
@@ -61,6 +62,9 @@ namespace WOTRMultiplayer
         {
             try
             {
+                var isolatedProfile = RealTimeTestProfileBootstrap.ApplyIfRequested();
+                if (isolatedProfile != null)
+                    entry.Logger.Log($"RTwP isolated test profile: {isolatedProfile}");
                 ModManagerSettings = UnityModManager.ModSettings.Load<UnityModManagerSettings>(entry);
                 ModManagerSettings.ModFolder = entry.Path;
                 ModManagerSettings.ModId = entry.Info.Id;

@@ -92,6 +92,9 @@ namespace WOTRMultiplayer.Services
 
         public void UpdateRealTimeCombat()
         {
+            if (RealTimePresentationRuntime.Enabled
+                && _multiplayerActorAccessor.Client is MultiplayerClient presentationClient)
+                presentationClient.TickRealTimePresentation();
             if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
             {
                 host.PublishRealTimeCombatSnapshot();
@@ -99,6 +102,14 @@ namespace WOTRMultiplayer.Services
         }
 
         public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
+
+        public void PublishRealTimeAttackPresentation(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAttackPresentation presentation)
+        {
+            if (RealTimePresentationRuntime.Enabled
+                && _multiplayerActorAccessor.Host is MultiplayerHost host)
+                host.PublishRealTimeAttackPresentation(presentation);
+        }
 
         public bool IsRealTimeCombatActive => _multiplayerActorAccessor.Host.IsRealTimeCombatActive
             || _multiplayerActorAccessor.Client.IsRealTimeCombatActive;

@@ -1,17 +1,22 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Build', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status', 'CollectDiagnostics')]
+    [ValidateSet('Build', 'PrepareA0Candidate', 'PrepareA0Profiles', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status', 'CollectDiagnostics')]
     [string]$Action,
 
     [string]$GamePath = 'C:\Jeux\Steam\steamapps\common\Pathfinder Second Adventure',
 
     [switch]$AllowUnvalidatedTest,
 
+    [switch]$HostPresentationPrototype,
+
     [string]$SavePath
 )
 
 $ErrorActionPreference = 'Stop'
+if ($HostPresentationPrototype -and $Action -notin @('Build', 'PrepareA0Candidate')) {
+    throw 'Le prototype de présentation est limité à Build ou PrepareA0Candidate : aucune activation ni installation automatique.'
+}
 $repoPath = Split-Path -Parent $PSScriptRoot
 $modsPath = Join-Path $GamePath 'Mods'
 $stablePath = Join-Path $modsPath '00_WOTRMultiplayer'
@@ -266,8 +271,72 @@ function Build-Experimental {
     $env:WOTR_PATH = $GamePath
     & dotnet build (Join-Path $repoPath 'src\WOTRMultiplayer.Localization.Generator\WOTRMultiplayer.Localization.Generator.csproj') --configuration Release --verbosity minimal
     if ($LASTEXITCODE -ne 0) { throw 'La génération des traductions a échoué.' }
-    & dotnet test (Join-Path $repoPath 'src\WOTRMultiplayer.sln') --configuration Release --verbosity minimal
+    $presentationProperty = "-p:HostPresentationPrototype=$($HostPresentationPrototype.IsPresent.ToString().ToLowerInvariant())"
+    & dotnet test (Join-Path $repoPath 'src\WOTRMultiplayer.sln') --configuration Release $presentationProperty --verbosity minimal
     if ($LASTEXITCODE -ne 0) { throw 'La compilation ou les tests ont échoué.' }
+}
+
+function Prepare-A0Candidate {
+    if (-not $HostPresentationPrototype) {
+        throw 'PrepareA0Candidate exige -HostPresentationPrototype.'
+    }
+    Assert-GameInstallation
+    Build-Experimental
+    $fingerprint = Get-ExperimentalFingerprint $buildPath $repoPath
+    if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+        throw 'Empreinte du candidat A0 impossible à calculer.'
+    }
+    $candidatesRoot = Join-Path $repoPath 'local-artifacts\a0-candidates'
+    $candidateRoot = Join-Path $candidatesRoot $fingerprint
+    $packagePath = Join-Path $candidateRoot '00_WOTRMultiplayerRTwP'
+    $resolvedRoot = [IO.Path]::GetFullPath($candidatesRoot).TrimEnd('\')
+    $resolvedCandidate = [IO.Path]::GetFullPath($candidateRoot)
+    if (-not [string]::Equals((Split-Path -Parent $resolvedCandidate), $resolvedRoot,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Chemin de candidat A0 imprévu : $resolvedCandidate"
+    }
+    if (-not (Test-Path -LiteralPath $packagePath)) {
+        New-Item -ItemType Directory -Path $packagePath -Force | Out-Null
+        Copy-Item -Path (Join-Path $buildPath '*') -Destination $packagePath -Recurse -Force
+        New-Item -ItemType Directory -Path (Join-Path $packagePath 'localization') -Force | Out-Null
+        Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $packagePath 'localization') -Force
+        Assert-ExperimentalFingerprintParity $packagePath
+    }
+    $gameAssembly = Join-Path $GamePath 'Wrath_Data\Managed\Assembly-CSharp.dll'
+    $manifest = [ordered]@{
+        createdUtc = (Get-Date).ToUniversalTime().ToString('o')
+        purpose = 'A0 presentation-only engine test; not validated for normal play'
+        protocolVersion = 40
+        experimentalBuildFingerprint = $fingerprint
+        mainAssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $packagePath 'WOTRMultiplayer.dll') -Algorithm SHA256).Hash
+        gameAssemblySha256 = (Get-FileHash -LiteralPath $gameAssembly -Algorithm SHA256).Hash
+        hostPresentationPrototype = $true
+        runtimeValidated = $false
+        packageFolder = '00_WOTRMultiplayerRTwP'
+        stableModChanged = $false
+    }
+    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $candidateRoot 'manifest.json') -Encoding UTF8
+    Write-Output "Candidat A0 préparé hors du jeu : $candidateRoot"
+    Write-Output "Empreinte exacte : $fingerprint"
+}
+
+function Prepare-A0Profiles {
+    $profilesRoot = Join-Path $repoPath 'local-artifacts\runtime-profiles'
+    foreach ($name in @('host', 'client')) {
+        $profile = Join-Path $profilesRoot $name
+        $resolvedRoot = [IO.Path]::GetFullPath($profilesRoot).TrimEnd('\')
+        $resolvedProfile = [IO.Path]::GetFullPath($profile)
+        if (-not [string]::Equals((Split-Path -Parent $resolvedProfile), $resolvedRoot,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Chemin de profil A0 imprévu : $resolvedProfile"
+        }
+        New-Item -ItemType Directory -Path $profile -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profile '.rtwp-test-profile') -Value $name -Encoding UTF8
+        New-Item -ItemType Directory -Path (Join-Path $profile 'Saved Games') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $profile 'Cache') -Force | Out-Null
+    }
+    Write-Output "Profils A0 isolés préparés : $profilesRoot"
+    Write-Output "Aucune sauvegarde originale n'a été copiée."
 }
 
 function Install-Experimental([bool]$testOnly) {
@@ -393,6 +462,8 @@ function Enable-Experimental([bool]$testOnly) {
 
 switch ($Action) {
     'Build' { Build-Experimental }
+    'PrepareA0Candidate' { Prepare-A0Candidate }
+    'PrepareA0Profiles' { Prepare-A0Profiles }
     'Install' { Install-Experimental $false }
     'StageTest' { Install-Experimental $true }
     'EnableStable' { Enable-Stable }

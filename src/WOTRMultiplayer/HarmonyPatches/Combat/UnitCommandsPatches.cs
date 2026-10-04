@@ -170,6 +170,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         private static bool InterceptRealTimePlayerCommand(UnitCommand command)
         {
+            if (RealTimePresentationRuntime.IsClientActive && command?.CreatedByPlayer != true)
+                return false;
             if (!RealTimeCommandExecutionScope.IsActive && Main.Multiplayer.IsRealTimeCombatBarrierActive
                 && command?.CreatedByPlayer == true)
             {

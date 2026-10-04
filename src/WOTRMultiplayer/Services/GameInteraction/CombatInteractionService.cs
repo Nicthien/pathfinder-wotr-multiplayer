@@ -22,9 +22,14 @@ using Kingmaker.UnitLogic.Class.Kineticist;
 using Kingmaker.UnitLogic.Commands;
 using Kingmaker.UnitLogic.Commands.Base;
 using Kingmaker.Utility;
+using Kingmaker.Visual.Animation.Kingmaker;
+using Kingmaker.Visual.Animation.Kingmaker.Actions;
+using Kingmaker.View.Animation;
+using WOTRMultiplayer.Networking.Messages.Game;
 using Microsoft.Extensions.Logging;
 using TurnBased.Controllers;
 using UniRx;
+using UnityEngine;
 using WOTRMultiplayer.Abstractions.GameInteraction;
 using WOTRMultiplayer.Abstractions.GameInteraction.CombatLog;
 using WOTRMultiplayer.Abstractions.Unity;
@@ -48,6 +53,121 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly IPlayerNotificationService _playerNotificationService;
         private readonly IBuffInteractionService _buffInteractionService;
         private readonly IMapper _mapper;
+
+        private readonly Dictionary<string, (string ActionId, UnitAnimationActionHandle Handle, DateTime Started)> _presentedAttacks = new();
+        private readonly Dictionary<string, VisualMove> _visualMoves = new();
+
+        private sealed class VisualMove
+        {
+            public UnitEntityData Unit { get; set; }
+            public Vector3 Start { get; set; }
+            public Vector3 Target { get; set; }
+            public DateTime Started { get; set; }
+        }
+
+        public void TickRealTimePresentation(bool active)
+        {
+            foreach (var pair in _presentedAttacks.ToArray())
+            {
+                if (active && !pair.Value.Handle.IsFinished && !pair.Value.Handle.IsReleased
+                    && DateTime.UtcNow - pair.Value.Started < TimeSpan.FromSeconds(15)) continue;
+                pair.Value.Handle.Release(0f);
+                _presentedAttacks.Remove(pair.Key);
+            }
+            foreach (var pair in _visualMoves.ToArray())
+            {
+                var move = pair.Value;
+                if (move.Unit?.View == null) { _visualMoves.Remove(pair.Key); continue; }
+                var progress = active
+                    ? RealTimeVisualInterpolation.Progress(move.Started, DateTime.UtcNow, TimeSpan.FromMilliseconds(300))
+                    : 1f;
+                move.Unit.View.transform.position = Vector3.LerpUnclamped(move.Start, move.Target, progress);
+                if (progress >= 1f) _visualMoves.Remove(pair.Key);
+            }
+        }
+
+        public Task<bool?> TryPresentRealTimeAttackAsync(NotifyRealTimeAttackPresentation presentation, Func<bool> canPresent)
+        {
+            if (canPresent == null) throw new ArgumentNullException(nameof(canPresent));
+            var completion = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                UnitAnimationActionHandle createdHandle = null;
+                try
+                {
+                    if (!canPresent()) { completion.TrySetResult(null); return; }
+                    if (presentation == null) { completion.TrySetResult(false); return; }
+                    var stage = (RealTimePresentationStage)presentation.Stage;
+                    if (stage == RealTimePresentationStage.Impact)
+                    {
+                        completion.TrySetResult(true);
+                        return;
+                    }
+                    if (stage == RealTimePresentationStage.End || stage == RealTimePresentationStage.Interrupt)
+                    {
+                        if (presentation != null && !string.IsNullOrWhiteSpace(presentation.UnitId)
+                            && !string.IsNullOrWhiteSpace(presentation.ActionId)
+                            && _presentedAttacks.TryGetValue(presentation.UnitId, out var active)
+                            && string.Equals(active.ActionId, presentation.ActionId, StringComparison.Ordinal))
+                        {
+                            active.Handle.Release(0f);
+                            _presentedAttacks.Remove(presentation.UnitId);
+                        }
+                        completion.TrySetResult(true);
+                        return;
+                    }
+                    if (string.IsNullOrWhiteSpace(presentation.UnitId)
+                        || string.IsNullOrWhiteSpace(presentation.ActionId)
+                        || stage != RealTimePresentationStage.Start
+                        || !Enum.IsDefined(typeof(UnitAnimationType), presentation.AnimationType)
+                        || !Enum.IsDefined(typeof(WeaponAnimationStyle), presentation.WeaponStyle)
+                        || float.IsNaN(presentation.SpeedScale) || float.IsInfinity(presentation.SpeedScale)
+                        || presentation.SpeedScale <= 0 || presentation.SpeedScale > 20
+                        || float.IsNaN(presentation.TargetDistance) || float.IsInfinity(presentation.TargetDistance)
+                        || presentation.TargetDistance < 0)
+                    { completion.TrySetResult(false); return; }
+                    var unit = _gameStateLookupService.GetUnitEntity(presentation.UnitId);
+                    var manager = unit?.View?.AnimationManager;
+                    var type = (UnitAnimationType)presentation.AnimationType;
+                    if (manager == null || (type != UnitAnimationType.MainHandAttack
+                        && type != UnitAnimationType.OffHandAttack && type != UnitAnimationType.SpecialAttack))
+                    { completion.TrySetResult(false); return; }
+                    UnitAnimationActionHandle handle;
+                    if (type == UnitAnimationType.SpecialAttack)
+                    {
+                        if (!Enum.IsDefined(typeof(UnitAnimationSpecialAttackType), presentation.SpecialAttackType))
+                        { completion.TrySetResult(false); return; }
+                        handle = manager.CreateSpecialAttackHandle((UnitAnimationSpecialAttackType)presentation.SpecialAttackType);
+                    }
+                    else handle = manager.CreateHandle(type);
+                    if (handle == null) { completion.TrySetResult(false); return; }
+                    createdHandle = handle;
+                    handle.AttackWeaponStyle = (WeaponAnimationStyle)presentation.WeaponStyle;
+                    // Sequence/custom clips are not reconstructed by the A0 prototype.
+                    if (presentation.Variant < 0 || presentation.Variant >= handle.VariantsCount)
+                    { handle.Release(0f); completion.TrySetResult(false); return; }
+                    handle.Variant = presentation.Variant;
+                    handle.SpeedScale = presentation.SpeedScale;
+                    handle.AttackTargetDistance = presentation.TargetDistance;
+                    handle.IsChargeAttack = presentation.IsCharge;
+                    handle.IsRendAttack = presentation.IsRend;
+                    handle.IsMounted = presentation.IsMounted;
+                    if (_presentedAttacks.TryGetValue(presentation.UnitId, out var previous)) previous.Handle.Release(0f);
+                    manager.Execute(handle);
+                    _presentedAttacks[presentation.UnitId] = (presentation.ActionId, handle, DateTime.UtcNow);
+                    createdHandle = null;
+                    _logger.LogInformation("Presented host attack without a local combat command. UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}",
+                        presentation.UnitId, presentation.Epoch, presentation.Sequence);
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    createdHandle?.Release(0f);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
 
         public CombatInteractionService(
             ILogger<CombatInteractionService> logger,
@@ -1885,6 +2005,27 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 _logger.LogInformation("Orientation has been updated. UnitId={UnitId}, PreviousOrientation={PreviousOrientation}, NewOrientation={NewOrientation}", unit.UniqueId, previousOrientation.ToString("F4"), unit.Orientation.ToString("F4"));
             }
 
+            if (RealTimePresentationRuntime.IsClientActive && unit.RiderPart == null
+                && unit.View != null && networkUnit.Position != null)
+            {
+                var target = networkUnit.Position.ToUnityVector3();
+                var visualStart = unit.View.transform.position;
+                if ((visualStart - target).sqrMagnitude > 400f)
+                {
+                    _visualMoves.Remove(unit.UniqueId);
+                    UpdateUnitPosition(unit, networkUnit.Position);
+                    return;
+                }
+                if (unit.CombatState != null)
+                    unit.CombatState.PreventAttacksOfOpporunityNextFrame = true;
+                unit.Position = target;
+                unit.View.transform.position = visualStart;
+                _visualMoves[unit.UniqueId] = new VisualMove
+                {
+                    Unit = unit, Start = visualStart, Target = target, Started = DateTime.UtcNow
+                };
+                return;
+            }
             UpdateUnitPosition(unit, networkUnit.Position);
         }
 

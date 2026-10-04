@@ -30,5 +30,17 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(6)]
         [LogMe]
         public long MissingReplies { get; set; }
+
+        [ProtoMember(7)]
+        [LogMe]
+        public string SessionId { get; set; }
+
+        [ProtoMember(8)]
+        [LogMe]
+        public int LoadedSaveSeed { get; set; }
+
+        [ProtoMember(9)]
+        [LogMe]
+        public long IncludedEventSequence { get; set; }
     }
 }

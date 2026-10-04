@@ -15,6 +15,7 @@ using Kingmaker.UnitLogic.Commands.Base;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
 {
@@ -78,6 +79,12 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool AiBrainController_SelectAction_Prefix(UnitEntityData unit, ref bool __result)
         {
+            if (RealTimePresentationRuntime.IsClientActive)
+            {
+                __result = false;
+                _selectionFromHost = null;
+                return false;
+            }
             if (!Main.Multiplayer.IsRealTimeClientCombatActive)
                 return true;
 
@@ -176,6 +183,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void AiBrainController_FindBestAction_Postfix(UnitEntityData unit, DecisionContext context, ref AiAction bestActionResult, ref UnitEntityData bestTargetResult)
         {
+            if (RealTimePresentationRuntime.Enabled && Main.Multiplayer.IsRealTimeCombatActive) return;
             if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive || unit == null)
             {
                 return;

@@ -36,5 +36,17 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 
         [ProtoMember(8)]
         public NetworkAbilityUse Ability { get; set; }
+
+        [ProtoMember(9)]
+        [LogMe]
+        public string SessionId { get; set; }
+
+        [ProtoMember(10)]
+        [LogMe]
+        public int LoadedSaveSeed { get; set; }
+
+        [ProtoMember(11)]
+        [LogMe]
+        public string CommandId { get; set; }
     }
 }

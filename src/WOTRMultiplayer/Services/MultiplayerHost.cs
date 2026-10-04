@@ -62,6 +62,8 @@ namespace WOTRMultiplayer.Services
         private readonly Dictionary<long, long> _lastRealTimePauseRequestByPlayer = [];
         private RealTimeCommandGate _realTimeCommandGate;
         private NetworkRealTimeCombatState _realTimeCommandGateState;
+        private NetworkGame _realTimeCommandGateSession;
+        private int _realTimeCommandGateSaveSeed;
         private long _realTimeLocalCommandEpoch;
         private long _nextRealTimeLocalCommandSequence;
         private long _realTimePauseRequestEpoch;
@@ -95,6 +97,48 @@ namespace WOTRMultiplayer.Services
         private NetworkLobbyStage Status => Game?.Stage ?? NetworkLobbyStage.None;
 
         public bool IsActive => _networkHost.IsActive;
+
+        private NetworkRealTimeCombatState _presentationCombat;
+        private NetworkGame _presentationSession;
+        private int _presentationSaveSeed;
+        private long _presentationEpoch;
+        private long _presentationSequence;
+
+        public void PublishRealTimeAttackPresentation(NotifyRealTimeAttackPresentation presentation)
+        {
+            if (!RealTimePresentationRuntime.Enabled || presentation == null
+                || !IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                return;
+            var combat = Game.RealTimeCombat;
+            EnsurePresentationLane(combat);
+            Send(new NotifyRealTimeAttackPresentation
+            {
+                Epoch = combat.Epoch, Sequence = ++_presentationSequence,
+                SessionId = Game.Id, LoadedSaveSeed = Game.LoadedSaveSeed,
+                UnitId = presentation.UnitId, TargetUnitId = presentation.TargetUnitId,
+                AnimationType = presentation.AnimationType, WeaponStyle = presentation.WeaponStyle,
+                Variant = presentation.Variant, SpeedScale = presentation.SpeedScale,
+                TargetDistance = presentation.TargetDistance, IsCharge = presentation.IsCharge,
+                IsRend = presentation.IsRend, IsMounted = presentation.IsMounted,
+                SpecialAttackType = presentation.SpecialAttackType,
+                HostGameTimeTicks = presentation.HostGameTimeTicks,
+                ActionId = presentation.ActionId,
+                Stage = presentation.Stage
+            });
+        }
+
+        private void EnsurePresentationLane(NetworkRealTimeCombatState combat)
+        {
+            if (!ReferenceEquals(_presentationSession, Game) || _presentationSaveSeed != Game.LoadedSaveSeed
+                || !ReferenceEquals(_presentationCombat, combat) || _presentationEpoch != combat.Epoch)
+            {
+                _presentationSession = Game;
+                _presentationSaveSeed = Game.LoadedSaveSeed;
+                _presentationCombat = combat;
+                _presentationEpoch = combat.Epoch;
+                _presentationSequence = 0;
+            }
+        }
 
         public bool IsInLobby => IsActive && Status == NetworkLobbyStage.Lobby;
 
@@ -173,6 +217,7 @@ namespace WOTRMultiplayer.Services
             _nextRealTimeSnapshotAt = DateTime.UtcNow.AddMilliseconds(250);
 
             var state = CombatInteraction.GetRealTimeCombatState();
+            EnsurePresentationLane(Game.RealTimeCombat);
             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
             {
                 Combat = state,
@@ -198,6 +243,9 @@ namespace WOTRMultiplayer.Services
             {
                 Epoch = Game.RealTimeCombat.Epoch,
                 Sequence = sequence,
+                SessionId = Game.Id,
+                LoadedSaveSeed = Game.LoadedSaveSeed,
+                IncludedEventSequence = _presentationSequence,
                 CanonicalStateHash = hash,
                 ResponseTimeMs = Game.RealTimeCombat.ResponseTimeMs,
                 MissingReplies = Game.RealTimeCombat.MissingSnapshotReplies,
@@ -701,6 +749,8 @@ namespace WOTRMultiplayer.Services
             {
                 _realTimeCommandGate = null;
                 _realTimeCommandGateState = null;
+                _realTimeCommandGateSession = null;
+                _realTimeCommandGateSaveSeed = 0;
                 _realTimeLocalCommandEpoch = 0;
                 _nextRealTimeLocalCommandSequence = 0;
             }
@@ -3017,6 +3067,9 @@ namespace WOTRMultiplayer.Services
             {
                 Epoch = Game.RealTimeCombat.Epoch,
                 PlayerId = Game.LocalPlayerId,
+                SessionId = Game.Id,
+                LoadedSaveSeed = Game.LoadedSaveSeed,
+                ObservedStateHash = Game.RealTimeCombat.CanonicalStateHash,
                 Kind = (int)kind,
                 Movement = movement == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkUnitMoveTo>(movement),
                 Attack = attack == null ? null : Mapper.Map<Networking.Messages.Contracts.NetworkUnitAttack>(attack),
@@ -3030,16 +3083,26 @@ namespace WOTRMultiplayer.Services
                     _nextRealTimeLocalCommandSequence = 0;
                 }
                 message.Sequence = ++_nextRealTimeLocalCommandSequence;
+                message.CommandId = $"{message.PlayerId}:{message.Epoch}:{message.Sequence}";
             }
             return AcceptRealTimeCombatCommand(Game.LocalPlayerId, message, executeOnHost: false);
         }
 
         private bool AcceptRealTimeCombatCommand(long receivedFrom, ClientRealTimeCombatCommand message, bool executeOnHost)
         {
-            if (Game?.Combat?.Stage != NetworkCombatStage.Running || Game.RealTimeCombat == null
-                || GetPlayer(receivedFrom) == null || !RealTimeCombatCommandValidator.TryGetUnitId(message, out var unitId))
+            if (Game?.Combat?.Stage != NetworkCombatStage.Running || Game.RealTimeCombat == null)
             {
-                Logger.LogWarning("Rejecting malformed or out-of-combat real-time command. PlayerId={PlayerId}", receivedFrom);
+                Logger.LogWarning("Rejecting out-of-combat real-time command. PlayerId={PlayerId}", receivedFrom);
+                RejectRealTimeCombatCommand(receivedFrom, message,
+                    RealTimeCommandRejection.RealTimeModeInactive, executeOnHost);
+                return false;
+            }
+            if (GetPlayer(receivedFrom) == null) return false;
+            if (!RealTimeCombatCommandValidator.TryGetUnitId(message, out var unitId))
+            {
+                Logger.LogWarning("Rejecting malformed real-time command. PlayerId={PlayerId}", receivedFrom);
+                RejectRealTimeCombatCommand(receivedFrom, message,
+                    RealTimeCommandRejection.MalformedCommand, executeOnHost);
                 return false;
             }
 
@@ -3053,23 +3116,37 @@ namespace WOTRMultiplayer.Services
                 Sequence = message.Sequence,
                 PlayerId = message.PlayerId,
                 UnitId = unitId,
-                Kind = (RealTimeCommandKind)message.Kind
+                Kind = (RealTimeCommandKind)message.Kind,
+                SessionId = message.SessionId,
+                LoadedSaveSeed = message.LoadedSaveSeed,
+                CommandId = message.CommandId,
+                ObservedStateHash = message.ObservedStateHash
             };
             long authoritativeSequence;
             lock (_realTimeCommandLock)
             {
-                if (!ReferenceEquals(_realTimeCommandGateState, Game.RealTimeCombat))
+                if (!ReferenceEquals(_realTimeCommandGateSession, Game)
+                    || _realTimeCommandGateSaveSeed != Game.LoadedSaveSeed
+                    || !ReferenceEquals(_realTimeCommandGateState, Game.RealTimeCombat))
                 {
+                    _realTimeCommandGateSession = Game;
+                    _realTimeCommandGateSaveSeed = Game.LoadedSaveSeed;
                     _realTimeCommandGateState = Game.RealTimeCombat;
-                    _realTimeCommandGate = new RealTimeCommandGate(_realTimeCommandGateState);
+                    _realTimeCommandGate = new RealTimeCommandGate(
+                        _realTimeCommandGateState, Game.Id, Game.LoadedSaveSeed);
                 }
 
                 var rejection = _realTimeCommandGate.Validate(envelope, receivedFrom, owners);
                 if (rejection != RealTimeCommandRejection.None)
                 {
                     Logger.LogWarning("Rejecting real-time command. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}, Reason={Reason}", receivedFrom, unitId, message.Epoch, message.Sequence, rejection);
+                    RejectRealTimeCombatCommand(receivedFrom, message, rejection, executeOnHost);
                     return false;
                 }
+                if (message.ObservedStateHash != 0
+                    && message.ObservedStateHash != Game.RealTimeCombat.CanonicalStateHash)
+                    Logger.LogDebug("Accepting command observed against an older state. CommandId={CommandId}, ObservedHash={ObservedHash}, HostHash={HostHash}",
+                        message.CommandId, message.ObservedStateHash, Game.RealTimeCombat.CanonicalStateHash);
 
                 if (executeOnHost)
                 {
@@ -3083,6 +3160,8 @@ namespace WOTRMultiplayer.Services
                         {
                             Logger.LogWarning("Real-time command was rejected by game execution. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, unitId, message.Epoch, message.Sequence);
                             TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch);
+                            RejectRealTimeCombatCommand(receivedFrom, message,
+                                RealTimeCommandRejection.GameExecutionRejected, executeOnHost);
                             return false;
                         }
                     }
@@ -3090,6 +3169,8 @@ namespace WOTRMultiplayer.Services
                     {
                         Logger.LogError(ex, "Real-time command failed on host. PlayerId={PlayerId}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, unitId, message.Epoch, message.Sequence);
                         TryHandleRealTimeCriticalFault(receivedFrom, message.Epoch);
+                        RejectRealTimeCombatCommand(receivedFrom, message,
+                            RealTimeCommandRejection.GameExecutionRejected, executeOnHost);
                         return false;
                     }
                 }
@@ -3099,6 +3180,8 @@ namespace WOTRMultiplayer.Services
                 {
                     Logger.LogWarning("Real-time command changed epoch or order during game execution; scheduling verification. PlayerId={PlayerId}, Epoch={Epoch}, Sequence={Sequence}", receivedFrom, message.Epoch, message.Sequence);
                     _mainThreadAccessor.Post(() => _ = BeginRealTimeRepairAsync());
+                    RejectRealTimeCombatCommand(receivedFrom, message,
+                        RealTimeCommandRejection.StateChangedDuringExecution, executeOnHost);
                     return false;
                 }
                 authoritativeSequence = new RealTimeCombatCoordinator(Game.RealTimeCombat).NextAuthoritativeSequence();
@@ -3113,11 +3196,30 @@ namespace WOTRMultiplayer.Services
                 Kind = message.Kind,
                 Movement = message.Movement,
                 Attack = message.Attack,
-                Ability = message.Ability
+                Ability = message.Ability,
+                SessionId = Game.Id,
+                LoadedSaveSeed = Game.LoadedSaveSeed,
+                CommandId = message.CommandId
             };
             RealTimeAcceptedOrderLedger.Record(Game.RealTimeCombat, accepted);
             Send(accepted);
             return true;
+        }
+
+        private void RejectRealTimeCombatCommand(long receivedFrom, ClientRealTimeCombatCommand message,
+            RealTimeCommandRejection reason, bool remoteCommand)
+        {
+            if (!remoteCommand || message == null || Game == null || GetPlayer(receivedFrom) == null) return;
+            Send(new NotifyRealTimeCombatCommandRejected
+            {
+                SessionId = Game?.Id,
+                LoadedSaveSeed = Game?.LoadedSaveSeed ?? 0,
+                Epoch = message.Epoch,
+                PlayerId = receivedFrom,
+                ClientSequence = message.Sequence,
+                CommandId = message.CommandId,
+                Reason = (int)reason
+            });
         }
 
         public bool RequestLocalRealTimePause(bool wantsPause)

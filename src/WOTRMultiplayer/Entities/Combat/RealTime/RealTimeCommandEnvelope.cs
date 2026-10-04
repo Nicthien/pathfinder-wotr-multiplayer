@@ -13,5 +13,13 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
         public RealTimeCommandKind Kind { get; set; }
 
         public string Payload { get; set; }
+
+        public string SessionId { get; set; }
+
+        public int LoadedSaveSeed { get; set; }
+
+        public string CommandId { get; set; }
+
+        public ulong ObservedStateHash { get; set; }
     }
 }

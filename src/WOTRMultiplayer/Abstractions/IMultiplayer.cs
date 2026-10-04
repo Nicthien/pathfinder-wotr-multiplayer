@@ -46,6 +46,9 @@ namespace WOTRMultiplayer.Abstractions
 
         void UpdateRealTimeCombat();
 
+        void PublishRealTimeAttackPresentation(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAttackPresentation presentation);
+
         bool IsRealTimeClientCombatActive { get; }
 
         bool IsRealTimeCombatActive { get; }

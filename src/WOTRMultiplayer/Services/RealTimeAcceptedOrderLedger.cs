@@ -45,7 +45,10 @@ namespace WOTRMultiplayer.Services
                     PlayerId = accepted.PlayerId,
                     UnitId = unitId,
                     Kind = (RealTimeCommandKind)accepted.Kind,
-                    Payload = payload
+                    Payload = payload,
+                    SessionId = accepted.SessionId,
+                    LoadedSaveSeed = accepted.LoadedSaveSeed,
+                    CommandId = accepted.CommandId
                 });
                 state.AcceptedOrders.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
                 if (state.AcceptedOrders.Count > RetainedOrders)

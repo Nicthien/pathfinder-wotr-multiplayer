@@ -13,6 +13,12 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyCombatInteractionService : ICombatInteractionService
     {
+        public Task<bool?> TryPresentRealTimeAttackAsync(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAttackPresentation presentation,
+            Func<bool> canPresent) => Task.FromResult<bool?>(canPresent() ? true : null);
+
+        public void TickRealTimePresentation(bool active) { }
+
         public bool IsCombatTurnFinished()
         {
             return false;

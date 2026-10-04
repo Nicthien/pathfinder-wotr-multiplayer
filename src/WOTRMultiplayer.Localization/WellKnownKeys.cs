@@ -1556,6 +1556,100 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("realTimeCommandRejected")]
+            public static class RealTimeCommandRejected
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("realTimeCommandRejection")]
+            public static class RealTimeCommandRejection
+            {
+                [Description("inactive")]
+                public static class Inactive
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("barrier")]
+                public static class Barrier
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("epoch")]
+                public static class Epoch
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("sequence")]
+                public static class Sequence
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("sender")]
+                public static class Sender
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("session")]
+                public static class Session
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("save")]
+                public static class Save
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("commandId")]
+                public static class CommandId
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("malformed")]
+                public static class Malformed
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("unknownUnit")]
+                public static class UnknownUnit
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("ownership")]
+                public static class Ownership
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("game")]
+                public static class Game
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("stateChanged")]
+                public static class StateChanged
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("unknown")]
+                public static class Unknown
+                {
+                    public static string Key { get; set; }
+                }
+            }
+
             [Description("start")]
             public static class Start
             {

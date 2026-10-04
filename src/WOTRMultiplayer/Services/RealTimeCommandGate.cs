@@ -11,6 +11,12 @@ namespace WOTRMultiplayer.Services
         WrongEpoch,
         InvalidSequence,
         SenderMismatch,
+        WrongSession,
+        WrongLoadedSave,
+        InvalidCommandId,
+        MalformedCommand,
+        GameExecutionRejected,
+        StateChangedDuringExecution,
         UnknownUnit,
         UnitOwnedByAnotherPlayer,
     }
@@ -20,11 +26,15 @@ namespace WOTRMultiplayer.Services
         private readonly NetworkRealTimeCombatState _state;
         private readonly Dictionary<long, long> _lastSequenceByPlayer = [];
         private long _trackedEpoch;
+        private readonly string _sessionId;
+        private readonly int _loadedSaveSeed;
 
-        public RealTimeCommandGate(NetworkRealTimeCombatState state)
+        public RealTimeCommandGate(NetworkRealTimeCombatState state, string sessionId = null, int loadedSaveSeed = 0)
         {
             _state = state ?? throw new System.ArgumentNullException(nameof(state));
             _trackedEpoch = state.Epoch;
+            _sessionId = sessionId;
+            _loadedSaveSeed = loadedSaveSeed;
         }
 
         public RealTimeCommandRejection Validate(
@@ -55,6 +65,22 @@ namespace WOTRMultiplayer.Services
             if (command.PlayerId != receivedFrom)
             {
                 return RealTimeCommandRejection.SenderMismatch;
+            }
+
+            if (_sessionId != null && !string.Equals(command.SessionId, _sessionId, System.StringComparison.Ordinal))
+            {
+                return RealTimeCommandRejection.WrongSession;
+            }
+
+            if (_sessionId != null && command.LoadedSaveSeed != _loadedSaveSeed)
+            {
+                return RealTimeCommandRejection.WrongLoadedSave;
+            }
+
+            if (_sessionId != null && !string.Equals(command.CommandId,
+                    $"{command.PlayerId}:{command.Epoch}:{command.Sequence}", System.StringComparison.Ordinal))
+            {
+                return RealTimeCommandRejection.InvalidCommandId;
             }
 
             if (_trackedEpoch != _state.Epoch)

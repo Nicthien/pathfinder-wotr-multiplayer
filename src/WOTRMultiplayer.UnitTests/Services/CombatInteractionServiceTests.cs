@@ -17,6 +17,24 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class CombatInteractionServiceTests
     {
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AttackPresentation_StaleOrMalformed_DoesNotLookUpUnits(bool current)
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => action());
+            var lookup = A.Fake<IGameStateLookupService>();
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var task = service.TryPresentRealTimeAttackAsync(
+                new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAttackPresentation
+                { UnitId = "unit-a", SpeedScale = float.NaN }, () => current);
+            Assert.That(task.Result, Is.EqualTo(current ? (bool?)false : null));
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
+
         [Test]
         public void UpdateRealTimeCombatStateAsync_MissingEntities_FaultsBeforePartialUpdate()
         {

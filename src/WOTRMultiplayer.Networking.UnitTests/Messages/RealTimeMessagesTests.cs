@@ -62,6 +62,9 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 CanonicalStateHash = 987654321UL,
                 ResponseTimeMs = 42,
                 MissingReplies = 3,
+                SessionId = "session-a",
+                LoadedSaveSeed = 44,
+                IncludedEventSequence = 9,
                 State = new NetworkCombatState
                 {
                     Units = [new NetworkUnit
@@ -88,6 +91,9 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.CanonicalStateHash, Is.EqualTo(987654321UL));
             Assert.That(copy.ResponseTimeMs, Is.EqualTo(42));
             Assert.That(copy.MissingReplies, Is.EqualTo(3));
+            Assert.That(copy.SessionId, Is.EqualTo("session-a"));
+            Assert.That(copy.LoadedSaveSeed, Is.EqualTo(44));
+            Assert.That(copy.IncludedEventSequence, Is.EqualTo(9));
             Assert.That(copy.State.Units[0].Id, Is.EqualTo("unit-a"));
             Assert.That(copy.State.Units[0].BlueprintId, Is.EqualTo("unit-blueprint"));
             Assert.That(copy.State.Units[0].OriginalBlueprintId, Is.EqualTo("original-unit"));
@@ -106,6 +112,38 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(copy.State.AreaEffects[0].TargetUnitId, Is.EqualTo("unit-a"));
             Assert.That(copy.State.AreaEffects[0].TargetOrientation, Is.EqualTo(1.5f));
             Assert.That(copy.State.AreaEffects[0].IsAttachedToUnit, Is.True);
+        }
+
+        [Test]
+        public void IntentAcceptanceRejectionAndPresentation_RoundTripIdentity()
+        {
+            var intent = Serializer.DeepClone(new ClientRealTimeCombatCommand
+            {
+                SessionId = "session-a", LoadedSaveSeed = 44, Epoch = 7,
+                Sequence = 3, PlayerId = 42, CommandId = "42:7:3", ObservedStateHash = 99
+            });
+            var accepted = Serializer.DeepClone(new NotifyRealTimeCombatCommandAccepted
+            {
+                SessionId = "session-a", LoadedSaveSeed = 44, Epoch = 7,
+                ClientSequence = 3, CommandId = "42:7:3", AuthoritativeSequence = 8
+            });
+            var rejected = Serializer.DeepClone(new NotifyRealTimeCombatCommandRejected
+            {
+                SessionId = "session-a", LoadedSaveSeed = 44, Epoch = 7,
+                PlayerId = 42, ClientSequence = 3, CommandId = "42:7:3", Reason = 4
+            });
+            var presentation = Serializer.DeepClone(new NotifyRealTimeAttackPresentation
+            {
+                SessionId = "session-a", LoadedSaveSeed = 44, Epoch = 7, Sequence = 5,
+                ActionId = "hero:1", Stage = 2, UnitId = "hero"
+            });
+            Assert.That(intent.CommandId, Is.EqualTo("42:7:3"));
+            Assert.That(intent.ObservedStateHash, Is.EqualTo(99));
+            Assert.That(accepted.CommandId, Is.EqualTo(intent.CommandId));
+            Assert.That(rejected.CommandId, Is.EqualTo(intent.CommandId));
+            Assert.That(rejected.Reason, Is.EqualTo(4));
+            Assert.That(presentation.ActionId, Is.EqualTo("hero:1"));
+            Assert.That(presentation.Stage, Is.EqualTo(2));
         }
 
         [Test]

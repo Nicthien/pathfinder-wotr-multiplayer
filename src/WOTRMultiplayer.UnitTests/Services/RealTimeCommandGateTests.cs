@@ -121,6 +121,35 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(gate.TryCommit(command), Is.False);
         }
 
+        [TestCase("other", 9, RealTimeCommandRejection.WrongSession)]
+        [TestCase("session", 8, RealTimeCommandRejection.WrongLoadedSave)]
+        public void Command_FromAnotherSessionOrSave_IsRejected(string sessionId, int saveSeed,
+            RealTimeCommandRejection expected)
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state, "session", 9);
+            var command = Command(state.Epoch, 1, 42, "unit-a");
+            command.SessionId = sessionId;
+            command.LoadedSaveSeed = saveSeed;
+            command.CommandId = "42:7:1";
+            Assert.That(gate.Validate(command, 42,
+                new Dictionary<string, long> { ["unit-a"] = 42 }), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void Command_WithForgedId_IsRejected()
+        {
+            var state = RealTimeState();
+            var gate = new RealTimeCommandGate(state, "session", 9);
+            var command = Command(state.Epoch, 1, 42, "unit-a");
+            command.SessionId = "session";
+            command.LoadedSaveSeed = 9;
+            command.CommandId = "forged";
+            Assert.That(gate.Validate(command, 42,
+                new Dictionary<string, long> { ["unit-a"] = 42 }),
+                Is.EqualTo(RealTimeCommandRejection.InvalidCommandId));
+        }
+
         private static NetworkRealTimeCombatState RealTimeState()
         {
             return new NetworkRealTimeCombatState

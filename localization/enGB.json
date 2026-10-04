@@ -382,6 +382,17 @@
                 "unitAutokilled": "Auto-killing unit '{0}' ({1}) as it's been killed at {2}",
                 "saveBlockedDuringSynchronization": "Save unavailable during real-time multiplayer combat or synchronization. Switch to turn-based mode or wait until combat ends.",
                 "saveBlockedAfterDisconnect": "Saving is blocked after a disconnect during real-time combat because this state may differ from the host. Return to the main menu and load a safe save.",
+                "realTimeCommandRejected": "The host rejected the real-time command ({0}).",
+                "realTimeCommandRejection": {
+                    "inactive": "real-time mode is inactive", "barrier": "synchronization is in progress",
+                    "epoch": "the combat epoch changed", "sequence": "the command is old or duplicated",
+                    "sender": "the sender identity is invalid", "session": "the session changed",
+                    "save": "another save is loaded", "commandId": "the command identity is invalid",
+                    "malformed": "the command data is incomplete",
+                    "unknownUnit": "the character is unavailable", "ownership": "the character belongs to another player",
+                    "game": "the game rejected the action", "stateChanged": "the combat state changed during the action",
+                    "unknown": "unknown reason"
+                },
                 "start": {
                     "desyncedStartup": {
                         "host": "Combat recovery has been initiated due to desynced combat startup sequence.\nReason: {0}",
