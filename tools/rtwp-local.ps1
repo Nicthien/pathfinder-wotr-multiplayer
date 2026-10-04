@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Build', 'PrepareA0Candidate', 'PrepareA0Profiles', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status', 'CollectDiagnostics')]
+    [ValidateSet('Build', 'PrepareA0Candidate', 'PrepareA0Profiles', 'StageA0Candidate', 'Install', 'StageTest', 'EnableStable', 'EnableExperimental', 'EnableTestExperimental', 'Status', 'CollectDiagnostics')]
     [string]$Action,
 
     [string]$GamePath = 'C:\Jeux\Steam\steamapps\common\Pathfinder Second Adventure',
@@ -9,6 +9,8 @@ param(
     [switch]$AllowUnvalidatedTest,
 
     [switch]$HostPresentationPrototype,
+
+    [string]$CandidateFingerprint,
 
     [string]$SavePath
 )
@@ -339,6 +341,71 @@ function Prepare-A0Profiles {
     Write-Output "Aucune sauvegarde originale n'a été copiée."
 }
 
+function Stage-A0Candidate {
+    Assert-GameStopped
+    Assert-GameInstallation
+    if ($CandidateFingerprint -notmatch '^[A-Fa-f0-9]{64}$') {
+        throw 'StageA0Candidate exige -CandidateFingerprint avec une empreinte SHA-256 exacte.'
+    }
+    $fingerprint = $CandidateFingerprint.ToUpperInvariant()
+    $candidateRoot = Join-Path (Join-Path $repoPath 'local-artifacts\a0-candidates') $fingerprint
+    $source = Join-Path $candidateRoot '00_WOTRMultiplayerRTwP'
+    $manifestPath = Join-Path $candidateRoot 'manifest.json'
+    $sourceExists = Test-Path -LiteralPath $source -PathType Container
+    $manifestExists = Test-Path -LiteralPath $manifestPath -PathType Leaf
+    if (-not $sourceExists -or -not $manifestExists) {
+        throw "Candidat A0 introuvable : $candidateRoot"
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $actual = Get-ExperimentalFingerprint $source
+    $manifestFingerprintMatches = [string]::Equals(
+        $manifest.experimentalBuildFingerprint,
+        $fingerprint,
+        [StringComparison]::OrdinalIgnoreCase)
+    $contentFingerprintMatches = [string]::Equals(
+        $actual,
+        $fingerprint,
+        [StringComparison]::OrdinalIgnoreCase)
+    if ($manifest.protocolVersion -ne 40 -or $manifest.runtimeValidated -ne $false `
+        -or -not $manifestFingerprintMatches -or -not $contentFingerprintMatches) {
+        throw "Le manifeste ou le contenu du candidat A0 ne correspond pas a l'empreinte demandee."
+    }
+    if (Test-Path -LiteralPath $experimentalPath) {
+        throw 'La variante expérimentale est active : préparation A0 refusée.'
+    }
+    $temporary = Join-Path $slotRoot ("a0-stage-" + [Guid]::NewGuid().ToString('N'))
+    $backup = Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-a0-disabled-' + [Guid]::NewGuid().ToString('N'))
+    Assert-SafeModPath $temporary
+    New-Item -ItemType Directory -Path $temporary -Force | Out-Null
+    $oldMoved = $false
+    try {
+        Copy-Item -Path (Join-Path $source '*') -Destination $temporary -Recurse -Force
+        Assert-ExperimentalFingerprintParity $temporary
+        if (Test-Path -LiteralPath $disabledExperimentalPath) {
+            New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+            Move-Item -LiteralPath $disabledExperimentalPath -Destination $backup
+            $oldMoved = $true
+        }
+        Move-Item -LiteralPath $temporary -Destination $disabledExperimentalPath
+        Write-Output "Candidat A0 préparé dans l'emplacement expérimental désactivé : $disabledExperimentalPath"
+        if ($oldMoved) { Write-Output "Ancien paquet expérimental sauvegardé : $backup" }
+    }
+    catch {
+        $disabledSlotMissing = -not (Test-Path -LiteralPath $disabledExperimentalPath)
+        $backupExists = Test-Path -LiteralPath $backup
+        if ($oldMoved -and $disabledSlotMissing -and $backupExists) {
+            Move-Item -LiteralPath $backup -Destination $disabledExperimentalPath
+        }
+        throw
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Assert-SafeModPath $temporary
+            Remove-Item -LiteralPath $temporary -Recurse
+        }
+    }
+}
+
 function Install-Experimental([bool]$testOnly) {
     if ($testOnly) {
         Assert-UnvalidatedTestRequested
@@ -464,6 +531,7 @@ switch ($Action) {
     'Build' { Build-Experimental }
     'PrepareA0Candidate' { Prepare-A0Candidate }
     'PrepareA0Profiles' { Prepare-A0Profiles }
+    'StageA0Candidate' { Stage-A0Candidate }
     'Install' { Install-Experimental $false }
     'StageTest' { Install-Experimental $true }
     'EnableStable' { Enable-Stable }
