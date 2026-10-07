@@ -1,5 +1,7 @@
 # Rapport de développement — Multijoueur temps réel avec pause, sans DLC
 
+> Incrément du 7 octobre 2026 : variante 0.4.16.12, protocole 48, empreinte schéma 14. Capture et transport des valeurs de contexte des buffs, vérification de leur chaîne et application sans recalcul aux contextes existants. Voir le [bilan des contextes](rtwp-buff-context-2026-10-07.md). Les créations de buffs absents ne sont pas encore branchées à la restauration transactionnelle ; aucune validation en combat réel.
+
 > Incrément du 7 octobre 2026 : variante 0.4.16.11, protocole 47. Brique de création/enregistrement/annulation de représentations natives de buffs sans composants mécaniques, vérifiée hors jeu par tests et sous Mono. Elle n'est pas encore branchée à la réparation réseau : la restauration des buffs manquants reste à terminer. Voir le [bilan du registre de buffs](rtwp-buff-replica-store-2026-10-07.md). Aucun jeu ou outil de production des voix n'a été lancé.
 
 > Incrément du 7 octobre 2026 : variante 0.4.16.10, protocole 47. Mise à jour des valeurs de buffs existants sans réactivation mécanique, identification des instances empilées, contrôle préalable des niveaux négatifs et protections au niveau de la collection de buffs. Voir le [bilan des valeurs de buffs](rtwp-buff-values-2026-10-07.md). La création/reconstruction des buffs manquants n'est pas encore implémentée ; aucun essai en jeu n'a été lancé.

@@ -9,6 +9,37 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void BuffPresentationContext_RoundTripsWithoutLosingCalculatedValues()
+        {
+            var buff = Serializer.DeepClone(new NetworkBuff
+            {
+                Id = "buff", ContextChain = [new()
+                {
+                    BlueprintId = "buff-blueprint", CasterId = "caster", OwnerId = "target",
+                    Params = new() { CasterLevel = 9, SpellLevel = 4, DC = 21 },
+                    Ranks = [9, 2], SharedValues = [3], Properties = [5], SpellDescriptor = 1L << 35,
+                    Direction = new() { X = 1 }, SourceItemId = "item",
+                    MainTarget = new() { UnitId = "target", Point = new() { Z = 12 }, Orientation = 45 }
+                }, new()
+                {
+                    BlueprintId = "spell", IsAbilityContext = true, SourceAbility = new() { BlueprintId = "spell" },
+                    Params = new() { SpellLevel = 4 }
+                }]
+            });
+            Assert.That(buff.ContextChain.Count, Is.EqualTo(2));
+            Assert.That(buff.ContextChain[0].Ranks, Is.EqualTo(new[] { 9, 2 }));
+            Assert.That(buff.ContextChain[0].SharedValues, Is.EqualTo(new[] { 3 }));
+            Assert.That(buff.ContextChain[0].Properties, Is.EqualTo(new[] { 5 }));
+            Assert.That(buff.ContextChain[0].Params.DC, Is.EqualTo(21));
+            Assert.That(buff.ContextChain[0].Params.SpellLevel, Is.EqualTo(4));
+            Assert.That(buff.ContextChain[0].SpellDescriptor, Is.EqualTo(1L << 35));
+            Assert.That(buff.ContextChain[0].MainTarget.Point.Z, Is.EqualTo(12));
+            Assert.That(buff.ContextChain[0].SourceItemId, Is.EqualTo("item"));
+            Assert.That(buff.ContextChain[1].IsAbilityContext, Is.True);
+            Assert.That(buff.ContextChain[1].SourceAbility.BlueprintId, Is.EqualTo("spell"));
+        }
+
+        [Test]
         public void CombatEnd_RoundTripsFinalReferenceAndCorrelatedAck()
         {
             var frame = Serializer.DeepClone(new NotifyRealTimeCombatEnd

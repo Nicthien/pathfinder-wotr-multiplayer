@@ -2,6 +2,8 @@
 {
     public class NetworkAbilityParams
     {
+        public int SpellLevel { get; set; }
+
         public int CasterLevel { get; set; }
 
         public int Concentration { get; set; }

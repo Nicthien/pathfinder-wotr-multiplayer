@@ -67,14 +67,31 @@ namespace WOTRMultiplayer.Services.GameInteraction
             && !string.IsNullOrEmpty(buff.BlueprintId)
             && _recreatableBuffs.ContainsKey(buff.BlueprintId);
 
+        public string ValidateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection)
+        {
+            var error = RealTimeBuffState.ValidateCollection(unitBuffCollection, GetUnitBuffs(unit));
+            if (error != null) return error;
+            var existing = GetSyncableUnitBuffs(unit).ToDictionary(buff => buff.UniqueId, StringComparer.OrdinalIgnoreCase);
+            foreach (var confirmed in unitBuffCollection.Buffs)
+            {
+                error = RealTimeBuffContextReplication.Validate(existing[confirmed.Id].Context, confirmed.ContextChain);
+                if (error != null) return error + ":" + confirmed.Id;
+            }
+            return null;
+        }
+
         public void UpdateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection)
         {
             var buffBaseTime = BuffBaseTime;
-            var error = RealTimeBuffState.ValidateCollection(unitBuffCollection, GetUnitBuffs(unit));
+            var error = ValidateUnitBuffsPresentation(unit, unitBuffCollection);
             if (error != null) throw new InvalidOperationException($"unit:{unit.UniqueId}:{error}");
             var existing = GetSyncableUnitBuffs(unit).ToDictionary(buff => buff.UniqueId, StringComparer.OrdinalIgnoreCase);
             foreach (var confirmed in unitBuffCollection.Buffs)
+            {
+                RealTimeBuffContextReplication.Apply(existing[confirmed.Id].Context, confirmed.ContextChain,
+                    parameters => _mapper.Map<AbilityParams>(parameters));
                 RealTimeBuffReplication.ApplyValues(existing[confirmed.Id], confirmed, buffBaseTime);
+            }
             UpdateNegativeLevels(unit, unitBuffCollection.NegativeLevels, presentationOnly: true);
             unit.Buffs.UpdateNextEvent();
         }

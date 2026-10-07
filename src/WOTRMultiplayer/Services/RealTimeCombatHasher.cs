@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(13); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(14); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -111,6 +111,7 @@ namespace WOTRMultiplayer.Services
                         writer.Write(buff?.IsHidden ?? false);
                         WriteString(writer, buff?.SourceAbilityCasterId);
                         WriteString(writer, buff?.SourceAbility?.BlueprintId);
+                        WriteBuffContext(writer, buff?.ContextChain);
                     }
 
                     var negativeLevels = (unit?.BuffCollection?.NegativeLevels ?? [])
@@ -201,6 +202,59 @@ namespace WOTRMultiplayer.Services
             if (value != null)
             {
                 writer.Write(value);
+            }
+        }
+
+        private static void WriteBuffContext(BinaryWriter writer, System.Collections.Generic.List<NetworkBuffContextState> chain)
+        {
+            var error = RealTimeBuffContextChain.Validate(chain);
+            if (error != null) throw new InvalidOperationException(error);
+            writer.Write(chain != null);
+            if (chain == null) return;
+            writer.Write(chain.Count);
+            foreach (var node in chain)
+            {
+                WriteString(writer, node.BlueprintId); WriteString(writer, node.CasterId); WriteString(writer, node.OwnerId);
+                writer.Write(node.IsAbilityContext);
+                writer.Write(node.SourceAbility != null);
+                if (node.SourceAbility != null)
+                {
+                    var ability = node.SourceAbility;
+                    WriteString(writer, ability.Id); WriteString(writer, ability.BlueprintId); WriteString(writer, ability.SpellbookId);
+                    WriteString(writer, ability.ConvertedFromId); writer.Write(ability.SpellLevel);
+                    writer.Write(ability.Metamagic.HasValue); if (ability.Metamagic.HasValue) writer.Write(ability.Metamagic.Value);
+                    writer.Write(ability.ParamSpellLevel.HasValue); if (ability.ParamSpellLevel.HasValue) writer.Write(ability.ParamSpellLevel.Value);
+                    WriteString(writer, ability.ParamSpellBookId); writer.Write(ability.PotionForOther);
+                    WriteString(writer, ability.SourceItem?.Id); WriteString(writer, ability.SourceItem?.BlueprintId);
+                    writer.Write(ability.ParamSpellSlot != null);
+                    if (ability.ParamSpellSlot != null)
+                    {
+                        WriteString(writer, ability.ParamSpellSlot.SpellbookId); writer.Write(ability.ParamSpellSlot.SpellLevel);
+                        writer.Write(ability.ParamSpellSlot.Slot != null);
+                        if (ability.ParamSpellSlot.Slot != null)
+                        {
+                            writer.Write(ability.ParamSpellSlot.Slot.Index); writer.Write((int)ability.ParamSpellSlot.Slot.Type);
+                        }
+                    }
+                }
+                var parameters = node.Params;
+                writer.Write(parameters.CasterLevel); writer.Write(parameters.SpellLevel); writer.Write(parameters.Concentration);
+                writer.Write(parameters.DC); WriteString(writer, parameters.SpellSource);
+                writer.Write(parameters.Metamagic); writer.Write(parameters.RankBonus);
+                foreach (var values in new[] { node.Ranks, node.SharedValues, node.Properties })
+                {
+                    writer.Write(values.Count);
+                    foreach (var value in values) writer.Write(value);
+                }
+                writer.Write(node.SpellDescriptor); writer.Write(node.SpellSchool); writer.Write(node.SpellLevel);
+                writer.Write(node.DisableFx); WriteVector(writer, node.Direction); WriteString(writer, node.SourceItemId);
+                writer.Write(node.MainTarget != null);
+                if (node.MainTarget != null)
+                {
+                    WriteString(writer, node.MainTarget.UnitId); WriteVector(writer, node.MainTarget.Point);
+                    writer.Write(node.MainTarget.Orientation.HasValue);
+                    if (node.MainTarget.Orientation.HasValue) writer.Write(node.MainTarget.Orientation.Value);
+                }
             }
         }
 

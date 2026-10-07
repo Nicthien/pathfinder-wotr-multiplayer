@@ -56,7 +56,7 @@ $exitCode = $LASTEXITCODE
 $passed = $exitCode -eq 0 -and (Select-String -LiteralPath $logPath -SimpleMatch 'Mono=True' -Quiet)
 $proof = [ordered]@{
     createdUtc = (Get-Date).ToUniversalTime().ToString('o')
-    scope = 'Offline installed Rulebook and vital-stat guards with raw confirmed health/death fields; not a game/combat validation'
+    scope = 'Offline rule/vital/buff guards, inert buff registration/rollback and context-value capture; not a game/combat validation'
     success = [bool]$passed
     exitCode = $exitCode
     candidateFingerprint = if ($CandidateFingerprint) { $CandidateFingerprint } else { $null }

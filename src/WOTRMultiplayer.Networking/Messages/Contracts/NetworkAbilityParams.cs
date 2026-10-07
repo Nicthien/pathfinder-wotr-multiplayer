@@ -5,6 +5,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
     [ProtoContract]
     public class NetworkAbilityParams
     {
+        [ProtoMember(7)]
+        public int SpellLevel { get; set; }
+
         [ProtoMember(1)]
         public int CasterLevel { get; set; }
 

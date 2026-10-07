@@ -638,8 +638,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 if (RealTimePresentationRuntime.Enabled)
                 {
-                    var buffError = RealTimeBuffState.ValidateCollection(networkUnit.BuffCollection,
-                        _buffInteractionService.GetUnitBuffs(_gameStateLookupService.GetUnitEntity(networkUnit.Id)));
+                    var buffError = _buffInteractionService.ValidateUnitBuffsPresentation(
+                        _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection);
                     if (buffError != null) throw new InvalidOperationException($"unit:{networkUnit.Id}:{buffError}");
                 }
                 if (RealTimePresentationRuntime.Enabled)

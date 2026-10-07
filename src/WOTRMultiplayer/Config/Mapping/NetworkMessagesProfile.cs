@@ -31,6 +31,7 @@ namespace WOTRMultiplayer.Config.Mapping
     {
         public NetworkMessagesProfile()
         {
+            CreateMap<NetworkBuffContextState, Networking.Messages.Contracts.NetworkBuffContextState>().ReverseMap();
             CreateMap<Entities.Combat.RealTime.NetworkProjectileState, Networking.Messages.Contracts.NetworkProjectileState>().ReverseMap();
             CreateMap<NetworkSpellbookState, Networking.Messages.Contracts.NetworkSpellbookState>().ReverseMap();
             CreateMap<NetworkPreparedSpellState, Networking.Messages.Contracts.NetworkPreparedSpellState>().ReverseMap();

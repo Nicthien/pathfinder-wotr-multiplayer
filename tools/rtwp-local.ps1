@@ -308,7 +308,7 @@ function Prepare-A0Candidate {
     $manifest = [ordered]@{
         createdUtc = (Get-Date).ToUniversalTime().ToString('o')
         purpose = 'A0 presentation-only engine test; not validated for normal play'
-        protocolVersion = 47
+        protocolVersion = 48
         experimentalBuildFingerprint = $fingerprint
         mainAssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $packagePath 'WOTRMultiplayer.dll') -Algorithm SHA256).Hash
         gameAssemblySha256 = (Get-FileHash -LiteralPath $gameAssembly -Algorithm SHA256).Hash
@@ -366,7 +366,7 @@ function Stage-A0Candidate {
         $actual,
         $fingerprint,
         [StringComparison]::OrdinalIgnoreCase)
-    if ($manifest.protocolVersion -ne 47 -or $manifest.runtimeValidated -ne $false `
+    if ($manifest.protocolVersion -ne 48 -or $manifest.runtimeValidated -ne $false `
         -or -not $manifestFingerprintMatches -or -not $contentFingerprintMatches) {
         throw "Le manifeste ou le contenu du candidat A0 ne correspond pas a l'empreinte demandee."
     }

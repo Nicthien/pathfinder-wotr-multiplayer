@@ -118,6 +118,20 @@ internal static class Program
 
     private static int _statCallbacks;
 
+    private sealed class ContextMapperStub : RealProxy
+    {
+        public ContextMapperStub() : base(typeof(AutoMapper.IRuntimeMapper)) { }
+        public override IMessage Invoke(IMessage message)
+        {
+            var call = (IMethodCallMessage)message;
+            var method = (MethodInfo)call.MethodBase;
+            if (call.MethodName == "Map" && method.ReturnType == typeof(NetworkAbilityParams))
+                return new ReturnMessage(new NetworkAbilityParams { CasterLevel = 12, SpellLevel = 6 }, null, 0,
+                    call.LogicalCallContext, call);
+            return new ReturnMessage(new InvalidOperationException("Unexpected context mapping: " + call.MethodName), call);
+        }
+    }
+
     private static bool ProbeBuffReplica()
     {
         try
@@ -141,9 +155,28 @@ internal static class Program
                 registered = ReferenceEquals(manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Single(), buff)
                     && ReferenceEquals(manager.FindById(buff.UniqueId), buff) && !buff.IsActive && !buff.IsSubscribedOnEventBus;
             var rolledBack = !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any() && buff.Manager == null;
+            var initialized = (Kingmaker.UnitLogic.Mechanics.MechanicsContext)Activator.CreateInstance(
+                typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext), BindingFlags.Instance | BindingFlags.NonPublic,
+                null, new object[] { default(Kingmaker.EntitySystem.Persistence.JsonUtility.JsonConstructorMark) }, null);
+            typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext).GetField("AssociatedBlueprint").SetValue(initialized, blueprint);
+            var ranks = (int[])typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext).GetField("m_Ranks",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).GetValue(initialized);
+            ranks[0] = 37;
+            var captured = RealTimeBuffContextCapture.Capture(initialized,
+                (AutoMapper.IRuntimeMapper)new ContextMapperStub().GetTransparentProxy());
+            ranks[0] = 99;
+            var contextCopied = captured.Count == 1 && captured[0].Ranks[0] == 37 && captured[0].Params.SpellLevel == 6;
+            captured[0].Ranks[0] = 15;
+            var confirmedParameters = (Kingmaker.UnitLogic.Abilities.AbilityParams)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(Kingmaker.UnitLogic.Abilities.AbilityParams));
+            typeof(Kingmaker.UnitLogic.Abilities.AbilityParams).GetProperty("DC").GetSetMethod(true)
+                .Invoke(confirmedParameters, new object[] { 23 });
+            RealTimeBuffContextReplication.Apply(initialized, captured, _ => confirmedParameters);
+            var contextApplied = ranks[0] == 15 && initialized.Params.DC == 23;
+            Console.WriteLine("installed-buff-context: captured-without-world=" + contextCopied + "; applied-without-recalculation=" + contextApplied);
             Console.WriteLine("installed-buff-replica: empty=" + initiallyEmpty + "; registered-without-components=" + registered
                 + "; cache-rollback=" + rolledBack);
-            return initiallyEmpty && registered && rolledBack;
+            return initiallyEmpty && registered && rolledBack && contextCopied && contextApplied;
         }
         catch (Exception failure) { Console.WriteLine("installed-buff-replica: FAILED: " + failure); return false; }
     }

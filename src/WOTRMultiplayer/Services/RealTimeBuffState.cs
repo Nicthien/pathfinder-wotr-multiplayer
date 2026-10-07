@@ -44,6 +44,8 @@ namespace WOTRMultiplayer.Services
                     // event captured before its host callback finishes.
                     if (buff.Rank < 0 || buff.TimeLeft < TimeSpan.Zero)
                         return "invalid-buff-values:" + buff.Id;
+                    var contextError = RealTimeBuffContextChain.Validate(buff.ContextChain);
+                    if (contextError != null) return contextError + ":" + buff.Id;
                 }
             }
             var byId = peer.ToDictionary(buff => buff.Id, StringComparer.OrdinalIgnoreCase);

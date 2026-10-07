@@ -12,5 +12,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         void UpdateUnitBuffs(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
 
         void UpdateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
+
+        string ValidateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
     }
 }

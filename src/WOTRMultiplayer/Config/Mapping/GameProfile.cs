@@ -433,6 +433,9 @@ namespace WOTRMultiplayer.Config.Mapping
                 IsHidden = buff.Hidden
             };
 
+            if (WOTRMultiplayer.Services.RealTimePresentationRuntime.Enabled)
+                networkBuff.ContextChain = WOTRMultiplayer.Services.GameInteraction.RealTimeBuffContextCapture.Capture(buff.Context, context.Mapper);
+
             if (buff.Context.ParentContext is AbilityExecutionContext abilityContext)
             {
                 networkBuff.SourceAbility = context.Mapper.Map<NetworkAbility>(abilityContext.Ability);
