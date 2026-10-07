@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(11); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(12); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -143,6 +143,23 @@ namespace WOTRMultiplayer.Services
                     }
                 }
 
+                writer.Write(snapshot.Combat.ProjectilesCaptured);
+                if (snapshot.Combat.ProjectilesCaptured)
+                {
+                    var projectiles = (snapshot.Combat.Projectiles ?? []).OrderBy(state => state?.Id, StringComparer.Ordinal).ToList();
+                    writer.Write(projectiles.Count);
+                    foreach (var projectile in projectiles)
+                    {
+                        WriteString(writer, projectile?.Id);
+                        WriteString(writer, projectile?.BlueprintId);
+                        WriteVector(writer, projectile?.Position);
+                        writer.Write(Quantize(projectile?.RotationX ?? 0));
+                        writer.Write(Quantize(projectile?.RotationY ?? 0));
+                        writer.Write(Quantize(projectile?.RotationZ ?? 0));
+                        writer.Write(Quantize(projectile?.RotationW ?? 0));
+                        writer.Write(projectile?.IsHit ?? false);
+                    }
+                }
                 var orders = (snapshot.ActiveOrders ?? [])
                     .OrderBy(x => x?.PlayerId)
                     .ThenBy(x => x?.Sequence)

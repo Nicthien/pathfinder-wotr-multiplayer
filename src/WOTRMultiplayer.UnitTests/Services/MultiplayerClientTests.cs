@@ -563,6 +563,42 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A<NetworkAbilityUse>._, A<Func<bool>>._)).MustNotHaveHappened();
         }
 
+        [TestCase(-1, "presentation-session", 7, 5, true)]
+        [TestCase(42, "presentation-session", 7, 5, false)]
+        [TestCase(-1, "old-session", 7, 5, false)]
+        [TestCase(-1, "presentation-session", 6, 5, false)]
+        [TestCase(-1, "presentation-session", 7, 4, false)]
+        public void ProjectilePresentation_RequiresHostAndCurrentSession(long sender, string sessionId,
+            int saveSeed, long epoch, bool expected)
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "presentation-session", LoadedSaveSeed = 7,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
+                A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
+            var receive = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeAuthoritativeEvent>(_networkClient);
+            var frame = new NotifyRealTimeAuthoritativeEvent
+            {
+                SessionId = sessionId, LoadedSaveSeed = saveSeed, Epoch = epoch, Sequence = 1,
+                EventId = "5:1", ActionId = "arrow", Kind = (int)RealTimeAuthoritativeEventKind.ProjectilePresentation,
+                Projectile = new RealTimeProjectilePresentationPayload
+                    { Stage = 1, State = new Networking.Messages.Contracts.NetworkProjectileState { Id = "arrow" } }
+            };
+            receive(sender, frame);
+            receive(sender, frame);
+            var call = A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
+                A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._));
+            if (RealTimePresentationRuntime.Enabled && expected) call.MustHaveHappenedOnceExactly();
+            else call.MustNotHaveHappened();
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(
+                A<RealTimeCommandKind>._, A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._,
+                A<NetworkAbilityUse>._, A<Func<bool>>._)).MustNotHaveHappened();
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void ActionPresentation_ReplacedSessionBeforeRenderingIsIgnored(bool ability)

@@ -19,6 +19,9 @@ namespace WOTRMultiplayer.Services
             }
 
             var differences = new List<string>();
+            if (!SameHash(new NetworkCombatState { ProjectilesCaptured = expected.ProjectilesCaptured, Projectiles = expected.Projectiles },
+                new NetworkCombatState { ProjectilesCaptured = actual.ProjectilesCaptured, Projectiles = actual.Projectiles }))
+                differences.Add("projectiles");
             var expectedUnits = Index(expected.Units, x => x.Id, "host-unit", differences);
             var actualUnits = Index(actual.Units, x => x.Id, "client-unit", differences);
             foreach (var id in expectedUnits.Keys.Union(actualUnits.Keys).OrderBy(x => x, StringComparer.Ordinal))

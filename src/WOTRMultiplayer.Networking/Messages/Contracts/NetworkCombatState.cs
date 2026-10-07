@@ -22,5 +22,8 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(4)]
         [LogMe]
         public List<NetworkAreaEffect> AreaEffects { get; set; } = [];
+
+        [ProtoMember(5)] public List<NetworkProjectileState> Projectiles { get; set; } = [];
+        [ProtoMember(6)] public bool ProjectilesCaptured { get; set; }
     }
 }

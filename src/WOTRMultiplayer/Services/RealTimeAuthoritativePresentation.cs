@@ -25,10 +25,15 @@ namespace WOTRMultiplayer.Services
         // Do not accept ambiguous envelopes or dispatch an unknown payload as
         // another kind. Numeric/game-asset validation occurs on the game thread.
         public static bool IsSupported(NotifyRealTimeAuthoritativeEvent frame) => frame != null
-            && !string.IsNullOrWhiteSpace(frame.UnitId) && !string.IsNullOrWhiteSpace(frame.ActionId)
-            && ((frame.Kind == (int)RealTimeAuthoritativeEventKind.AttackPresentation
+            && !string.IsNullOrWhiteSpace(frame.ActionId)
+            && ((!string.IsNullOrWhiteSpace(frame.UnitId) && frame.Projectile == null
+                && ((frame.Kind == (int)RealTimeAuthoritativeEventKind.AttackPresentation
                     && frame.Attack != null && frame.Ability == null)
                 || (frame.Kind == (int)RealTimeAuthoritativeEventKind.AbilityPresentation
-                    && frame.Ability != null && frame.Attack == null));
+                    && frame.Ability != null && frame.Attack == null)))
+                || frame.Kind == (int)RealTimeAuthoritativeEventKind.ProjectilePresentation
+                    && frame.Attack == null && frame.Ability == null && frame.Projectile?.State != null
+                    && frame.Projectile.State.Id == frame.ActionId
+                    && frame.Projectile.Stage >= 1 && frame.Projectile.Stage <= 3);
     }
 }

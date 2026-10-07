@@ -9,6 +9,31 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void ProjectilePresentation_RoundTripsConfirmedImpactAndTransform()
+        {
+            var frame = Serializer.DeepClone(new NotifyRealTimeAuthoritativeEvent
+            {
+                Epoch = 9, Sequence = 42, EventId = "9:42", ActionId = "arrow",
+                Kind = (int)RealTimeAuthoritativeEventKind.ProjectilePresentation,
+                Projectile = new RealTimeProjectilePresentationPayload
+                {
+                    Stage = 3, State = new NetworkProjectileState
+                    {
+                        Id = "arrow", BlueprintId = "projectile-blueprint", IsHit = true,
+                        Position = new NetworkVector3 { X = 1, Y = 2, Z = 3 }, RotationY = 0.6f, RotationW = 0.8f
+                    }
+                }
+            });
+            Assert.That(frame.Ability, Is.Null);
+            Assert.That(frame.Attack, Is.Null);
+            Assert.That(frame.Projectile.Stage, Is.EqualTo(3));
+            Assert.That(frame.Projectile.State.IsHit, Is.True);
+            Assert.That(frame.Projectile.State.Position.Z, Is.EqualTo(3));
+            Assert.That(frame.Projectile.State.RotationY, Is.EqualTo(0.6f));
+            Assert.That(frame.Projectile.State.RotationW, Is.EqualTo(0.8f));
+        }
+
+        [Test]
         public void AbilityPresentation_RoundTripsIdentityAndCastParameters()
         {
             var frame = Serializer.DeepClone(new NotifyRealTimeAuthoritativeEvent

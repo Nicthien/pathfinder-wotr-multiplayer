@@ -58,6 +58,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private readonly Dictionary<string, (string ActionId, UnitAnimationActionHandle Handle, DateTime Started)> _presentedAttacks = new();
         private readonly Dictionary<string, VisualMove> _visualMoves = new();
+        private readonly HashSet<RealTimeProjectileVisual> _projectileVisuals = [];
+        private readonly RealTimeProjectileReplica _projectileReplica;
 
         private sealed class VisualMove
         {
@@ -69,6 +71,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void TickRealTimePresentation(bool active)
         {
+            if (!active && !RealTimePresentationRuntime.IsClientActive) _projectileReplica.Clear();
+            else if (active)
+            {
+                try { foreach (var view in _projectileVisuals.ToArray()) view.Tick(); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to display confirmed host projectile.");
+                    Main.Multiplayer.ReportRealTimeAIActionFault(null, null, "projectile-presentation-failed");
+                }
+            }
             foreach (var pair in _presentedAttacks.ToArray())
             {
                 if (active && !pair.Value.Handle.IsFinished && !pair.Value.Handle.IsReleased
@@ -100,6 +112,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (!canPresent()) { completion.TrySetResult(null); return; }
                     if (!RealTimeAuthoritativePresentation.IsSupported(authoritativeEvent))
                     { completion.TrySetResult(false); return; }
+                    if (authoritativeEvent.Projectile != null)
+                    {
+                        var projectile = _mapper.Map<NetworkProjectileState>(authoritativeEvent.Projectile.State);
+                        if ((authoritativeEvent.Projectile.Stage == 3) != projectile.IsHit)
+                        { completion.TrySetResult(false); return; }
+                        _projectileReplica.Apply(projectile);
+                        completion.TrySetResult(true);
+                        return;
+                    }
                     var ability = authoritativeEvent.Ability;
                     var presentation = authoritativeEvent.Attack ?? new RealTimeAttackPresentationPayload
                     {
@@ -202,6 +223,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _logger = logger;
             _gameStateLookupService = gameStateLookupService;
+            _projectileReplica = new RealTimeProjectileReplica(state =>
+            {
+                var visual = new RealTimeProjectileVisual(state, view => _projectileVisuals.Remove(view));
+                _projectileVisuals.Add(visual);
+                return visual;
+            });
             _mainThreadAccessor = mainThreadAccessor;
             _playerNotificationService = playerNotificationService;
             _buffInteractionService = buffInteractionService;
@@ -410,6 +437,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return new NetworkCombatState
             {
                 Units = GetUnitsInCombat(includeTurnBasedInfo: false),
+                ProjectilesCaptured = RealTimePresentationRuntime.Enabled,
+                Projectiles = !RealTimePresentationRuntime.Enabled ? []
+                    : RealTimePresentationRuntime.IsClientActive ? _projectileReplica.Snapshot()
+                    : RealTimeProjectileCapture.CaptureAll(),
                 AreaEffects = _mapper.Map<List<NetworkAreaEffect>>(_gameStateLookupService.GetAreaEffects())
             };
         }
@@ -541,6 +572,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState)
         {
+            var projectileStates = networkCombatState.ProjectilesCaptured
+                ? RealTimeProjectileReplica.ValidateAndCopy(networkCombatState.Projectiles) : null;
             var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
                 id => _gameStateLookupService.GetUnitEntity(id) != null,
                 area => _gameStateLookupService.GetAreaEffect(area) != null,
@@ -585,6 +618,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     throw new InvalidOperationException($"unit:{networkUnit.Id}:{resourceError}");
             }
 
+            // Unsupported visual assets must fail before health/buffs are changed.
+            if (projectileStates != null) _projectileReplica.Restore(projectileStates);
             UpdateCombatState(networkCombatState, requiresFullUpdate: false);
             foreach (var networkUnit in networkCombatState.Units)
             {
