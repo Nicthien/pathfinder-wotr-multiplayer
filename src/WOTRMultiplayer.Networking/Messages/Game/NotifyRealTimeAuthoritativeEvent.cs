@@ -6,7 +6,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
     {
         AttackPresentation = 1,
         AbilityPresentation = 2,
-        ProjectilePresentation = 3
+        ProjectilePresentation = 3,
+        UnitResult = 4
     }
 
     [ProtoContract]
@@ -43,6 +44,7 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(11)] public RealTimeAttackPresentationPayload Attack { get; set; }
         [ProtoMember(12)] public RealTimeAbilityPresentationPayload Ability { get; set; }
         [ProtoMember(13)] public RealTimeProjectilePresentationPayload Projectile { get; set; }
+        [ProtoMember(14)] public RealTimeUnitResultPayload UnitResult { get; set; }
     }
 
     [ProtoContract]
@@ -66,5 +68,13 @@ namespace WOTRMultiplayer.Networking.Messages.Game
     {
         [ProtoMember(1)] public int Stage { get; set; }
         [ProtoMember(2)] public Contracts.NetworkProjectileState State { get; set; }
+    }
+
+    [ProtoContract]
+    public class RealTimeUnitResultPayload
+    {
+        [ProtoMember(1)] public Contracts.NetworkUnitDescriptor State { get; set; }
+        [ProtoMember(2)] public string Reason { get; set; }
+        [ProtoMember(3)] public string CauseActionId { get; set; }
     }
 }

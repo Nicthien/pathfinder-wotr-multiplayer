@@ -103,6 +103,10 @@ namespace WOTRMultiplayer.Services
 
         public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
 
+        // A combat object survives repair epochs, but not a new encounter or load.
+        public object RealTimeCombatIdentity => _multiplayerActorAccessor.Current is MultiplayerActorBase actor
+            ? actor.Game?.Combat : null;
+
         public void PublishRealTimeAuthoritativeEvent(
             WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent)
         {

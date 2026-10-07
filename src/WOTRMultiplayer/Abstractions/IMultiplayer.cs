@@ -53,6 +53,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool IsRealTimeCombatActive { get; }
 
+        object RealTimeCombatIdentity { get; }
+
         bool IsRealTimeCombatBarrierActive { get; }
 
         bool IsSavingBlockedByCombatSync { get; }

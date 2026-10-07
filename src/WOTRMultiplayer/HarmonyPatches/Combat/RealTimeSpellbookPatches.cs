@@ -5,6 +5,7 @@ using HarmonyLib;
 using Kingmaker.UnitLogic;
 using Kingmaker.UnitLogic.Abilities;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
 {
@@ -32,6 +33,15 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 "autonomous-client-spell-slot:" + __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name);
             return false;
         }
+
+        [HarmonyPostfix]
+        public static void AfterMutation(object __instance)
+        {
+            if (!RealTimePresentationRuntime.Enabled) return;
+            var unit = __instance is Spellbook book ? book.Owner?.Unit
+                : (__instance as SpellSlot)?.Spell?.Caster?.Unit;
+            RealTimeUnitResultCapture.Publish(unit, "spell-slot");
+        }
     }
 
     [HarmonyPatch(typeof(Spellbook), "SpendInternal")]
@@ -46,6 +56,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             Main.Multiplayer.ReportRealTimeAIActionFault(null, null,
                 "autonomous-client-spell-slot:Spellbook.SpendInternal");
             return false;
+        }
+
+        [HarmonyPostfix]
+        public static void AfterSpend(Spellbook __instance, bool doSpend)
+        {
+            if (!RealTimePresentationRuntime.Enabled) return;
+            if (doSpend) RealTimeUnitResultCapture.Publish(__instance.Owner?.Unit, "spell-slot");
         }
     }
 }

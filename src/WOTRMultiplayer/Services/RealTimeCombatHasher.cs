@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(12); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(13); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -41,6 +41,15 @@ namespace WOTRMultiplayer.Services
                     writer.Write(Quantize(unit?.Orientation ?? 0));
                     writer.Write(unit?.Descriptor?.Damage ?? 0);
                     writer.Write(unit?.Descriptor?.Stats?.DamageNonLethal ?? 0);
+                    var vitals = unit?.Descriptor?.Vitals;
+                    writer.Write(vitals != null);
+                    if (vitals != null)
+                    {
+                        writer.Write(vitals.Damage); writer.Write(vitals.LifeState); writer.Write(vitals.IsFinallyDead);
+                        writer.Write(vitals.IsInCombat); writer.Write(vitals.GroupCounterCaptured);
+                        if (vitals.GroupCounterCaptured) writer.Write(vitals.GroupCombatCounter);
+                        WriteStat(writer, vitals.HitPoints); WriteStat(writer, vitals.TemporaryHitPoints); WriteStat(writer, vitals.NonLethal);
+                    }
                     writer.Write(unit?.Descriptor?.ResourcesCaptured ?? false);
                     if (unit?.Descriptor?.ResourcesCaptured == true)
                     {
@@ -193,6 +202,14 @@ namespace WOTRMultiplayer.Services
             {
                 writer.Write(value);
             }
+        }
+
+        private static void WriteStat(BinaryWriter writer, NetworkStatValues stat)
+        {
+            writer.Write(stat != null);
+            if (stat == null) return;
+            writer.Write(stat.BaseValue); writer.Write(stat.ModifiedValue);
+            writer.Write(stat.ModifiedValueRaw); writer.Write(stat.PermanentValue);
         }
 
         private static void WriteVector(BinaryWriter writer, NetworkVector3 position)

@@ -5,6 +5,7 @@ using HarmonyLib;
 using Kingmaker.Blueprints;
 using Kingmaker.UnitLogic;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
 {
@@ -29,6 +30,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             Main.Multiplayer.ReportRealTimeAIActionFault(__instance.m_Owner?.Unit?.UniqueId, null,
                 "autonomous-client-resource:" + __originalMethod.Name);
             return false;
+        }
+
+        [HarmonyPostfix]
+        public static void AfterMutation(UnitAbilityResourceCollection __instance)
+        {
+            if (!RealTimePresentationRuntime.Enabled) return;
+            RealTimeUnitResultCapture.Publish(__instance.m_Owner?.Unit, "resource");
         }
     }
 }

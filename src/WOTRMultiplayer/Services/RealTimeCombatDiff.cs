@@ -149,6 +149,9 @@ namespace WOTRMultiplayer.Services
                 || (expected.Descriptor?.Stats?.DamageNonLethal ?? 0)
                     != (actual.Descriptor?.Stats?.DamageNonLethal ?? 0))
                 causes.Add("damage");
+            if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor { Vitals = expected.Descriptor?.Vitals } }] },
+                new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor { Vitals = actual.Descriptor?.Vitals } }] }))
+                causes.Add("vitals");
             if ((expected.Descriptor?.ResourcesCaptured ?? false) != (actual.Descriptor?.ResourcesCaptured ?? false)
                 || expected.Descriptor?.ResourcesCaptured == true
                     && !(expected.Descriptor.Resources ?? []).OrderBy(resource => resource?.BlueprintId, StringComparer.Ordinal)

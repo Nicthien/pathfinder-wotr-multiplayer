@@ -124,6 +124,7 @@ namespace WOTRMultiplayer.Services
                 Kind = authoritativeEvent.Kind,
                 Ability = authoritativeEvent.Ability == null ? null : ProtoBuf.Serializer.DeepClone(authoritativeEvent.Ability),
                 Projectile = authoritativeEvent.Projectile == null ? null : ProtoBuf.Serializer.DeepClone(authoritativeEvent.Projectile),
+                UnitResult = authoritativeEvent.UnitResult == null ? null : ProtoBuf.Serializer.DeepClone(authoritativeEvent.UnitResult),
                 Attack = authoritativeEvent.Attack == null ? null : new RealTimeAttackPresentationPayload
                 {
                     Stage = authoritativeEvent.Attack.Stage,

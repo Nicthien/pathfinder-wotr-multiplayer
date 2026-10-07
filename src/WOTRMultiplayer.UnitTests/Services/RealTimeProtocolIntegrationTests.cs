@@ -254,6 +254,30 @@ namespace WOTRMultiplayer.UnitTests.Services
             client.OnUnitDeath("enemy", "enemy-group");
             Assert.That(queued, Is.Empty);
             host.OnUnitDeath("enemy", "enemy-group");
+            if (RealTimePresentationRuntime.Enabled)
+            {
+                Assert.That(queued, Is.Empty, "The old death channel must not run with presentation replication.");
+                A.CallTo(() => clientCombat.TryPresentRealTimeActionAsync(
+                    A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
+                host.PublishRealTimeAuthoritativeEvent(UnitResult("enemy"));
+                var firstResult = (NotifyRealTimeAuthoritativeEvent)queued.Dequeue();
+                host.PublishRealTimeAuthoritativeEvent(UnitResult("second-enemy"));
+                var secondResult = (NotifyRealTimeAuthoritativeEvent)queued.Dequeue();
+                var receiveResult = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeAuthoritativeEvent>(clientNetwork);
+                receiveResult(NetworkConstants.HostPlayerId, secondResult);
+                receiveResult(NetworkConstants.HostPlayerId, firstResult);
+                receiveResult(NetworkConstants.HostPlayerId, firstResult);
+                A.CallTo(() => clientCombat.TryPresentRealTimeActionAsync(
+                    A<NotifyRealTimeAuthoritativeEvent>.That.Matches(frame => frame.UnitId == "enemy"),
+                    A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+                A.CallTo(() => clientCombat.TryPresentRealTimeActionAsync(
+                    A<NotifyRealTimeAuthoritativeEvent>.That.Matches(frame => frame.UnitId == "second-enemy"),
+                    A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+                A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
+                    A<string>._, A<NetworkPlayer>._, A<Func<bool>>._)).MustNotHaveHappened();
+                Assert.That(queued, Is.Empty);
+                return;
+            }
             var death = (NotifyRealTimeUnitKilled)queued.Dequeue();
             host.OnUnitDeath("second-enemy", "enemy-group");
             var secondDeath = (NotifyRealTimeUnitKilled)queued.Dequeue();
@@ -289,12 +313,24 @@ namespace WOTRMultiplayer.UnitTests.Services
                     "enemy", A<NetworkPlayer>._, A<Func<bool>>._))
                 .Returns(Task.FromResult<bool?>(false));
 
-            host.OnUnitDeath("enemy", "enemy-group");
-            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
-                NetworkConstants.HostPlayerId, (NotifyRealTimeUnitKilled)queued.Dequeue());
+            if (RealTimePresentationRuntime.Enabled)
+            {
+                A.CallTo(() => clientCombat.TryPresentRealTimeActionAsync(
+                    A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(false));
+                host.PublishRealTimeAuthoritativeEvent(UnitResult("enemy"));
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeAuthoritativeEvent>(clientNetwork)(
+                    NetworkConstants.HostPlayerId, (NotifyRealTimeAuthoritativeEvent)queued.Dequeue());
+            }
+            else
+            {
+                host.OnUnitDeath("enemy", "enemy-group");
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                    NetworkConstants.HostPlayerId, (NotifyRealTimeUnitKilled)queued.Dequeue());
+            }
             Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
             var fault = (ClientRealTimeCommandFault)queued.Dequeue();
-            Assert.That(fault.Reason, Is.EqualTo("host-unit-death-not-applied"));
+            Assert.That(fault.Reason, Is.EqualTo(RealTimePresentationRuntime.Enabled
+                ? "action-presentation-not-applied" : "host-unit-death-not-applied"));
             FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCommandFault>(hostNetwork)(42, fault);
             Pump(queued, hostNetwork, clientNetwork);
 
@@ -302,8 +338,31 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
         }
 
+        private static NotifyRealTimeAuthoritativeEvent UnitResult(string unitId) => new()
+        {
+            UnitId = unitId, ActionId = "result:" + unitId, Kind = (int)RealTimeAuthoritativeEventKind.UnitResult,
+            UnitResult = new RealTimeUnitResultPayload
+            {
+                Reason = "life-state",
+                State = new Networking.Messages.Contracts.NetworkUnitDescriptor
+                {
+                    Damage = 40, ResourcesCaptured = true, SpellbooksCaptured = true,
+                    Stats = new Networking.Messages.Contracts.NetworkCharacterStats(),
+                    State = new Networking.Messages.Contracts.NetworkUnitState { IsFinallyDead = true },
+                    Vitals = new Networking.Messages.Contracts.NetworkUnitVitals
+                    {
+                        Damage = 40, LifeState = 2, IsFinallyDead = true,
+                        HitPoints = new Networking.Messages.Contracts.NetworkStatValues
+                            { BaseValue = 30, ModifiedValue = 30, ModifiedValueRaw = 30, PermanentValue = 30 },
+                        TemporaryHitPoints = new Networking.Messages.Contracts.NetworkStatValues(),
+                        NonLethal = new Networking.Messages.Contracts.NetworkStatValues()
+                    }
+                }
+            }
+        };
+
         [Test]
-        public async Task TwoActors_DelayedDeathFromPreviousEpoch_AppliesDuringModePrepare()
+        public async Task TwoActors_DelayedDeathDuringModePrepare_UsesOnlySelectedReplicationPath()
         {
             var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
@@ -313,18 +372,31 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .Returns(Task.FromResult<bool?>(true));
 
             host.OnUnitDeath("enemy", "enemy-group");
-            var delayedDeath = (NotifyRealTimeUnitKilled)queued.Dequeue();
+            if (RealTimePresentationRuntime.Enabled)
+            {
+                Assert.That(queued, Is.Empty);
+                host.PublishRealTimeAuthoritativeEvent(UnitResult("enemy"));
+            }
+            var delayedDeath = queued.Dequeue();
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
             var prepare = (NotifyRealTimeModeTransition)queued.Dequeue();
             FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(clientNetwork)(
                 NetworkConstants.HostPlayerId, prepare);
             Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.PreparingModeSwitch));
-            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
-                NetworkConstants.HostPlayerId, delayedDeath);
+            if (RealTimePresentationRuntime.Enabled)
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeAuthoritativeEvent>(clientNetwork)(
+                    NetworkConstants.HostPlayerId, (NotifyRealTimeAuthoritativeEvent)delayedDeath);
+            else
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(clientNetwork)(
+                    NetworkConstants.HostPlayerId, (NotifyRealTimeUnitKilled)delayedDeath);
             Pump(queued, hostNetwork, clientNetwork);
 
             A.CallTo(() => clientCombat.TryApplyRealTimeUnitDeathAsync(
-                "enemy", A<NetworkPlayer>._, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
+                "enemy", A<NetworkPlayer>._, A<Func<bool>>._))
+                .MustHaveHappened(RealTimePresentationRuntime.Enabled ? 0 : 1, Times.Exactly);
+            if (RealTimePresentationRuntime.Enabled)
+                A.CallTo(() => clientCombat.TryPresentRealTimeActionAsync(
+                    A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._)).MustNotHaveHappened();
             Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
             Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
         }

@@ -26,14 +26,17 @@ namespace WOTRMultiplayer.Services
         // another kind. Numeric/game-asset validation occurs on the game thread.
         public static bool IsSupported(NotifyRealTimeAuthoritativeEvent frame) => frame != null
             && !string.IsNullOrWhiteSpace(frame.ActionId)
-            && ((!string.IsNullOrWhiteSpace(frame.UnitId) && frame.Projectile == null
+            && ((!string.IsNullOrWhiteSpace(frame.UnitId) && frame.Projectile == null && frame.UnitResult == null
                 && ((frame.Kind == (int)RealTimeAuthoritativeEventKind.AttackPresentation
                     && frame.Attack != null && frame.Ability == null)
                 || (frame.Kind == (int)RealTimeAuthoritativeEventKind.AbilityPresentation
                     && frame.Ability != null && frame.Attack == null)))
                 || frame.Kind == (int)RealTimeAuthoritativeEventKind.ProjectilePresentation
-                    && frame.Attack == null && frame.Ability == null && frame.Projectile?.State != null
+                    && frame.Attack == null && frame.Ability == null && frame.UnitResult == null && frame.Projectile?.State != null
                     && frame.Projectile.State.Id == frame.ActionId
-                    && frame.Projectile.Stage >= 1 && frame.Projectile.Stage <= 3);
+                    && frame.Projectile.Stage >= 1 && frame.Projectile.Stage <= 3
+                || frame.Kind == (int)RealTimeAuthoritativeEventKind.UnitResult
+                    && !string.IsNullOrWhiteSpace(frame.UnitId) && frame.UnitResult?.State?.Vitals != null
+                    && frame.Attack == null && frame.Ability == null && frame.Projectile == null);
     }
 }

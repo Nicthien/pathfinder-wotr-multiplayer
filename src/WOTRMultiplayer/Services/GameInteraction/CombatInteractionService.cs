@@ -112,6 +112,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (!canPresent()) { completion.TrySetResult(null); return; }
                     if (!RealTimeAuthoritativePresentation.IsSupported(authoritativeEvent))
                     { completion.TrySetResult(false); return; }
+                    if (authoritativeEvent.UnitResult != null)
+                    {
+                        var target = _gameStateLookupService.GetUnitEntity(authoritativeEvent.UnitId);
+                        if (target == null) { completion.TrySetResult(false); return; }
+                        var result = _mapper.Map<NetworkUnitDescriptor>(authoritativeEvent.UnitResult.State);
+                        var error = RealTimeUnitResultState.Validate(result, RealTimeUnitResultReplication.Capture(target));
+                        if (error != null) throw new InvalidOperationException(error);
+                        RealTimeUnitResultReplication.ApplyValidated(target, result);
+                        RealTimeEncounterParticipants<UnitEntityData>.For(Main.Multiplayer?.RealTimeCombatIdentity)
+                            ?.Remember(target.UniqueId, target);
+                        completion.TrySetResult(true);
+                        return;
+                    }
                     if (authoritativeEvent.Projectile != null)
                     {
                         var projectile = _mapper.Map<NetworkProjectileState>(authoritativeEvent.Projectile.State);
@@ -603,6 +616,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             foreach (var networkUnit in networkCombatState.Units)
             {
+                if (RealTimePresentationRuntime.Enabled)
+                {
+                    var resultError = RealTimeUnitResultState.Validate(networkUnit.Descriptor,
+                        RealTimeUnitResultReplication.Capture(_gameStateLookupService.GetUnitEntity(networkUnit.Id)));
+                    if (resultError != null) throw new InvalidOperationException($"unit:{networkUnit.Id}:{resultError}");
+                }
                 if (networkUnit.Descriptor?.SpellbooksCaptured == true)
                 {
                     var spellbookError = RealTimeSpellbookState.Validate(networkUnit.Descriptor.Spellbooks,
@@ -623,6 +642,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
             UpdateCombatState(networkCombatState, requiresFullUpdate: false);
             foreach (var networkUnit in networkCombatState.Units)
             {
+                if (RealTimePresentationRuntime.Enabled)
+                {
+                    var participant = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
+                    RealTimeEncounterParticipants<UnitEntityData>.For(Main.Multiplayer?.RealTimeCombatIdentity)
+                        ?.Remember(networkUnit.Id, participant);
+                }
                 if (networkUnit.Descriptor?.SpellbooksCaptured == true)
                     RealTimeSpellbookReplication.ApplyValidated(_gameStateLookupService.GetUnitEntity(networkUnit.Id),
                         networkUnit.Descriptor.Spellbooks);
@@ -636,6 +661,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 }
                 if (networkUnit.Descriptor?.State?.IsFinallyDead != true)
                     continue;
+                if (RealTimePresentationRuntime.Enabled) continue; // Already applied without death mechanics.
                 var localUnit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
                 if (localUnit != null && !localUnit.State.IsFinallyDead)
                 {
@@ -1238,6 +1264,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         completion.TrySetResult(null);
                         return;
                     }
+                    if (RealTimePresentationRuntime.Enabled)
+                    {
+                        completion.TrySetResult(false);
+                        return;
+                    }
                     var unit = _gameStateLookupService.GetUnitEntity(unitId);
                     if (unit == null || hostPlayer == null)
                     {
@@ -1455,6 +1486,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 var unitsInCombat = Game.Instance.State.Units.InCombat().ToDictionary(x => x.UniqueId, x => x);
 
+                if (!includeTurnBasedInfo && RealTimePresentationRuntime.Enabled)
+                {
+                    var participants = RealTimeEncounterParticipants<UnitEntityData>.For(Main.Multiplayer?.RealTimeCombatIdentity);
+                    if (participants != null)
+                    {
+                        foreach (var pair in unitsInCombat) participants.Remember(pair.Key, pair.Value);
+                        unitsInCombat = participants.Snapshot();
+                    }
+                }
+
                 switch (Game.Instance.CurrentlyLoadedArea.name)
                 {
                     case "Prologue_Caves_1":
@@ -1648,6 +1689,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 SpellbooksCaptured = captureResources,
                 Spellbooks = captureResources ? RealTimeSpellbookReplication.Capture(combatUnit) : [],
                 Damage = combatUnit.Descriptor.Damage,
+                Vitals = captureResources && RealTimePresentationRuntime.Enabled ? RealTimeUnitResultReplication.CaptureVitals(combatUnit) : null,
                 Stats = new NetworkCharacterStats
                 {
                     DamageNonLethal = combatUnit.Descriptor.Stats.DamageNonLethal.BaseValue,
@@ -1666,7 +1708,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return descriptor;
         }
 
-        private static List<NetworkAbilityResource> CaptureResources(UnitEntityData unit) =>
+        internal static List<NetworkAbilityResource> CaptureResources(UnitEntityData unit) =>
             unit.Descriptor.Resources.PersistantResources.Select(resource => new NetworkAbilityResource
             {
                 BlueprintId = resource.Blueprint.AssetGuid.ToString(),
@@ -1827,6 +1869,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void UpdateUnitHealth(UnitEntityData unit, NetworkUnit networkUnit)
         {
+            if (RealTimePresentationRuntime.Enabled && networkUnit.Descriptor.Vitals != null)
+            {
+                RealTimeUnitResultReplication.ApplyVitals(unit, networkUnit.Descriptor.Vitals);
+                return;
+            }
             unit.Damage = networkUnit.Descriptor.Damage;
             if (networkUnit.Descriptor.Stats != null &&
                 unit.Descriptor.Stats.DamageNonLethal.BaseValue != networkUnit.Descriptor.Stats.DamageNonLethal)

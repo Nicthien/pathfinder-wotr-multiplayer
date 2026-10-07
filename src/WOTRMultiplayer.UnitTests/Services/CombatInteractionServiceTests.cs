@@ -11,6 +11,7 @@ using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Services.GameInteraction;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.UnitTests.Services
 {
@@ -245,6 +246,23 @@ namespace WOTRMultiplayer.UnitTests.Services
             queued();
 
             Assert.That(task.Result, Is.Null);
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void PresentationBuild_RejectsLegacyKillBeforeWorldLookup()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            var lookup = A.Fake<IGameStateLookupService>();
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => action());
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var task = service.TryApplyRealTimeUnitDeathAsync("enemy", new NetworkPlayer(0),
+                () => RealTimePresentationRuntime.Enabled);
+            if (RealTimePresentationRuntime.Enabled) Assert.That(task.Result, Is.False);
+            else Assert.That(task.Result, Is.Null);
             A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
         }
     }

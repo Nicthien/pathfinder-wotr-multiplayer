@@ -65,7 +65,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 });
             var call = A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
                 A<string>._, A<NetworkPlayer>._, A<Func<bool>>._));
-            if (expected) call.MustHaveHappenedOnceExactly();
+            if (expected && !RealTimePresentationRuntime.Enabled) call.MustHaveHappenedOnceExactly();
             else call.MustNotHaveHappened();
         }
 
@@ -119,7 +119,8 @@ namespace WOTRMultiplayer.UnitTests.Services
                 });
             }
             A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
-                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._)).MustHaveHappenedTwiceExactly();
+                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._))
+                .MustHaveHappened(RealTimePresentationRuntime.Enabled ? 0 : 2, Times.Exactly);
         }
 
         [Test]
@@ -594,6 +595,48 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._));
             if (RealTimePresentationRuntime.Enabled && expected) call.MustHaveHappenedOnceExactly();
             else call.MustNotHaveHappened();
+            A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(
+                A<RealTimeCommandKind>._, A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._,
+                A<NetworkAbilityUse>._, A<Func<bool>>._)).MustNotHaveHappened();
+        }
+
+        [TestCase(-1, "result-session", 7, 5, true)]
+        [TestCase(42, "result-session", 7, 5, false)]
+        [TestCase(-1, "old-session", 7, 5, false)]
+        [TestCase(-1, "result-session", 6, 5, false)]
+        [TestCase(-1, "result-session", 7, 4, false)]
+        public void UnitResult_RequiresHostAndCurrentSessionAndDoesNotRunCommands(long sender, string sessionId,
+            int saveSeed, long epoch, bool expected)
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "result-session", LoadedSaveSeed = 7,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
+                A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
+            var receive = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeAuthoritativeEvent>(_networkClient);
+            var frame = new NotifyRealTimeAuthoritativeEvent
+            {
+                SessionId = sessionId, LoadedSaveSeed = saveSeed, Epoch = epoch, Sequence = 1,
+                EventId = "5:1", ActionId = "damage-result", UnitId = "unit",
+                Kind = (int)RealTimeAuthoritativeEventKind.UnitResult,
+                UnitResult = new RealTimeUnitResultPayload
+                {
+                    State = new Networking.Messages.Contracts.NetworkUnitDescriptor
+                    {
+                        Vitals = new Networking.Messages.Contracts.NetworkUnitVitals { Damage = 20 }
+                    }
+                }
+            };
+            receive(sender, frame);
+            receive(sender, frame);
+            var apply = A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
+                A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._));
+            if (RealTimePresentationRuntime.Enabled && expected) apply.MustHaveHappenedOnceExactly();
+            else apply.MustNotHaveHappened();
             A.CallTo(() => _combatInteractionService.TryExecuteRealTimeCombatCommandAsync(
                 A<RealTimeCommandKind>._, A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._,
                 A<NetworkAbilityUse>._, A<Func<bool>>._)).MustNotHaveHappened();

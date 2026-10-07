@@ -401,6 +401,35 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         }
 
         [Test]
+        public void UnitResult_RoundTripsVitalCachesAndResourceAmounts()
+        {
+            var frame = Serializer.DeepClone(new NotifyRealTimeAuthoritativeEvent
+            {
+                Epoch = 8, Sequence = 9, SessionId = "session", UnitId = "unit",
+                Kind = (int)RealTimeAuthoritativeEventKind.UnitResult,
+                UnitResult = new RealTimeUnitResultPayload
+                {
+                    Reason = "damage", CauseActionId = "attack:1",
+                    State = new NetworkUnitDescriptor
+                    {
+                        Damage = 42, ResourcesCaptured = true, SpellbooksCaptured = true,
+                        Vitals = new NetworkUnitVitals
+                        {
+                            Damage = 42, LifeState = 2, IsFinallyDead = true,
+                            HitPoints = new NetworkStatValues { BaseValue = 30, ModifiedValue = 35, ModifiedValueRaw = 35, PermanentValue = 30 },
+                            GroupCounterCaptured = true, GroupCombatCounter = 2
+                        },
+                        Resources = [new NetworkAbilityResource { BlueprintId = "resource", Amount = 3, RetainCount = 1 }]
+                    }
+                }
+            });
+            Assert.That(frame.UnitResult.State.Vitals.HitPoints.ModifiedValue, Is.EqualTo(35));
+            Assert.That(frame.UnitResult.State.Vitals.GroupCombatCounter, Is.EqualTo(2));
+            Assert.That(frame.UnitResult.State.Resources[0].Amount, Is.EqualTo(3));
+            Assert.That(frame.UnitResult.CauseActionId, Is.EqualTo("attack:1"));
+        }
+
+        [Test]
         public void ModeTransitionAck_RoundTripsFailureAndHash()
         {
             var copy = Serializer.DeepClone(new ClientRealTimeModeTransitionAck

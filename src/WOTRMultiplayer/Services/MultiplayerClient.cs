@@ -1431,6 +1431,7 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyRealTimeUnitKilled(long receivedFrom, NotifyRealTimeUnitKilled message)
         {
+            if (RealTimePresentationRuntime.Enabled) return;
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null
                 || message.Sequence <= 0 || string.IsNullOrEmpty(message.UnitId))
                 return;

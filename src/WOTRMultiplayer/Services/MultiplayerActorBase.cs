@@ -4711,6 +4711,9 @@ namespace WOTRMultiplayer.Services
         {
             if (Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause)
             {
+                // Presentation clients consume sequenced absolute UnitResult
+                // events/checkpoints, never the old callback-driven kill lane.
+                if (RealTimePresentationRuntime.Enabled) return;
                 // The turn-based notification below has no turn to attach to in RTwP.
                 // Only the host publishes irreversible death; a client's local rule
                 // simulation may disagree and must not kill a host-owned unit.

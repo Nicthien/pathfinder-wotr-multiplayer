@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.Remoting.Messaging;
@@ -8,6 +9,11 @@ using HarmonyLib;
 using Kingmaker.RuleSystem;
 using WOTRMultiplayer.HarmonyPatches.Combat;
 using WOTRMultiplayer.Abstractions;
+using Kingmaker.UnitLogic;
+using Kingmaker.EntitySystem.Stats;
+using Kingmaker.Enums;
+using WOTRMultiplayer.Services.GameInteraction;
+using WOTRMultiplayer.Entities.Units;
 
 // Offline diagnostic. No game process, Game.Instance, Unity initialization,
 // saves, installation writes or real gameplay units/results are involved.
@@ -25,6 +31,9 @@ internal static class Program
             var call = (IMethodCallMessage)message;
             if (call.MethodName == "get_IsRealTimeClientCombatActive")
                 return new ReturnMessage(_suppress, null, 0, call.LogicalCallContext, call);
+            // This fixture must never enter host publishing or Game.Instance.
+            if (call.MethodName == "get_IsRealTimeCombatActive")
+                return new ReturnMessage(false, null, 0, call.LogicalCallContext, call);
             if (call.MethodName == "ReportRealTimeAIActionFault")
             {
                 _reports++;
@@ -100,9 +109,72 @@ internal static class Program
             Console.WriteLine("Rejected inlineable-property approach: " + !unsafeGatePassed);
             success &= ProbeDelegate();
             success &= ProbeRulebook();
+            success &= ProbeVitals();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;
+    }
+
+    private static int _statCallbacks;
+    private static void StatChanged(ModifiableValue stat, int previous) { _statCallbacks++; }
+
+    private static bool ProbeVitals()
+    {
+        var harmony = new Harmony("WOTRMultiplayer.OfflineProbe.installed-vitals");
+        var multiplayer = typeof(WOTRMultiplayer.Main).GetField("<Multiplayer>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        var previous = multiplayer.GetValue(null);
+        try
+        {
+            multiplayer.SetValue(null, new MultiplayerStub().GetTransparentProxy());
+            _suppress = true; _reports = 0; _statCallbacks = 0;
+            var patched = harmony.CreateClassProcessor(typeof(RealTimeUnitResultPatches)).Patch();
+            if (patched == null || patched.Count == 0) throw new InvalidOperationException("Vitals guard was not installed.");
+            var descriptor = (UnitDescriptor)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(UnitDescriptor));
+            var statsField = typeof(UnitDescriptor).GetField("Stats");
+            var stats = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(statsField.FieldType);
+            foreach (var name in new[] { "HitPoints", "TemporaryHitPoints", "DamageNonLethal" })
+            {
+                var field = stats.GetType().GetField(name);
+                field.SetValue(stats, System.Runtime.Serialization.FormatterServices.GetUninitializedObject(field.FieldType));
+            }
+            statsField.SetValue(descriptor, stats);
+            typeof(UnitDescriptor).GetField("State").SetValue(descriptor,
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(UnitState)));
+            var stat = descriptor.Stats.DamageNonLethal;
+            typeof(ModifiableValue).GetField("Type").SetValue(stat, StatType.DamageNonLethal);
+            var changed = typeof(ModifiableValue).GetField("OnChanged", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            changed.SetValue(stat, Delegate.CreateDelegate(changed.FieldType,
+                typeof(Program).GetMethod(nameof(StatChanged), BindingFlags.Static | BindingFlags.NonPublic)));
+            // Invoke actual installed setters, not the prefixes directly.
+            var damageSetter = typeof(UnitDescriptor).GetProperty("Damage").GetSetMethod();
+            damageSetter.Invoke(descriptor, new object[] { 99 });
+            typeof(ModifiableValue).GetProperty("BaseValue").GetSetMethod().Invoke(stat, new object[] { 12 });
+            var blocked = descriptor.Damage == 0 && stat.BaseValue == 0 && _reports == 2 && _statCallbacks == 0;
+            var values = new NetworkUnitVitals
+            {
+                Damage = 40, LifeState = 2, IsFinallyDead = true,
+                HitPoints = new NetworkStatValues { BaseValue = 30, ModifiedValue = 30, ModifiedValueRaw = 30, PermanentValue = 30 },
+                TemporaryHitPoints = new NetworkStatValues(),
+                NonLethal = new NetworkStatValues { BaseValue = 2, ModifiedValue = 2, ModifiedValueRaw = 2, PermanentValue = 2 }
+            };
+            RealTimeUnitResultReplication.ApplyValues(descriptor, values);
+            var applied = descriptor.Damage == 40 && descriptor.State.IsDead && descriptor.State.IsFinallyDead
+                && stat.BaseValue == 2 && stat.ModifiedValue == 2 && _reports == 2 && _statCallbacks == 0;
+            _suppress = false;
+            damageSetter.Invoke(descriptor, new object[] { 3 });
+            var hostPreserved = descriptor.Damage == 3 && _reports == 2;
+            Console.WriteLine("installed-vitals: patched-targets=" + patched.Count + "; blocked-client-setters=" + blocked
+                + "; applied-confirmed-death=" + applied + "; stat-callbacks=" + _statCallbacks + "; host-setter=" + hostPreserved);
+            return blocked && applied && hostPreserved;
+        }
+        catch (Exception failure) { Console.WriteLine("installed-vitals: FAILED: " + failure); return false; }
+        finally
+        {
+            multiplayer.SetValue(null, previous);
+            foreach (var method in Harmony.GetAllPatchedMethods().ToArray())
+                if (Harmony.GetPatchInfo(method)?.Owners.Contains(harmony.Id) == true)
+                    harmony.Unpatch(method, HarmonyPatchType.All, harmony.Id);
+        }
     }
 
     private static void InvokeHostCallback<T>(T rule) where T : RulebookEvent
