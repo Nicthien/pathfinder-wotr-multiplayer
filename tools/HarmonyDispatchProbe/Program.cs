@@ -112,12 +112,40 @@ internal static class Program
             success &= ProbeVitals();
             success &= ProbeAreas();
             success &= ProbeBuffReplica();
+            success &= ProbeNativeCheckpoint();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;
     }
 
     private static int _statCallbacks;
+
+    private static bool ProbeNativeCheckpoint()
+    {
+        try
+        {
+            using var source = new RealTimeMemorySaver();
+            source.SaveJson("header", "{\"GameId\":\"offline-native-checkpoint\"}");
+            source.SaveJson("player", "{\"synthetic\":true}"); source.SaveJson("party", "{}"); source.Seal();
+            var bytes = RealTimeNativeCheckpointCodec.Encode(source);
+            using var restored = RealTimeNativeCheckpointCodec.Decode(bytes, RealTimeNativeCheckpointCodec.Hash(bytes));
+            var info = RealTimeNativeCheckpointLoadSource.Prepare(restored, "offline-native-checkpoint",
+                "11111111111111111111111111111111");
+            source.Dispose(); restored.Dispose();
+            bool safe;
+            using (info.Saver)
+            {
+                safe = info.GameId == "offline-native-checkpoint" && info.IsActuallySaved
+                    && info.Saver.ReadJson("player") == "{\"synthetic\":true}";
+                using var clone = info.Saver.Clone();
+                safe &= clone.ReadHeader().Contains("offline-native-checkpoint");
+                try { clone.Save(); safe = false; } catch (InvalidOperationException) { }
+            }
+            Console.WriteLine("native-memory-checkpoint: actual-header-decoder=" + safe + "; game-load-not-invoked=True");
+            return safe;
+        }
+        catch (Exception failure) { Console.WriteLine("native-memory-checkpoint: FAILED: " + failure); return false; }
+    }
 
     private sealed class ContextMapperStub : RealProxy
     {
