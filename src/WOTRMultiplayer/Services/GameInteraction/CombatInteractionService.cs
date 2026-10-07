@@ -1731,6 +1731,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 Spellbooks = captureResources ? RealTimeSpellbookReplication.Capture(combatUnit) : [],
                 Damage = combatUnit.Descriptor.Damage,
                 Vitals = captureResources && RealTimePresentationRuntime.Enabled ? RealTimeUnitResultReplication.CaptureVitals(combatUnit) : null,
+                CalculatedStats = captureResources && RealTimePresentationRuntime.Enabled
+                    ? RealTimeCalculatedStatReplication.Capture(combatUnit.Stats.AllStats) : null,
                 Stats = new NetworkCharacterStats
                 {
                     DamageNonLethal = combatUnit.Descriptor.Stats.DamageNonLethal.BaseValue,
@@ -1914,6 +1916,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (RealTimePresentationRuntime.Enabled && networkUnit.Descriptor.Vitals != null)
             {
                 RealTimeUnitResultReplication.ApplyVitals(unit, networkUnit.Descriptor.Vitals);
+                RealTimeCalculatedStatReplication.Apply(unit.Stats.AllStats, networkUnit.Descriptor.CalculatedStats);
                 return;
             }
             unit.Damage = networkUnit.Descriptor.Damage;

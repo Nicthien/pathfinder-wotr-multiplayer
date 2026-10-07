@@ -35,7 +35,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             NonLethal = CaptureStat(descriptor.Stats.DamageNonLethal)
         };
 
-        private static NetworkStatValues CaptureStat(ModifiableValue stat) => new()
+        internal static NetworkStatValues CaptureStat(ModifiableValue stat) => new()
         {
             BaseValue = stat.BaseValue, ModifiedValue = stat.ModifiedValue,
             ModifiedValueRaw = stat.ModifiedValueRaw, PermanentValue = stat.PermanentValue
@@ -45,6 +45,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             Damage = unit.Descriptor.Damage,
             Vitals = CaptureVitals(unit),
+            CalculatedStats = RealTimeCalculatedStatReplication.Capture(unit.Stats.AllStats),
             Stats = new NetworkCharacterStats { DamageNonLethal = unit.Stats.DamageNonLethal.BaseValue },
             State = new NetworkUnitState { IsFinallyDead = unit.State.IsFinallyDead },
             ResourcesCaptured = true,
@@ -68,7 +69,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             descriptor.State.IsFinallyDead = state.IsFinallyDead;
         }
 
-        private static void ApplyStat(ModifiableValue stat, NetworkStatValues state)
+        internal static void ApplyStat(ModifiableValue stat, NetworkStatValues state)
         {
             stat.m_BaseValue = state.BaseValue;
             stat.ModifiedValueRaw = state.ModifiedValueRaw;
@@ -94,6 +95,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public static void ApplyValidated(UnitEntityData unit, NetworkUnitDescriptor state)
         {
             ApplyVitals(unit, state.Vitals);
+            RealTimeCalculatedStatReplication.Apply(unit.Stats.AllStats, state.CalculatedStats);
             var resources = unit.Descriptor.Resources.PersistantResources.ToDictionary(
                 resource => resource.Blueprint.AssetGuid.ToString(), StringComparer.OrdinalIgnoreCase);
             foreach (var resource in state.Resources) resources[resource.BlueprintId].Amount = resource.Amount;

@@ -473,6 +473,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                     State = new NetworkUnitDescriptor
                     {
                         Damage = 42, ResourcesCaptured = true, SpellbooksCaptured = true,
+                        CalculatedStats = [new NetworkCalculatedStat { Type = 7,
+                            Values = new NetworkStatValues { BaseValue = 10, ModifiedValue = -2, ModifiedValueRaw = -2, PermanentValue = 8 } }],
                         Vitals = new NetworkUnitVitals
                         {
                             Damage = 42, LifeState = 2, IsFinallyDead = true,
@@ -487,6 +489,7 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(frame.UnitResult.State.Vitals.GroupCombatCounter, Is.EqualTo(2));
             Assert.That(frame.UnitResult.State.Resources[0].Amount, Is.EqualTo(3));
             Assert.That(frame.UnitResult.CauseActionId, Is.EqualTo("attack:1"));
+            Assert.That(frame.UnitResult.State.CalculatedStats[0].Values.ModifiedValue, Is.EqualTo(-2));
         }
 
         [Test]

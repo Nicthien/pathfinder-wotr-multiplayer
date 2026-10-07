@@ -286,6 +286,7 @@ namespace WOTRMultiplayer.Config.Mapping
                 .ReverseMap();
             CreateMap<NetworkUnitVitals, Networking.Messages.Contracts.NetworkUnitVitals>().ReverseMap();
             CreateMap<NetworkStatValues, Networking.Messages.Contracts.NetworkStatValues>().ReverseMap();
+            CreateMap<NetworkCalculatedStat, Networking.Messages.Contracts.NetworkCalculatedStat>().ReverseMap();
 
             CreateMap<NetworkAbilityResource, Networking.Messages.Contracts.NetworkAbilityResource>()
                 .ReverseMap();

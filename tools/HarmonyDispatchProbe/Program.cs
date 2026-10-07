@@ -280,6 +280,23 @@ internal static class Program
             _suppress = false;
             damageSetter.Invoke(descriptor, new object[] { 3 });
             var hostPreserved = descriptor.Damage == 3 && _reports == 2;
+            var additional = new ModifiableValue(null, StatType.AdditionalAttackBonus);
+            changed.SetValue(additional, Delegate.CreateDelegate(changed.FieldType,
+                typeof(Program).GetMethod(nameof(StatChanged), BindingFlags.Static | BindingFlags.NonPublic)));
+            _suppress = true;
+            var reportsBeforeStats = _reports;
+            typeof(ModifiableValue).GetProperty("BaseValue").GetSetMethod().Invoke(additional, new object[] { 99 });
+            var nonVitalBlocked = additional.BaseValue == 0 && _reports == reportsBeforeStats + 1;
+            RealTimeCalculatedStatReplication.Apply(new[] { additional }, new[]
+            {
+                new NetworkCalculatedStat { Type = (int)StatType.AdditionalAttackBonus,
+                    Values = new NetworkStatValues { BaseValue = 10, ModifiedValue = -3, ModifiedValueRaw = -3, PermanentValue = 8 } }
+            });
+            var calculated = RealTimeCalculatedStatReplication.Capture(new[] { additional });
+            var calculatedApplied = calculated[0].Values.ModifiedValue == -3 && additional.BaseValue == 10 && _statCallbacks == 0;
+            _suppress = false;
+            Console.WriteLine("installed-calculated-stats: client-setter-blocked=" + nonVitalBlocked
+                + "; applied-without-recalculation=" + calculatedApplied);
             var player = (Kingmaker.Player)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Kingmaker.Player));
             typeof(Kingmaker.Player).GetProperty("IsInCombat").GetSetMethod(true).Invoke(player, new object[] { true });
             RealTimeUnitResultReplication.ApplyPartyCombatEnd(player);
@@ -297,7 +314,7 @@ internal static class Program
             Console.WriteLine("installed-vitals: patched-targets=" + patched.Count + "; blocked-client-setters=" + blocked
                 + "; applied-confirmed-death=" + applied + "; stat-callbacks=" + _statCallbacks + "; host-setter=" + hostPreserved
                 + "; party-combat-cleared=" + partyEnded);
-            return blocked && applied && hostPreserved && partyEnded && buffApplied;
+            return blocked && applied && hostPreserved && partyEnded && buffApplied && nonVitalBlocked && calculatedApplied;
         }
         catch (Exception failure) { Console.WriteLine("installed-vitals: FAILED: " + failure); return false; }
         finally

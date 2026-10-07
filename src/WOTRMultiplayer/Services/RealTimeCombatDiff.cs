@@ -152,6 +152,11 @@ namespace WOTRMultiplayer.Services
             if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor { Vitals = expected.Descriptor?.Vitals } }] },
                 new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor { Vitals = actual.Descriptor?.Vitals } }] }))
                 causes.Add("vitals");
+            if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
+                    { CalculatedStats = expected.Descriptor?.CalculatedStats } }] },
+                new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
+                    { CalculatedStats = actual.Descriptor?.CalculatedStats } }] }))
+                causes.Add("calculated-stats");
             if ((expected.Descriptor?.ResourcesCaptured ?? false) != (actual.Descriptor?.ResourcesCaptured ?? false)
                 || expected.Descriptor?.ResourcesCaptured == true
                     && !(expected.Descriptor.Resources ?? []).OrderBy(resource => resource?.BlueprintId, StringComparer.Ordinal)

@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(14); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(15); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -51,6 +51,19 @@ namespace WOTRMultiplayer.Services
                         WriteStat(writer, vitals.HitPoints); WriteStat(writer, vitals.TemporaryHitPoints); WriteStat(writer, vitals.NonLethal);
                     }
                     writer.Write(unit?.Descriptor?.ResourcesCaptured ?? false);
+                    var calculatedStats = unit?.Descriptor?.CalculatedStats;
+                    var calculatedError = RealTimeCalculatedStatState.ValidateValues(calculatedStats);
+                    if (calculatedError != null) throw new InvalidOperationException(calculatedError);
+                    writer.Write(calculatedStats != null);
+                    if (calculatedStats != null)
+                    {
+                        writer.Write(calculatedStats.Count);
+                        foreach (var stat in calculatedStats.OrderBy(stat => stat.Type))
+                        {
+                            writer.Write(stat.Type);
+                            WriteStat(writer, stat.Values);
+                        }
+                    }
                     if (unit?.Descriptor?.ResourcesCaptured == true)
                     {
                         var resources = (unit.Descriptor.Resources ?? [])

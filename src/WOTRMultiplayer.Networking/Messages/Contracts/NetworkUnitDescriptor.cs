@@ -29,5 +29,7 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         public bool SpellbooksCaptured { get; set; }
 
         [ProtoMember(8)] public NetworkUnitVitals Vitals { get; set; }
+
+        [ProtoMember(9)] public System.Collections.Generic.List<NetworkCalculatedStat> CalculatedStats { get; set; }
     }
 }

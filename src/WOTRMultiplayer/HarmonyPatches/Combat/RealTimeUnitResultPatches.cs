@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         private static bool RejectClient(UnitEntityData unit, string reason)
         {
             if (!RealTimePresentationRuntime.IsClientActive) return true;
-            Main.Multiplayer.ReportRealTimeAIActionFault(unit?.UniqueId, null, "autonomous-client-vitals:" + reason);
+            Main.Multiplayer.ReportRealTimeAIActionFault(unit?.UniqueId, null, "autonomous-client-unit-state:" + reason);
             return false;
         }
 
@@ -40,14 +40,14 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPatch(typeof(ModifiableValue), "UpdateValue")]
         [HarmonyPrefix]
-        public static bool ModifiableValue_UpdateValue_Prefix(ModifiableValue __instance) => !IsVitalStat(__instance)
+        public static bool ModifiableValue_UpdateValue_Prefix(ModifiableValue __instance) => __instance == null
             || RejectClient(__instance.Owner?.Unit, "stat:" + __instance.Type);
 
         [HarmonyPatch(typeof(ModifiableValue), "UpdateValue")]
         [HarmonyPostfix]
         public static void ModifiableValue_UpdateValue_Postfix(ModifiableValue __instance)
         {
-            if (IsVitalStat(__instance)) RealTimeUnitResultCapture.Publish(__instance.Owner?.Unit, "stat:" + __instance.Type);
+            if (__instance != null) RealTimeUnitResultCapture.Publish(__instance.Owner?.Unit, "stat:" + __instance.Type);
         }
 
         [HarmonyPatch(typeof(UnitLifeController), nameof(UnitLifeController.ForceTickOnUnit))]

@@ -6,6 +6,8 @@
 
         public NetworkUnitVitals Vitals { get; set; }
 
+        public System.Collections.Generic.List<NetworkCalculatedStat> CalculatedStats { get; set; }
+
         public NetworkCharacterStats Stats { get; set; }
 
         public NetworkUnitState State { get; set; }

@@ -21,6 +21,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (!RealTimePresentationRuntime.Enabled || unit == null
                 || Main.Multiplayer?.IsRealTimeCombatActive != true || Main.Multiplayer.IsRealTimeClientCombatActive
                 || Main.Multiplayer.IsRealTimeCombatBarrierActive) return;
+            // CharacterStats construction sets AC before the unit's complete
+            // stat collection exists. Do not sample a partially created unit;
+            // its initialized state is captured by subsequent events/checkpoints.
+            if (unit.Descriptor?.Stats?.AllStats == null || unit.Descriptor.Stats.AllStats.Count == 0) return;
             try
             {
                 var encounter = Main.Multiplayer.RealTimeCombatIdentity;

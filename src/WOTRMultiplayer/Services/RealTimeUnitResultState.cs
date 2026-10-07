@@ -23,7 +23,9 @@ namespace WOTRMultiplayer.Services
             if (!expected.ResourcesCaptured || !expected.SpellbooksCaptured
                 || !actual.ResourcesCaptured || !actual.SpellbooksCaptured)
                 return "incomplete-unit-result";
-            return RealTimeResourceState.Validate(expected.Resources, actual.Resources)
+            return RealTimeCalculatedStatState.ValidateVitals(expected.CalculatedStats, expected.Vitals)
+                ?? RealTimeCalculatedStatState.Validate(expected.CalculatedStats, actual.CalculatedStats)
+                ?? RealTimeResourceState.Validate(expected.Resources, actual.Resources)
                 ?? RealTimeSpellbookState.Validate(expected.Spellbooks, actual.Spellbooks);
         }
     }
