@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
 using WOTRMultiplayer.Services;
 
@@ -7,6 +8,73 @@ namespace WOTRMultiplayer.UnitTests.Services
     public class RealTimeEncounterParticipantsTests
     {
         private sealed class Unit { public bool InCombat = true; public bool Dead; }
+
+        [Test]
+        public void NativeCheckpointRebindsDeadAndWithdrawnUnitsWithoutRetainingOldObjects()
+        {
+            var participants = RealTimeEncounterParticipants<Unit>.For(new object());
+            var old = new Unit(); participants.Remember("dead", old);
+            var dead = new Unit { InCombat = false, Dead = true };
+            var withdrawn = new Unit { InCombat = false };
+            using (var binding = participants.RebindCheckpoint(new[] { "dead", "withdrawn" },
+                id => id == "dead" ? dead : withdrawn, () => true)) binding.Commit();
+            Assert.That(participants.Snapshot()["dead"], Is.SameAs(dead));
+            Assert.That(participants.Snapshot()["withdrawn"], Is.SameAs(withdrawn));
+            participants.Remember("dead", dead);
+            Assert.Throws<InvalidOperationException>(() => participants.Remember("dead", old));
+        }
+
+        [Test]
+        public void UncommittedRebindRollsBackWholeRegistry()
+        {
+            var participants = RealTimeEncounterParticipants<Unit>.For(new object());
+            var old = new Unit(); participants.Remember("old", old);
+            using (participants.RebindCheckpoint(new[] { "new" }, _ => new Unit(), () => true))
+                Assert.That(participants.Snapshot().ContainsKey("old"), Is.False);
+            Assert.That(participants.Snapshot()["old"], Is.SameAs(old));
+            Assert.That(participants.Snapshot().Count, Is.EqualTo(1));
+        }
+
+        [TestCase("duplicate")]
+        [TestCase("duplicate-case")]
+        [TestCase("blank")]
+        [TestCase("missing")]
+        [TestCase("revoked")]
+        [TestCase("limit")]
+        public void InvalidNativeRegistryCannotPublishPartialReplacement(string problem)
+        {
+            var participants = RealTimeEncounterParticipants<Unit>.For(new object());
+            var old = new Unit(); participants.Remember("old", old);
+            var ids = problem == "limit" ? System.Linq.Enumerable.Range(0, 4097).Select(index => index.ToString())
+                : problem == "duplicate" ? new[] { "new", "new" } : problem == "duplicate-case" ? new[] { "new", "NEW" }
+                : problem == "blank" ? new[] { "new", " " } : new[] { "new" };
+            Assert.Throws<InvalidOperationException>(() => participants.RebindCheckpoint(ids,
+                _ => problem == "missing" ? null : new Unit(), () => problem != "revoked"));
+            Assert.That(participants.Snapshot()["old"], Is.SameAs(old));
+            Assert.That(participants.Snapshot().Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ConcurrentParticipantCannotBeLostWhileResolvingNativeRegistry()
+        {
+            var participants = RealTimeEncounterParticipants<Unit>.For(new object());
+            var extra = new Unit();
+            Assert.Throws<InvalidOperationException>(() => participants.RebindCheckpoint(new[] { "new" }, _ =>
+            { participants.Remember("concurrent", extra); return new Unit(); }, () => true));
+            Assert.That(participants.Snapshot()["concurrent"], Is.SameAs(extra));
+            Assert.That(participants.Snapshot().ContainsKey("new"), Is.False);
+        }
+
+        [Test]
+        public void RollbackConflictCannotOverwriteNewerRegistryOwner()
+        {
+            var participants = RealTimeEncounterParticipants<Unit>.For(new object());
+            var binding = participants.RebindCheckpoint(new[] { "new" }, _ => new Unit(), () => true);
+            var extra = new Unit(); participants.Remember("concurrent", extra);
+            Assert.Throws<InvalidOperationException>(() => binding.Dispose());
+            Assert.That(participants.Snapshot()["concurrent"], Is.SameAs(extra));
+            binding.Dispose();
+        }
 
         [Test]
         public void DeathAndWithdrawalRemainInReferenceAfterLeavingLiveCombatList()

@@ -18,6 +18,62 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class CombatInteractionServiceTests
     {
+        [TestCase(false)]
+        [TestCase(true)]
+        public void NativeReferenceRevocationOrForeignReceiptNeverAccessesWorld(bool authorized)
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => action());
+            var lookup = A.Fake<IGameStateLookupService>();
+            var service = new CombatInteractionService(A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(), mainThread, A.Fake<IMapper>());
+            var task = service.TryRestoreNativeReferenceStateAsync(new object(), new object(), new NetworkCombatState(), () => authorized);
+            if (authorized) Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+            else Assert.That(task.Result, Is.Null);
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void NativeReferenceCannotReplaceMissingMechanicalAreaWithPresentationReplica()
+        {
+            var lookup = A.Fake<IGameStateLookupService>();
+            A.CallTo(() => lookup.GetAreaEffect(A<NetworkAreaEffect>._)).Returns(null);
+            var buffs = A.Fake<IBuffInteractionService>();
+            var service = new CombatInteractionService(A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), buffs, A.Fake<IMainThreadAccessor>(), A.Fake<IMapper>());
+            var reference = new NetworkCombatState
+            { AreaEffects = new System.Collections.Generic.List<NetworkAreaEffect> { new() { Id = "missing-native-area" } } };
+            var apply = typeof(CombatInteractionService).GetMethod("ApplyRealTimeCombatState",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            using var transaction = new RealTimeBuffRestoreTransaction();
+            var error = Assert.Throws<System.Reflection.TargetInvocationException>(() =>
+                apply.Invoke(service, new object[] { reference, transaction, true }));
+            Assert.That(error.InnerException, Is.TypeOf<InvalidOperationException>());
+            Assert.That(error.InnerException.Message, Does.Contain("missing-area:missing-native-area"));
+            A.CallTo(() => buffs.StageMissingUnitBuffsPresentation(A<Kingmaker.EntitySystem.Entities.UnitEntityData>._,
+                A<NetworkUnitBuffCollection>._, A<RealTimeBuffRestoreTransaction>._)).MustNotHaveHappened();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ConfirmedKineticistValueDoesNotNotifyMechanicsOnPresentationClient(bool presentationOnly)
+        {
+            var part = (Kingmaker.UnitLogic.Class.Kineticist.UnitPartKineticist)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Kingmaker.UnitLogic.Class.Kineticist.UnitPartKineticist));
+            var holder = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.UnitLogic.Class.Kineticist.UnitPartKineticistBurnHolder));
+            typeof(Kingmaker.UnitLogic.Class.Kineticist.UnitPartKineticist).GetField("m_BurnHolderCache",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(part, holder);
+            CombatInteractionService.ApplyConfirmedKineticistBurn(part, 1, true, _ => Assert.Fail("Unexpected native notification"));
+            var calls = 0;
+            Assert.That(CombatInteractionService.ApplyConfirmedKineticistBurn(part, 4, presentationOnly, previous =>
+            { Assert.That(previous, Is.EqualTo(1)); calls++; }), Is.True);
+            Assert.That(part.AcceptedBurn, Is.EqualTo(4));
+            Assert.That(calls, Is.EqualTo(presentationOnly ? 0 : 1));
+            Assert.That(CombatInteractionService.ApplyConfirmedKineticistBurn(part, 4, presentationOnly, _ => calls++), Is.False);
+            Assert.That(calls, Is.EqualTo(presentationOnly ? 0 : 1));
+        }
+
         [Test]
         public void StaleFinalizationNeverTouchesTheWorldOrRunsCleanup()
         {

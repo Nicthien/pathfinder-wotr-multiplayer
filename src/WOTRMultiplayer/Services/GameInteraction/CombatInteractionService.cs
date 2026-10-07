@@ -48,7 +48,7 @@ using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.Services.GameInteraction
 {
-    public class CombatInteractionService : ICombatInteractionService
+    public partial class CombatInteractionService : ICombatInteractionService
     {
         private readonly ILogger<CombatInteractionService> _logger;
         private readonly IGameStateLookupService _gameStateLookupService;
@@ -629,7 +629,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
-        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState, RealTimeBuffRestoreTransaction restoration)
+        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState, RealTimeBuffRestoreTransaction restoration,
+            bool requireNativeEntities = false)
         {
             var projectileStates = networkCombatState.ProjectilesCaptured
                 ? RealTimeProjectileReplica.ValidateAndCopy(networkCombatState.Projectiles) : null;
@@ -645,12 +646,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName,
                 getLocalBuffs: id => _buffInteractionService.GetUnitBuffs(
                     _gameStateLookupService.GetUnitEntity(id)).Buffs,
-                canRecreateBuff: buff => RealTimePresentationRuntime.Enabled
+                canRecreateBuff: buff => !requireNativeEntities && (RealTimePresentationRuntime.Enabled
                     ? buff?.ContextChain != null && RealTimeBuffContextChain.Validate(buff.ContextChain) == null
-                    : _buffInteractionService.CanRecreateBuff(buff),
+                    : _buffInteractionService.CanRecreateBuff(buff)),
                 getLocalArea: area => _mapper.Map<NetworkAreaEffect>(
                     _gameStateLookupService.GetAreaEffect(area)),
-                canRecreateArea: RealTimePresentationRuntime.Enabled ? _ => true : null);
+                canRecreateArea: !requireNativeEntities && RealTimePresentationRuntime.Enabled ? _ => true : null);
             if (missing != null)
                 throw new InvalidOperationException(missing);
 
@@ -662,14 +663,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 area => _gameStateLookupService.GetAreaEffect(area) != null,
                 localCombatUnitIds: localCombatState.Units.Select(unit => unit.Id),
                 localAreaIds: localCombatState.AreaEffects.Select(area => area.Id),
-                canRecreateArea: RealTimePresentationRuntime.Enabled ? _ => true : null,
-                canRemoveArea: RealTimePresentationRuntime.Enabled
+                canRecreateArea: !requireNativeEntities && RealTimePresentationRuntime.Enabled ? _ => true : null,
+                canRemoveArea: !requireNativeEntities && RealTimePresentationRuntime.Enabled
                     ? id => CanRemovePresentationArea(_gameStateLookupService.GetAreaEffect(
                         new NetworkAreaEffect { Id = id })) : null);
             if (extra != null)
                 throw new InvalidOperationException(extra);
 
-            if (RealTimePresentationRuntime.Enabled)
+            if (RealTimePresentationRuntime.Enabled && !requireNativeEntities)
                 StageAreaPresentation(networkCombatState.AreaEffects, restoration);
 
             if (RealTimePresentationRuntime.Enabled)
@@ -679,7 +680,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (areaError != null) throw new InvalidOperationException($"area:{area.Id}:{areaError}");
                 }
 
-            if (RealTimePresentationRuntime.Enabled)
+            if (RealTimePresentationRuntime.Enabled && !requireNativeEntities)
                 foreach (var networkUnit in networkCombatState.Units)
                     _buffInteractionService.StageMissingUnitBuffsPresentation(
                         _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection, restoration);
@@ -2039,15 +2040,27 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 return;
             }
 
-            if (unitPart.AcceptedBurn != networkUnit.UnitPartKineticist.AcceptedBurn)
+            if (ApplyConfirmedKineticistBurn(unitPart, networkUnit.UnitPartKineticist.AcceptedBurn,
+                RealTimePresentationRuntime.IsClientActive, previousValue =>
             {
-                var previousValue = unitPart.AcceptedBurn;
-                unitPart.AcceptedBurn = networkUnit.UnitPartKineticist.AcceptedBurn;
-
                 EventBus.RaiseEvent<IKineticistBurnValueHandler>(unit, x => x.HandleKineticistBurnValueChanged(unitPart, previousValue, null));
                 EventBus.RaiseEvent<IKineticistGlobalHandler>(x => x.HandleKineticistBurnValueChanged(unitPart, previousValue, null));
+            }))
+            {
                 _logger.LogInformation("UnitPartKineticist burn has been updated. UnitId={UnitId}, AcceptedBurn={AcceptedBurn}", unit.UniqueId, unitPart.AcceptedBurn);
             }
+        }
+
+        internal static bool ApplyConfirmedKineticistBurn(UnitPartKineticist part, int value,
+            bool presentationOnly, Action<int> notifyMechanics)
+        {
+            if (part?.m_BurnHolderCache == null)
+                throw new InvalidOperationException("missing-native-kineticist-burn-holder");
+            var previous = part.AcceptedBurn;
+            if (previous == value) return false;
+            part.AcceptedBurn = value;
+            if (!presentationOnly) notifyMechanics(previous);
+            return true;
         }
 
         private void UpdateUnitState(UnitEntityData unit, NetworkUnitState state)

@@ -11,6 +11,17 @@ namespace WOTRMultiplayer.UnitTests.Services
     public class RealTimeCombatHasherTests
     {
         [Test]
+        public void KineticistBurnAndMissingPartAreNotEquivalentReferenceStates()
+        {
+            var missing = Sample();
+            var zero = Sample();
+            zero.Combat.Units[0].UnitPartKineticist = new WOTRMultiplayer.Entities.Units.Parts.NetworkUnitPartKineticist { AcceptedBurn = 0 };
+            var spent = Sample();
+            spent.Combat.Units[0].UnitPartKineticist = new WOTRMultiplayer.Entities.Units.Parts.NetworkUnitPartKineticist { AcceptedBurn = 4 };
+            Assert.That(RealTimeCombatHasher.Compute(missing), Is.Not.EqualTo(RealTimeCombatHasher.Compute(zero)));
+            Assert.That(RealTimeCombatHasher.Compute(zero), Is.Not.EqualTo(RealTimeCombatHasher.Compute(spent)));
+        }
+        [Test]
         public void OrderOfUnitsBuffsAndAreas_DoesNotAffectHash()
         {
             var first = Sample();

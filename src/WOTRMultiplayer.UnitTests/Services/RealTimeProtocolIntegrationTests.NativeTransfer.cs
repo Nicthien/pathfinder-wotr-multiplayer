@@ -327,5 +327,56 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => NativeInteraction(host).SetPauseAsync(false)).MustNotHaveHappened();
             host.Reset();
         }
+
+        [TestCase("success")]
+        [TestCase("wrong-reference")]
+        [TestCase("unloaded")]
+        [TestCase("revoked")]
+        [TestCase("mismatch")]
+        [TestCase("revoked-during-restore")]
+        public async System.Threading.Tasks.Task NativeReference_RestoresOnlyLoadedManifestAndNeverLiftsGraphObligation(string scenario)
+        {
+            var (_, client, _, network, queued, combat) = CreatePair();
+            var prepare = NativePrepare(client);
+            var reference = new NetworkCombatState();
+            prepare.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
+            NativeHeader(network, prepare);
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
+            var (manifest, bytes) = NativeArchive(prepare); NativeHeader(network, manifest);
+            using var sender = new RealTimeNativeCheckpointSender(42, manifest, bytes);
+            foreach (var chunk in sender.GetDueChunks(DateTime.UtcNow))
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeNativeCheckpointChunk>(network)(NetworkConstants.HostPlayerId, chunk);
+            var world = new object(); var obligation = new object();
+            RealTimeNativeGraphRepair.Add(world, obligation);
+            var operation = new RealTimeNativeLoadOperation(() => true);
+            if (scenario != "unloaded")
+                await operation.RunAsync(() => System.Threading.Tasks.Task.FromResult(new RealTimeNativeWorldLoadResult
+                { World = world, RepairObligation = obligation }));
+            typeof(MultiplayerClient).GetField("_nativeLoadOperation", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(client, operation);
+            var authorized = scenario != "revoked";
+            var actual = scenario == "mismatch" ? new NetworkCombatState
+                { AreaEffects = new List<WOTRMultiplayer.Entities.AreaEffects.NetworkAreaEffect> { new() { Id = "unexpected" } } } : reference;
+            A.CallTo(() => combat.TryRestoreNativeReferenceStateAsync(world, obligation, A<NetworkCombatState>._, A<Func<bool>>._))
+                .ReturnsLazily(() =>
+                {
+                    if (scenario == "revoked-during-restore") authorized = false;
+                    return System.Threading.Tasks.Task.FromResult(actual);
+                });
+            var requested = RealTimeNativeCheckpointLimits.Copy(manifest);
+            if (scenario == "wrong-reference") requested.CanonicalStateHash++;
+            var restoration = client.RestoreLoadedNativeReferenceAsync(requested, reference, () => authorized);
+            if (scenario == "success") Assert.That(await restoration, Is.EqualTo(manifest.CanonicalStateHash));
+            else if (scenario == "revoked-during-restore") Assert.That(await restoration, Is.Null);
+            else Assert.ThrowsAsync<InvalidOperationException>(async () => await restoration);
+            if (scenario == "wrong-reference" || scenario == "unloaded" || scenario == "revoked")
+                A.CallTo(() => combat.TryRestoreNativeReferenceStateAsync(A<object>._, A<object>._,
+                    A<NetworkCombatState>._, A<Func<bool>>._)).MustNotHaveHappened();
+            Assert.That(RealTimeNativeGraphRepair.Contains(world, obligation), Is.True);
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(client.Game.RealTimeCombat.BlocksSaving, Is.True);
+            Assert.That(client.Game.RealTimeCombat.LastAuthoritativeSequence, Is.Zero);
+            A.CallTo(() => NativeInteraction(client).SetPauseAsync(false)).MustNotHaveHappened();
+            RealTimeNativeGraphRepair.Remove(world, obligation);
+        }
     }
 }

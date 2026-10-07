@@ -274,6 +274,7 @@ namespace WOTRMultiplayer.Services
                 _nativeReceiveSession = null; _nativeReceiveCombat = null; _nativeReceiveState = null;
                 _nativeReceivePrepared = false; _nativeReceiveFailed = false;
                 _nativeLoadOperation = null;
+                _nativeReferenceRestorationOwner = null;
             }
         }
     }

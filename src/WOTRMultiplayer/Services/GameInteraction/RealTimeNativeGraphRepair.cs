@@ -16,6 +16,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (RequiresRebuild(world)) throw new InvalidOperationException("native-area-graph-requires-mechanical-reconstruction");
         }
         internal static void Add(object world, object owner) => Pending.GetValue(world, _ => new()).Add(owner);
+        internal static bool Contains(object world, object owner) => world != null && owner != null
+            && Pending.TryGetValue(world, out var obligations) && obligations.Contains(owner);
         internal static void Remove(object world, object owner)
         {
             if (Pending.TryGetValue(world, out var obligations)) obligations.Remove(owner);
