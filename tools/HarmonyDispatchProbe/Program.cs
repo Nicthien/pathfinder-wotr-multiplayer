@@ -136,6 +136,10 @@ internal static class Program
             harmony.CreateClassProcessor(typeof(RealTimeUnitResultPatches)).Patch();
             var loadGuards = harmony.CreateClassProcessor(typeof(WOTRMultiplayer.HarmonyPatches.GameInstance.RealTimeNativeThreadedLoadPatches)).Patch();
             if (loadGuards == null || loadGuards.Count != 1) throw new InvalidOperationException("Native threaded load guard not installed.");
+            var lifecycleGuards = harmony.CreateClassProcessor(typeof(WOTRMultiplayer.HarmonyPatches.GameInstance.RealTimeNativeLifecycleFailurePatches)).Patch();
+            if (lifecycleGuards == null || lifecycleGuards.Count != 10) throw new InvalidOperationException("Native lifecycle catch guards not installed.");
+            harmony.Patch(AccessTools.Method(typeof(Program), nameof(SyntheticLifecycleCallback)),
+                transpiler: new HarmonyMethod(typeof(Program), nameof(SyntheticLifecycleTranspiler)));
             var leaseType = typeof(RealTimeMemorySaver).Assembly.GetType("WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease", true);
             const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
             using var source = new RealTimeMemorySaver();
@@ -165,6 +169,14 @@ internal static class Program
             typeof(UnitDescriptor).GetProperty("Damage").GetSetMethod().Invoke(descriptor, new object[] { 99 });
             safe &= descriptor.Damage == 17 && _reports == reportsBefore + 1;
             using var clone = info.Saver.Clone(); clone.CopyToStash("history"); safe &= writes == 1;
+            _lifecycleLogs = 0;
+            SyntheticLifecycleCallback();
+            safe &= _lifecycleLogs == 1 && (string)leaseType.GetProperty("Fault", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(lease)
+                == "native-lifecycle-callback-failed:synthetic-mono-wrapper:System.InvalidOperationException";
+            leaseType.GetMethod("MarkNativeCallback", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(lease, null);
+            safe &= !(bool)leaseType.GetProperty("NativeCallbackCompleted", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(lease);
+            Console.WriteLine("native-lifecycle-catches: installed-targets=10; synthetic-caught-fault=" + safe
+                + "; original-log-preserved=True; native-callbacks-not-invoked=True");
             lease.Dispose(); lease = null;
             try { clone.CopyToStash("history"); safe = false; } catch (InvalidOperationException) { }
             safe &= !(bool)leaseType.GetProperty("IsActive", flags).GetValue(null);
@@ -175,6 +187,21 @@ internal static class Program
         catch (Exception error) { Console.WriteLine("native-client-load-lease: FAILED: " + error); return false; }
         finally { lease?.Dispose(); harmony.UnpatchAll(harmony.Id); multiplayer.SetValue(null, previous); _suppress = false; }
     }
+
+    private static int _lifecycleLogs;
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void SyntheticLifecycleLog(object logger, Exception error, string message, object[] arguments) => _lifecycleLogs++;
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void SyntheticLifecycleCallback()
+    {
+        try { throw new InvalidOperationException("synthetic-native-callback"); }
+        catch (Exception error) { SyntheticLifecycleLog(null, error, null, Array.Empty<object>()); }
+    }
+    private static System.Collections.Generic.IEnumerable<CodeInstruction> SyntheticLifecycleTranspiler(
+        System.Collections.Generic.IEnumerable<CodeInstruction> instructions, System.Reflection.Emit.ILGenerator generator)
+        => (System.Collections.Generic.IEnumerable<CodeInstruction>)typeof(WOTRMultiplayer.HarmonyPatches.GameInstance.RealTimeNativeLifecycleFailurePatches)
+            .GetMethod("Rewrite", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[]
+            { instructions, generator, "synthetic-mono-wrapper", AccessTools.Method(typeof(Program), nameof(SyntheticLifecycleLog)) });
 
     private static bool ProbeNativeCheckpoint()
     {

@@ -11,14 +11,45 @@ $stream = [IO.File]::OpenRead((Join-Path $GamePath 'Wrath_Data\Managed\Assembly-
 try {
     $pe = [System.Reflection.PortableExecutable.PEReader]::new($stream)
     $metadata = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($pe)
+    function Resolve-TypeName([System.Reflection.Metadata.EntityHandle]$handle) {
+        switch ($handle.Kind.ToString()) {
+            'TypeDefinition' {
+                $definition = $metadata.GetTypeDefinition($handle)
+                $name = $metadata.GetString($definition.Name)
+                $parent = $definition.GetDeclaringType()
+                if (-not $parent.IsNil) { return (Resolve-TypeName $parent) + '+' + $name }
+                $namespace = $metadata.GetString($definition.Namespace)
+                return $(if ($namespace) { $namespace + '.' + $name } else { $name })
+            }
+            'TypeReference' {
+                $reference = $metadata.GetTypeReference($handle)
+                $name = $metadata.GetString($reference.Name)
+                if ($reference.ResolutionScope.Kind.ToString() -eq 'TypeReference') {
+                    return (Resolve-TypeName $reference.ResolutionScope) + '+' + $name
+                }
+                $namespace = $metadata.GetString($reference.Namespace)
+                return $(if ($namespace) { $namespace + '.' + $name } else { $name })
+            }
+            # Generic signatures are deliberately not guessed from their member name.
+            default { return '<' + $handle.Kind.ToString() + '>' }
+        }
+    }
     function Resolve-Operand([int]$token) {
         $handle = [System.Reflection.Metadata.Ecma335.MetadataTokens]::EntityHandle($token)
         switch ($handle.Kind.ToString()) {
-            'MethodDefinition' { return $metadata.GetString($metadata.GetMethodDefinition($handle).Name) }
-            'FieldDefinition' { return $metadata.GetString($metadata.GetFieldDefinition($handle).Name) }
-            'MemberReference' { return $metadata.GetString($metadata.GetMemberReference($handle).Name) }
-            'TypeReference' { return $metadata.GetString($metadata.GetTypeReference($handle).Name) }
-            'TypeDefinition' { return $metadata.GetString($metadata.GetTypeDefinition($handle).Name) }
+            'MethodDefinition' {
+                $definition = $metadata.GetMethodDefinition($handle)
+                return (Resolve-TypeName $definition.GetDeclaringType()) + '::' + $metadata.GetString($definition.Name)
+            }
+            'FieldDefinition' {
+                $definition = $metadata.GetFieldDefinition($handle)
+                return (Resolve-TypeName $definition.GetDeclaringType()) + '::' + $metadata.GetString($definition.Name)
+            }
+            'MemberReference' {
+                $reference = $metadata.GetMemberReference($handle)
+                return (Resolve-TypeName $reference.Parent) + '::' + $metadata.GetString($reference.Name)
+            }
+            { $_ -in @('TypeReference', 'TypeDefinition') } { return Resolve-TypeName $handle }
             'MethodSpecification' { return Resolve-Operand ([System.Reflection.Metadata.Ecma335.MetadataTokens]::GetToken($metadata.GetMethodSpecification($handle).Method)) }
             default { return $handle.Kind.ToString() }
         }
@@ -31,7 +62,7 @@ try {
     $found = $false
     foreach ($typeHandle in $metadata.TypeDefinitions) {
         $type = $metadata.GetTypeDefinition($typeHandle)
-        $fullName = $metadata.GetString($type.Namespace) + '.' + $metadata.GetString($type.Name)
+        $fullName = Resolve-TypeName $typeHandle
         if ($fullName -ne $TypeName) { continue }
         foreach ($methodHandle in $type.GetMethods()) {
             $method = $metadata.GetMethodDefinition($methodHandle)

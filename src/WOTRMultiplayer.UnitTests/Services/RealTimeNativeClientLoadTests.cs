@@ -19,7 +19,7 @@ using WOTRMultiplayer.Services;
 namespace WOTRMultiplayer.UnitTests.Services
 {
     [NonParallelizable]
-    public class RealTimeNativeClientLoadTests
+    public partial class RealTimeNativeClientLoadTests
     {
         private const string AreaId = "22222222222222222222222222222222";
 

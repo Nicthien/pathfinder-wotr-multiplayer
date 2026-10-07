@@ -27,6 +27,9 @@
 		<Reference Include="Assembly-CSharp">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\Assembly-CSharp.dll</HintPath>
 		</Reference>
+		<Reference Include="Owlcat.Runtime.Core">
+			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\Owlcat.Runtime.Core.dll</HintPath>
+		</Reference>
 		<Reference Include="UnityEngine.CoreModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
 		</Reference>
