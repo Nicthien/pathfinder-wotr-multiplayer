@@ -24,6 +24,8 @@ namespace WOTRMultiplayer.Services
         private bool _nativeReceiveFailed;
         private DateTime _nativeReceiveDeadline;
         private RealTimeNativeLoadOperation _nativeLoadOperation;
+        private NotifyRealTimeNativeCheckpoint _nativeReferenceRequest;
+        private ulong? _nativeReferenceVerifiedHash;
 
         private bool IsCurrentNativeReceive()
         {
@@ -41,7 +43,10 @@ namespace WOTRMultiplayer.Services
             if (!RealTimePresentationRuntime.Enabled || receivedFrom != NetworkConstants.HostPlayerId
                 || !RealTimeNativeCheckpointLimits.HasIdentity(frame)
                 || !Enum.IsDefined(typeof(RealTimeNativeCheckpointStage), frame.Stage)
-                || frame.ArchiveHash?.Length > 64) return;
+                || frame.ArchiveHash?.Length > 64 || frame.ReferenceStateHash?.Length > 64
+                || frame.ReferenceStateBytes?.Length > RealTimeNativeReferenceCodec.MaximumBytes
+                || frame.Stage != (int)RealTimeNativeCheckpointStage.Verify
+                    && (frame.ReferenceStateBytes != null || frame.ReferenceStateHash != null)) return;
             var copied = RealTimeNativeCheckpointLimits.Copy(frame);
             _mainThreadAccessor.Post(() =>
             {
@@ -103,6 +108,26 @@ namespace WOTRMultiplayer.Services
                             _nativeLoadOperation = operation;
                             _nativeReceiveDeadline = DateTime.MaxValue;
                             RunNativeCheckpointLoad(operation, requested, Authorized);
+                            return;
+                        }
+                        if (copied.Stage == (int)RealTimeNativeCheckpointStage.Verify)
+                        {
+                            var manifest = RealTimeNativeCheckpointLimits.ReferenceManifest(copied);
+                            if (!_nativeReceivePrepared || _nativeReceiveFailed || _nativeReceivedSource == null
+                                || manifest == null || _nativeReceiver?.MatchesManifest(manifest) != true
+                                || _nativeLoadOperation?.IsLoaded != true) return;
+                            if (_nativeReferenceRequest != null)
+                            {
+                                if (_nativeReferenceRequest.ReferenceStateHash != copied.ReferenceStateHash)
+                                { FailNativeCheckpointReceive("native-reference-conflicting-payload"); return; }
+                                if (_nativeReferenceVerifiedHash.HasValue)
+                                    SendNativeCheckpointAck(manifest, RealTimeNativeCheckpointAckStage.ReferenceVerified,
+                                        canonicalStateHash: _nativeReferenceVerifiedHash.Value, referenceStateHash: copied.ReferenceStateHash);
+                                return; // One restore per checkpoint, including while pending/failed.
+                            }
+                            _nativeReferenceRequest = copied;
+                            _nativeReceiveDeadline = DateTime.UtcNow.AddSeconds(60);
+                            VerifyNativeCheckpointReference(copied, manifest);
                             return;
                         }
                         if (!_nativeReceivePrepared) return;
@@ -182,6 +207,43 @@ namespace WOTRMultiplayer.Services
             }
         }
 
+        private async void VerifyNativeCheckpointReference(NotifyRealTimeNativeCheckpoint request,
+            NotifyRealTimeNativeCheckpoint manifest)
+        {
+            bool Authorized()
+            {
+                lock (ActionLock)
+                    return ReferenceEquals(_nativeReferenceRequest, request) && IsCurrentNativeReceive() && !_nativeReceiveFailed;
+            }
+            try
+            {
+                var reference = Mapper.Map<NetworkCombatState>(RealTimeNativeReferenceCodec.Decode(request.ReferenceStateBytes));
+                var hash = await RestoreLoadedNativeReferenceAsync(manifest, reference, Authorized);
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                    {
+                        if (!Authorized()) return;
+                        if (!hash.HasValue) { FailNativeCheckpointReceive("native-reference-restoration-not-confirmed"); return; }
+                        _nativeReferenceVerifiedHash = hash;
+                        _nativeReceiveDeadline = DateTime.UtcNow.AddSeconds(60);
+                        SendNativeCheckpointAck(manifest, RealTimeNativeCheckpointAckStage.ReferenceVerified,
+                            canonicalStateHash: hash.Value, referenceStateHash: request.ReferenceStateHash);
+                        Logger.LogInformation("Native reference data verified. Checkpoint={Checkpoint}; mechanical certificate and Commit still required.", manifest.CheckpointId);
+                    }
+                });
+            }
+            catch (Exception error)
+            {
+                Logger.LogError(error, "Native reference verification failed; combat remains protected.");
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                        if (Authorized()) FailNativeCheckpointReceive("native-reference-verification-failed");
+                });
+            }
+        }
+
         private void OnNotifyNativeCheckpointChunk(long receivedFrom, NotifyRealTimeNativeCheckpointChunk chunk)
         {
             if (!RealTimePresentationRuntime.Enabled || receivedFrom != NetworkConstants.HostPlayerId || chunk == null
@@ -223,7 +285,8 @@ namespace WOTRMultiplayer.Services
             });
         }
 
-        private void SendNativeCheckpointAck(NotifyRealTimeNativeCheckpoint frame, RealTimeNativeCheckpointAckStage stage, int number = 0)
+        private void SendNativeCheckpointAck(NotifyRealTimeNativeCheckpoint frame, RealTimeNativeCheckpointAckStage stage,
+            int number = 0, ulong canonicalStateHash = 0, string referenceStateHash = null)
             => Send(new ClientRealTimeNativeCheckpointAck
             {
                 SessionId = frame.SessionId,
@@ -232,7 +295,9 @@ namespace WOTRMultiplayer.Services
                 CheckpointId = frame.CheckpointId,
                 ArchiveHash = frame.ArchiveHash,
                 Stage = (int)stage,
-                Number = number
+                Number = number,
+                CanonicalStateHash = canonicalStateHash,
+                ReferenceStateHash = referenceStateHash
             });
 
         private void FailNativeCheckpointReceive(string reason, NotifyRealTimeNativeCheckpoint frame = null, bool notify = true)
@@ -275,6 +340,7 @@ namespace WOTRMultiplayer.Services
                 _nativeReceivePrepared = false; _nativeReceiveFailed = false;
                 _nativeLoadOperation = null;
                 _nativeReferenceRestorationOwner = null;
+                _nativeReferenceRequest = null; _nativeReferenceVerifiedHash = null;
             }
         }
     }

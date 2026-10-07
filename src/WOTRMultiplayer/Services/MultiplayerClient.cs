@@ -2033,6 +2033,9 @@ namespace WOTRMultiplayer.Services
                 session = Game;
                 state = session.RealTimeCombat;
                 var stage = (RealTimeRepairStage)message.Stage;
+                // The native barrier owns this epoch. A queued legacy Apply or
+                // Resume must not bypass reconstruction/verification/Commit.
+                if (_nativeReceivePrepare?.Epoch == message.Epoch && IsCurrentNativeReceive()) return;
                 if (stage == RealTimeRepairStage.Prepare)
                 {
                     if (message.Epoch == state.Epoch

@@ -24,6 +24,7 @@ namespace WOTRMultiplayer.Networking.UnitTests
             var prepared = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var complete = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
             var receipt = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var referenceReceipt = new TaskCompletionSource<ClientRealTimeNativeCheckpointAck>(TaskCreationOptions.RunContinuationsAsynchronously);
             var bytes = RealTimeNativeCheckpointTransferTests.Bytes();
             var manifest = RealTimeNativeCheckpointTransferTests.Manifest(bytes);
             using var sender = new RealTimeNativeCheckpointSender(42, manifest, bytes);
@@ -42,6 +43,18 @@ namespace WOTRMultiplayer.Networking.UnitTests
                             prepare = header;
                             client.Broadcast(RealTimeNativeCheckpointTransferTests.Ack(header, RealTimeNativeCheckpointAckStage.Prepared));
                         }
+                        else if (header.Stage == (int)RealTimeNativeCheckpointStage.Verify)
+                        {
+                            if (RealTimeNativeCheckpointLimits.ReferenceManifest(header) == null)
+                                throw new InvalidOperationException("loopback-reference-header-refused");
+                            var reference = RealTimeNativeReferenceCodec.Decode(header.ReferenceStateBytes);
+                            if (reference.Units.Single().Id != new string('r', 70000))
+                                throw new InvalidOperationException("loopback-reference-content-differs");
+                            var ack = RealTimeNativeCheckpointTransferTests.Ack(manifest, RealTimeNativeCheckpointAckStage.ReferenceVerified);
+                            ack.CanonicalStateHash = header.CanonicalStateHash;
+                            ack.ReferenceStateHash = header.ReferenceStateHash;
+                            client.Broadcast(ack); // Contract transport test, not a native world verification.
+                        }
                         else receiver = new RealTimeNativeCheckpointReceiver(prepare, header);
                     }
                     if (metadata.Message is NotifyRealTimeNativeCheckpointChunk chunk)
@@ -55,12 +68,13 @@ namespace WOTRMultiplayer.Networking.UnitTests
                         }
                     }
                 }
-                catch (Exception error) { complete.TrySetException(error); }
+                catch (Exception error) { complete.TrySetException(error); referenceReceipt.TrySetException(error); }
             };
             server.OnMessageReceived = metadata =>
             {
                 if (metadata.Message is not ClientRealTimeNativeCheckpointAck ack) return;
                 if (ack.Stage == (int)RealTimeNativeCheckpointAckStage.Prepared) prepared.TrySetResult(true);
+                else if (ack.Stage == (int)RealTimeNativeCheckpointAckStage.ReferenceVerified) referenceReceipt.TrySetResult(ack);
                 else if (sender.Acknowledge(42, ack) && sender.IsTransferred) receipt.TrySetResult(true);
             };
             try
@@ -77,6 +91,18 @@ namespace WOTRMultiplayer.Networking.UnitTests
                 Assert.That(await complete.Task, Is.EqualTo(bytes));
                 Assert.That(await Task.WhenAny(receipt.Task, Task.Delay(5000)), Is.SameAs(receipt.Task));
                 Assert.That(sender.IsTransferred, Is.True);
+                var verify = RealTimeNativeCheckpointLimits.Copy(manifest);
+                verify.Stage = (int)RealTimeNativeCheckpointStage.Verify;
+                var reference = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState();
+                reference.Units.Add(new WOTRMultiplayer.Networking.Messages.Contracts.NetworkUnit { Id = new string('r', 70000) });
+                verify.ReferenceStateBytes = RealTimeNativeReferenceCodec.Encode(reference);
+                verify.ReferenceStateHash = RealTimeNativeCheckpointLimits.Hash(verify.ReferenceStateBytes);
+                server.Broadcast(verify);
+                Assert.That(await Task.WhenAny(referenceReceipt.Task, Task.Delay(5000)), Is.SameAs(referenceReceipt.Task));
+                var verified = await referenceReceipt.Task;
+                Assert.That(verified.ReferenceStateHash, Is.EqualTo(verify.ReferenceStateHash));
+                Assert.That(verified.CanonicalStateHash, Is.EqualTo(manifest.CanonicalStateHash));
+                Assert.That(verified.Number, Is.Zero);
             }
             finally { receiver?.Dispose(); client.Reset(); server.Reset(); }
         }

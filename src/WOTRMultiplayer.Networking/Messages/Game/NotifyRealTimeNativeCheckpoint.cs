@@ -3,10 +3,10 @@ using WOTRMultiplayer.Networking.Messages.Contracts;
 
 namespace WOTRMultiplayer.Networking.Messages.Game
 {
-    public enum RealTimeNativeCheckpointStage { Prepare = 1, Manifest = 2, Abort = 3, Load = 4 }
+    public enum RealTimeNativeCheckpointStage { Prepare = 1, Manifest = 2, Abort = 3, Load = 4, Verify = 5 }
     // Received means verified bytes, NEVER reconstructed mechanics or permission to resume/save.
     // Loaded is a reconstruction receipt, still NOT a verified Commit.
-    public enum RealTimeNativeCheckpointAckStage { Prepared = 1, Chunk = 2, Received = 3, Failed = 4, Loaded = 5 }
+    public enum RealTimeNativeCheckpointAckStage { Prepared = 1, Chunk = 2, Received = 3, Failed = 4, Loaded = 5, ReferenceVerified = 6 }
 
     [ProtoContract, MessageType((int)MessageTypes.Game.NotifyRealTimeNativeCheckpoint)]
     public class NotifyRealTimeNativeCheckpoint
@@ -23,6 +23,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(10)] public int ArchiveBytes { get; set; }
         [ProtoMember(11)] public int ChunkBytes { get; set; }
         [ProtoMember(12)] public int ChunkCount { get; set; }
+        [ProtoMember(13)] public byte[] ReferenceStateBytes { get; set; }
+        [ProtoMember(14)] public string ReferenceStateHash { get; set; }
     }
 
     [ProtoContract, MessageType((int)MessageTypes.Game.NotifyRealTimeNativeCheckpointChunk)]
@@ -49,5 +51,7 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(6)] public int Stage { get; set; }
         [ProtoMember(7)] public int Number { get; set; }
         [ProtoMember(8)] public string Reason { get; set; }
+        [ProtoMember(9)] public ulong CanonicalStateHash { get; set; }
+        [ProtoMember(10)] public string ReferenceStateHash { get; set; }
     }
 }

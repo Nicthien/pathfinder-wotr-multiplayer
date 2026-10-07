@@ -37,12 +37,25 @@ namespace WOTRMultiplayer.Networking
 
         public static bool IsPrepare(NotifyRealTimeNativeCheckpoint frame) => HasIdentity(frame)
             && frame.Stage == (int)RealTimeNativeCheckpointStage.Prepare && frame.ArchiveBytes == 0
-            && frame.ChunkBytes == 0 && frame.ChunkCount == 0 && string.IsNullOrEmpty(frame.ArchiveHash);
+            && frame.ChunkBytes == 0 && frame.ChunkCount == 0 && string.IsNullOrEmpty(frame.ArchiveHash)
+            && frame.ReferenceStateBytes == null && frame.ReferenceStateHash == null;
 
         public static bool IsManifest(NotifyRealTimeNativeCheckpoint frame) => HasIdentity(frame)
             && frame.Stage == (int)RealTimeNativeCheckpointStage.Manifest && IsHash(frame.ArchiveHash)
             && frame.ArchiveBytes > 0 && frame.ArchiveBytes <= MaximumArchiveBytes
-            && frame.ChunkBytes == ChunkBytes && frame.ChunkCount == (frame.ArchiveBytes + ChunkBytes - 1) / ChunkBytes;
+            && frame.ChunkBytes == ChunkBytes && frame.ChunkCount == (frame.ArchiveBytes + ChunkBytes - 1) / ChunkBytes
+            && frame.ReferenceStateBytes == null && frame.ReferenceStateHash == null;
+
+        public static NotifyRealTimeNativeCheckpoint ReferenceManifest(NotifyRealTimeNativeCheckpoint frame)
+        {
+            if (frame == null || frame.Stage != (int)RealTimeNativeCheckpointStage.Verify
+                || frame.ReferenceStateBytes == null || frame.ReferenceStateBytes.Length < 8
+                || frame.ReferenceStateBytes.Length > RealTimeNativeReferenceCodec.MaximumBytes
+                || !IsHash(frame.ReferenceStateHash) || Hash(frame.ReferenceStateBytes) != frame.ReferenceStateHash) return null;
+            var manifest = Copy(frame, includeReference: false);
+            manifest.Stage = (int)RealTimeNativeCheckpointStage.Manifest;
+            return IsManifest(manifest) ? manifest : null;
+        }
 
         public static NotifyRealTimeNativeCheckpoint AsManifest(NotifyRealTimeNativeCheckpoint frame)
         {
@@ -52,13 +65,17 @@ namespace WOTRMultiplayer.Networking
             return IsManifest(manifest) ? manifest : null;
         }
 
-        public static NotifyRealTimeNativeCheckpoint Copy(NotifyRealTimeNativeCheckpoint frame) => new()
+        public static NotifyRealTimeNativeCheckpoint Copy(NotifyRealTimeNativeCheckpoint frame, bool includeReference = true) => new()
         {
             SessionId = frame.SessionId, LoadedSaveSeed = frame.LoadedSaveSeed, Epoch = frame.Epoch,
             CheckpointId = frame.CheckpointId, BuildFingerprint = frame.BuildFingerprint,
             LastIncludedSequence = frame.LastIncludedSequence, CanonicalStateHash = frame.CanonicalStateHash,
             Stage = frame.Stage, ArchiveHash = frame.ArchiveHash, ArchiveBytes = frame.ArchiveBytes,
-            ChunkBytes = frame.ChunkBytes, ChunkCount = frame.ChunkCount
+            ChunkBytes = frame.ChunkBytes, ChunkCount = frame.ChunkCount,
+            ReferenceStateBytes = includeReference && frame.ReferenceStateBytes != null
+                ? frame.ReferenceStateBytes.Length <= RealTimeNativeReferenceCodec.MaximumBytes
+                    ? (byte[])frame.ReferenceStateBytes.Clone() : throw new InvalidDataException("native-reference-size-limit") : null,
+            ReferenceStateHash = includeReference ? frame.ReferenceStateHash : null
         };
 
         public static bool Matches(NotifyRealTimeNativeCheckpoint frame, ClientRealTimeNativeCheckpointAck ack)

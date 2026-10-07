@@ -3000,6 +3000,7 @@ namespace WOTRMultiplayer.Services
             {
                 try
                 {
+                    if (_nativeTransfer != null && IsCurrentNativeTransfer(_nativeTransfer)) return;
                     if (Game?.RealTimeCombat == null || message == null || !_realTimeRepairStage.HasValue
                         || message.Epoch != Game.RealTimeCombat.Epoch || message.PlayerId != receivedFrom
                         || (int)_realTimeRepairStage.Value != message.Stage
