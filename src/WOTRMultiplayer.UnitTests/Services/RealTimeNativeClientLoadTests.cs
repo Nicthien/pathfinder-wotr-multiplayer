@@ -22,6 +22,33 @@ namespace WOTRMultiplayer.UnitTests.Services
     public class RealTimeNativeClientLoadTests
     {
         private const string AreaId = "22222222222222222222222222222222";
+
+        [TestCase(false, false, false)]
+        [TestCase(false, true, false)]
+        [TestCase(false, false, true)]
+        [TestCase(false, true, true)]
+        [TestCase(true, true, false)]
+        [TestCase(true, false, true)]
+        [TestCase(true, true, true)]
+        public void CharacterEditingOrUnknownUiPreventsNativeCheckpoint(bool available, bool editing, bool respec)
+        {
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                RealTimeNativeCharacterUiGuard.RequireIdle(available, editing, respec));
+            Assert.That(error.Message, Is.EqualTo(available
+                ? "native-checkpoint-character-edit-in-progress" : "native-checkpoint-character-ui-unavailable"));
+        }
+
+        [Test]
+        public void KnownIdleCharacterUiAllowsCheckpointAdmission()
+        {
+            Assert.DoesNotThrow(() => RealTimeNativeCharacterUiGuard.RequireIdle(true, false, false));
+        }
+
+        [Test]
+        public void MissingGameRejectsCharacterUiWithoutAccessingUnitySingletons()
+        {
+            Assert.Throws<InvalidOperationException>(() => RealTimeNativeCharacterUiGuard.RequireIdle(null));
+        }
         private static SaveInfo Info()
         {
             var source = new RealTimeMemorySaver();

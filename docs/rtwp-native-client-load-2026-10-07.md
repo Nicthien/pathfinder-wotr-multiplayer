@@ -70,9 +70,23 @@ Preuves : `local-artifacts/a0-candidates/101DFBE5E635337D74DBC57CBC5C8AC629F23CD
 ## Travail restant avant une récupération jouable
 
 1. Relier capture, transfert, chargement et état de référence réseau à une barrière native explicite, avec adaptation des délais, messages de chargement, accusés de reconstruction et Commit/Abort. Aucun branchement automatique n'est présent ici.
-2. Compléter l'admission de point sûr autour des états d'interface particuliers, notamment création/respecialisation de personnage, et vérifier le nettoyage natif réel avant d'autoriser ce chemin en jeu.
+2. Vérifier en jeu l'admission de point sûr et le nettoyage natif réel. Le contrôle explicite des écrans de personnage est ajouté dans le complément ci-dessous ; son exécution avec une interface Unity réelle reste non vérifiée.
 3. Réappliquer les caches confirmés de caractéristiques et autres données de référence, restaurer les références/services et contrôleurs requis, reprendre les ordres au bon point et comparer l'empreinte commune. Certains callbacks natifs `PostLoad` peuvent encore être refusés ; ils ne doivent pas être autorisés globalement pour obtenir artificiellement un chargement réussi.
 4. Après échec, fournir reconstruction/repli vérifié ou sortie explicite vers une sauvegarde sûre. Vérifier le rétablissement du gestionnaire natif après erreur, sans supprimer un état de chargement alors que ses workers sont encore actifs.
 5. Démontrer reprise, tour par tour jouable et sauvegarde/rechargement, puis couvrir invocations, renforts et campagne. Vérifier réellement les voix `WOTR_AIVO` sur le paquet exact lorsque Nicolas autorisera le jeu.
 
 Mod stable installé 0.4.16 et slot expérimental désactivé inchangés ; aucune installation ou activation, aucun marqueur `RTWP_RUNTIME_VALIDATED.json`, aucune modification des sauvegardes originales ou de la production de voix. Le chantier et la validation moteur restent incomplets.
+
+## Complément : point sûr de l'interface personnage
+
+Le contrôle de mode normal/pause ne suffisait pas à prouver l'absence d'un contrôleur de création, montée de niveau ou respecialisation en attente. `RealTimeNativeCharacterUiGuard` refuse désormais capture hôte et chargement client si `CharGenVM` ou `RespecWindowVM` est actif, ou si le contexte d'interface en jeu et ses propriétés ne sont pas disponibles. La cliente revérifie après le nettoyage de présentation, avant le son et le remplacement du monde ; l'hôte revérifie via `RequireReady` après l'attente du brouillard.
+
+Les champs ont été identifiés par décompilation en lecture seule de `CharGenContextVM` du jeu installé. Aucune instance de ce VM ni aucun contrôleur de personnage natif n'a été créé pour les tests.
+
+Vérifications effectuées sur ces sources :
+
+- `Build` par défaut : 963 tests réussis (33 traduction, 75 réseau, 855 principaux), protocole 52 confirmé dans la DLL. Empreinte locale : `96FA7057B7DE0E23159E96D74976A6A2A0BAECECD75EF583B462C5419A46ABE5`.
+- `Build -HostPresentationPrototype` : mêmes 963 tests réussis et protocole confirmé. Empreinte locale : `7D47B65E070CC690C88CFD442CD0208A0A21180E0CB485F4D72C001E40B1BD42`.
+- Neuf tests ajoutés couvrent toutes les combinaisons du contexte disponible/éditeur/respecialisation, ainsi que l'absence de jeu sans accès à un singleton Unity.
+
+Ce complément ne produit pas de nouveau paquet candidat et ne réutilise pas les preuves Mono de l'ancien candidat pour les nouvelles DLL. L'avertissement AutoMapper `NU1903` reste présent. Le raccordement de la barrière complète et la récupération jouable restent à développer ; aucun jeu lancé, aucune installation ni validation moteur.

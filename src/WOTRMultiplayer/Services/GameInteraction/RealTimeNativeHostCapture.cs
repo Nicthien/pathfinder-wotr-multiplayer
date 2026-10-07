@@ -142,6 +142,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 || combat.IsInCrusadeTacticalCombat() || combat.HasActiveRealTimeProjectiles()
                 || combat.HasActiveRealTimeAtomicActions())
                 throw new InvalidOperationException("native-checkpoint-host-not-at-safe-point");
+            RealTimeNativeCharacterUiGuard.RequireIdle(game);
         }
 
         private static IEnumerator FinishAfterFog(IEnumerator wait, Func<bool> authorized, Action capture, Action<Exception> fail)

@@ -42,6 +42,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         || game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress
                         || LoadingProcess.Instance.IsLoadingInProcess)
                         throw new InvalidOperationException("native-load-client-not-at-safe-point");
+                    RealTimeNativeCharacterUiGuard.RequireIdle(game);
                     // All JSON syntax/header checks happen before LoadArea can
                     // schedule world disposal or native ClearDirectory.
                     info = RealTimeNativeCheckpointLoadSource.Prepare(source, campaignId, checkpointId);
@@ -68,6 +69,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     });
                     RealTimeNativeGraphRepair.Add(game.State, lease);
                     combat.ClearRealTimePresentationForNativeLoad();
+                    // Presentation cleanup may dispatch callbacks. Check again
+                    // before native sound teardown and world replacement.
+                    RealTimeNativeCharacterUiGuard.RequireIdle(game);
                     // Preserve the native LoadGame sound teardown even though its
                     // multiplayer ForceLoadGame hook must not reset our session.
                     Kingmaker.Visual.Sound.SoundState.Instance.ResetBeforeUnloading();
