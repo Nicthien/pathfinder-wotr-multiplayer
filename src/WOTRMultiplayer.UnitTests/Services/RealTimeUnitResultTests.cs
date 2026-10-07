@@ -26,6 +26,16 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Is.EqualTo(RealTimePresentationRuntime.Enabled));
         }
 
+        [Test]
+        public void ConfirmedPartyCombatEndClearsNativeCachedFlagWithoutAWorld()
+        {
+            var player = (Kingmaker.Player)FormatterServices.GetUninitializedObject(typeof(Kingmaker.Player));
+            typeof(Kingmaker.Player).GetProperty("IsInCombat").GetSetMethod(true).Invoke(player, new object[] { true });
+            Assert.That(player.IsInCombat, Is.True);
+            RealTimeUnitResultReplication.ApplyPartyCombatEnd(player);
+            Assert.That(player.IsInCombat, Is.False);
+        }
+
         private static NetworkStatValues Stat(int value) => new()
             { BaseValue = value, ModifiedValue = value, ModifiedValueRaw = value, PermanentValue = value };
 

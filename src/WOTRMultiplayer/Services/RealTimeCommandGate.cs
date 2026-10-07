@@ -52,7 +52,7 @@ namespace WOTRMultiplayer.Services
                 return RealTimeCommandRejection.RealTimeModeInactive;
             }
 
-            if (_state.Phase != CombatSynchronizationPhase.Stable)
+            if (_state.CombatEndPending || _state.Phase != CombatSynchronizationPhase.Stable)
             {
                 return RealTimeCommandRejection.SynchronizationBarrierActive;
             }

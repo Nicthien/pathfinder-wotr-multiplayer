@@ -316,6 +316,8 @@
             ClientRealTimeCommandFault,
             NotifyRealTimeUnitKilled,
             NotifyRealTimeAuthoritativeEvent,
+            NotifyRealTimeCombatEnd,
+            ClientRealTimeCombatEndAck,
             NotifyRealTimeCombatCommandRejected
         }
 

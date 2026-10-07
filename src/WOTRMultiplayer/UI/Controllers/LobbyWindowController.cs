@@ -467,7 +467,7 @@ namespace WOTRMultiplayer.UI.Controllers
             var mode = state.Mode == CombatMode.RealTimeWithPause
                 ? Localized(WellKnownKeys.LobbyWindow.RealTime.ModeRealTime.Key)
                 : Localized(WellKnownKeys.LobbyWindow.RealTime.TurnBased.Key);
-            var phase = state.Phase switch
+            var phase = state.CombatEndPending ? Localized(WellKnownKeys.LobbyWindow.RealTime.Synchronizing.Key) : state.Phase switch
             {
                 CombatSynchronizationPhase.PreparingModeSwitch or CombatSynchronizationPhase.Synchronizing => Localized(WellKnownKeys.LobbyWindow.RealTime.Synchronizing.Key),
                 CombatSynchronizationPhase.Repairing => Localized(WellKnownKeys.LobbyWindow.RealTime.Repairing.Key),
@@ -487,7 +487,7 @@ namespace WOTRMultiplayer.UI.Controllers
                     state.MissingSnapshotReplies));
             }
 
-            if (state.Phase != CombatSynchronizationPhase.Stable)
+            if (state.CombatEndPending || state.Phase != CombatSynchronizationPhase.Stable)
             {
                 return;
             }

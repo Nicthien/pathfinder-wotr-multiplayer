@@ -28,7 +28,7 @@ using WOTRMultiplayer.UnitTests.FakeRules;
 namespace WOTRMultiplayer.UnitTests.Services
 {
     [TestFixture]
-    public class RealTimeProtocolIntegrationTests
+    public partial class RealTimeProtocolIntegrationTests
     {
         [Test]
         public void TwoActors_SnapshotReply_UpdatesHostResponseTime()
@@ -964,7 +964,8 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         private static (MultiplayerHost Host, MultiplayerClient Client, INetworkHostConnection HostNetwork,
-            INetworkClientConnection ClientNetwork, Queue<object> Queued, ICombatInteractionService ClientCombat) CreatePair()
+            INetworkClientConnection ClientNetwork, Queue<object> Queued, ICombatInteractionService ClientCombat) CreatePair(
+                NetworkCombatState endState = null, Queue<Action> mainThreadQueue = null)
         {
             var mapper = new MapperConfiguration(x =>
             {
@@ -995,18 +996,28 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
             A.CallTo(() => hostCombat.GetRealTimeCombatStateAsync())
-                .Returns(Task.FromResult(new NetworkCombatState()));
+                .ReturnsLazily(() => Task.FromResult(endState ?? new NetworkCombatState()));
             A.CallTo(() => hostCombat.ExecuteRealTimeCombatCommand(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._)).Returns(true);
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(Task.FromResult(new NetworkCombatState()));
             A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
                     A<NetworkCombatState>._, A<Func<bool>>._))
-                .Returns(Task.FromResult(new NetworkCombatState()));
+                .ReturnsLazily(() => Task.FromResult(endState ?? new NetworkCombatState()));
+            A.CallTo(() => clientCombat.TryFinalizeRealTimeCombatAsync(A<Func<bool>>._, A<Action>._))
+                .ReturnsLazily((Func<bool> canFinalize, Action finalize) =>
+                {
+                    if (!canFinalize()) return Task.FromResult(false);
+                    finalize(); return Task.FromResult(true);
+                });
             A.CallTo(() => clientCombat.TryExecuteRealTimeCombatCommandAsync(A<RealTimeCommandKind>._,
                 A<NetworkUnitMoveTo>._, A<NetworkUnitAttack>._, A<NetworkAbilityUse>._, A<Func<bool>>._))
                 .Returns(Task.FromResult<bool?>(true));
             var mainThread = A.Fake<IMainThreadAccessor>();
-            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes(call => ((Action)call.Arguments[0])());
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) =>
+            {
+                if (mainThreadQueue != null) mainThreadQueue.Enqueue(action);
+                else action();
+            });
 
             var hostNetwork = A.Fake<INetworkHostConnection>();
             var clientNetwork = A.Fake<INetworkClientConnection>();
@@ -1058,6 +1069,12 @@ namespace WOTRMultiplayer.UnitTests.Services
                 var message = queued.Dequeue();
                 switch (message)
                 {
+                    case NotifyRealTimeCombatEnd end:
+                        FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatEnd>(clientNetwork)(NetworkConstants.HostPlayerId, end);
+                        break;
+                    case ClientRealTimeCombatEndAck endAck:
+                        FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatEndAck>(hostNetwork)(42, endAck);
+                        break;
                     case NotifyRealTimeModeTransition transition:
                         DeliverToClient(clientNetwork, transition);
                         break;

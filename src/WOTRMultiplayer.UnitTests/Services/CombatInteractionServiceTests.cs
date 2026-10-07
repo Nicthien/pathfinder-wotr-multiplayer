@@ -18,6 +18,24 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class CombatInteractionServiceTests
     {
+        [Test]
+        public void StaleFinalizationNeverTouchesTheWorldOrRunsCleanup()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            Action pending = null;
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => pending = action);
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), A.Fake<IGameStateLookupService>(),
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(), mainThread, A.Fake<IMapper>());
+            var current = true;
+            var cleaned = false;
+            var task = service.TryFinalizeRealTimeCombatAsync(() => current, () => cleaned = true);
+            current = false;
+            pending();
+            Assert.That(task.Result, Is.False);
+            Assert.That(cleaned, Is.False);
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void AbilityPresentation_StaleOrMalformed_DoesNotLookUpUnits(bool current)

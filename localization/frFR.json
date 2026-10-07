@@ -171,6 +171,7 @@
       "combat": {
         "unitAutokilled": "Mort de l'unité « {0} » ({1}) appliquée automatiquement : elle est morte chez {2}.",
         "saveBlockedDuringSynchronization": "Sauvegarde indisponible pendant un combat multijoueur en temps réel ou une synchronisation. Passez en tour par tour ou attendez la fin du combat.",
+        "finalSyncFailed": "L'état final du combat n'a pas pu être confirmé. La sauvegarde reste bloquée. Recueillez les diagnostics, puis revenez au menu principal et chargez une sauvegarde sûre.",
         "saveBlockedAfterDisconnect": "Sauvegarde bloquée après une déconnexion en combat temps réel : cet état peut être différent de celui de l'hôte. Revenez au menu principal et rechargez une sauvegarde sûre.",
         "realTimeCommandRejected": "L'hôte a refusé l'ordre en temps réel ({0}).",
         "realTimeCommandRejection": {

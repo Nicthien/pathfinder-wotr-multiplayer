@@ -380,6 +380,7 @@
             },
             "combat": {
                 "unitAutokilled": "Auto-killing unit '{0}' ({1}) as it's been killed at {2}",
+                "finalSyncFailed": "The final combat state could not be confirmed. Saving remains blocked. Collect diagnostics, then return to the main menu and load a safe save.",
                 "saveBlockedDuringSynchronization": "Save unavailable during real-time multiplayer combat or synchronization. Switch to turn-based mode or wait until combat ends.",
                 "saveBlockedAfterDisconnect": "Saving is blocked after a disconnect during real-time combat because this state may differ from the host. Return to the main menu and load a safe save.",
                 "realTimeCommandRejected": "The host rejected the real-time command ({0}).",

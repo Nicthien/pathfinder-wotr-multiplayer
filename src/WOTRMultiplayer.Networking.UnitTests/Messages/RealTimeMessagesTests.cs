@@ -9,6 +9,35 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void CombatEnd_RoundTripsFinalReferenceAndCorrelatedAck()
+        {
+            var frame = Serializer.DeepClone(new NotifyRealTimeCombatEnd
+            {
+                SessionId = "session", LoadedSaveSeed = 17, Epoch = 8, EndId = "end-id",
+                Stage = (int)RealTimeCombatEndStage.Prepare, CanonicalStateHash = 123,
+                State = new NetworkCombatState
+                {
+                    Units = [new NetworkUnit { Id = "enemy", Descriptor = new NetworkUnitDescriptor
+                        { Vitals = new NetworkUnitVitals { Damage = 40, LifeState = 2, IsFinallyDead = true } } }]
+                }
+            });
+            Assert.That(frame.State.Units[0].Descriptor.Vitals.IsFinallyDead, Is.True);
+            var ack = Serializer.DeepClone(new ClientRealTimeCombatEndAck
+            {
+                SessionId = frame.SessionId, LoadedSaveSeed = frame.LoadedSaveSeed, Epoch = frame.Epoch,
+                EndId = frame.EndId, Stage = frame.Stage, Applied = false,
+                CanonicalStateHash = frame.CanonicalStateHash, Reason = "final-state-hash-mismatch"
+            });
+            Assert.That(ack.EndId, Is.EqualTo("end-id"));
+            Assert.That(ack.LoadedSaveSeed, Is.EqualTo(17));
+            Assert.That(ack.Epoch, Is.EqualTo(8));
+            Assert.That(ack.Stage, Is.EqualTo(1));
+            Assert.That(ack.CanonicalStateHash, Is.EqualTo(123));
+            Assert.That(ack.Applied, Is.False);
+            Assert.That(ack.Reason, Is.EqualTo("final-state-hash-mismatch"));
+        }
+
+        [Test]
         public void ProjectilePresentation_RoundTripsConfirmedImpactAndTransform()
         {
             var frame = Serializer.DeepClone(new NotifyRealTimeAuthoritativeEvent

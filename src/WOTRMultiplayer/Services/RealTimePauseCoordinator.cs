@@ -17,7 +17,7 @@ namespace WOTRMultiplayer.Services
         public bool TryRequest(long playerId, long hostPlayerId, bool wantsPause, IEnumerable<long> connectedPlayers)
         {
             var players = new HashSet<long>(connectedPlayers ?? Enumerable.Empty<long>());
-            if (_state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable
+            if (_state.CombatEndPending || _state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable
                 || !players.Contains(playerId) || !players.Contains(hostPlayerId))
             {
                 return false;

@@ -4,7 +4,9 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 45;
+        public const int ProtocolVersion = 46;
+
+        public bool CombatEndPending { get; set; }
 
         public List<RealTimeCommandEnvelope> AcceptedOrders { get; set; } = [];
 
@@ -46,6 +48,6 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 
         public bool IsManualPauseActive => PausedPlayers.Count > 0;
 
-        public bool BlocksSaving => Phase != CombatSynchronizationPhase.Stable;
+        public bool BlocksSaving => CombatEndPending || Phase != CombatSynchronizationPhase.Stable;
     }
 }

@@ -14,6 +14,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
     {
         bool IsInCombat();
 
+        Task<bool> TryFinalizeRealTimeCombatAsync(Func<bool> canFinalize, Action finalize);
+
         bool IsInCombat(string unitId);
 
         bool IsInCrusadeTacticalCombat();

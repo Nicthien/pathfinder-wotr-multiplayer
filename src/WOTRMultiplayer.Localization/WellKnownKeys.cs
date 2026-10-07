@@ -1544,6 +1544,12 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("finalSyncFailed")]
+            public static class FinalSyncFailed
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("saveBlockedDuringSynchronization")]
             public static class SaveBlockedDuringSynchronization
             {

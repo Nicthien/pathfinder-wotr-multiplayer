@@ -163,9 +163,14 @@ internal static class Program
             _suppress = false;
             damageSetter.Invoke(descriptor, new object[] { 3 });
             var hostPreserved = descriptor.Damage == 3 && _reports == 2;
+            var player = (Kingmaker.Player)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Kingmaker.Player));
+            typeof(Kingmaker.Player).GetProperty("IsInCombat").GetSetMethod(true).Invoke(player, new object[] { true });
+            RealTimeUnitResultReplication.ApplyPartyCombatEnd(player);
+            var partyEnded = !player.IsInCombat;
             Console.WriteLine("installed-vitals: patched-targets=" + patched.Count + "; blocked-client-setters=" + blocked
-                + "; applied-confirmed-death=" + applied + "; stat-callbacks=" + _statCallbacks + "; host-setter=" + hostPreserved);
-            return blocked && applied && hostPreserved;
+                + "; applied-confirmed-death=" + applied + "; stat-callbacks=" + _statCallbacks + "; host-setter=" + hostPreserved
+                + "; party-combat-cleared=" + partyEnded);
+            return blocked && applied && hostPreserved && partyEnded;
         }
         catch (Exception failure) { Console.WriteLine("installed-vitals: FAILED: " + failure); return false; }
         finally

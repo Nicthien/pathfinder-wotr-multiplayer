@@ -150,12 +150,9 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             // Arrange
             var rootLocation = Path.GetFullPath(@"..\..\..\..\WOTRMultiplayer\Services");
 
-            var trees = new List<(CSharpCompilation, SemanticModel, ClassDeclarationSyntax)>
-            {
-               Create(Path.Combine(rootLocation, "MultiplayerClient.cs")),
-               Create(Path.Combine(rootLocation, "MultiplayerHost.cs")),
-               Create(Path.Combine(rootLocation, "MultiplayerActorBase.cs"))
-            };
+            var trees = new[] { "MultiplayerClient", "MultiplayerHost", "MultiplayerActorBase" }
+                .SelectMany(name => Directory.GetFiles(rootLocation, name + "*.cs"))
+                .Select(Create).ToList(); // Include the actors' partial implementations.
 
             var allMessages = Assembly
                 .GetAssembly(typeof(BeetleXMessageTypes.ProtobufServerPacket))

@@ -100,6 +100,26 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
+        public Task<bool> TryFinalizeRealTimeCombatAsync(Func<bool> canFinalize, Action finalize)
+        {
+            if (canFinalize == null || finalize == null) throw new ArgumentNullException();
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    if (!canFinalize()) { completion.TrySetResult(false); return; }
+                    if (Game.Instance?.Player == null || Game.Instance.Player.PartyAndPets.Any(unit => unit.IsInCombat))
+                        throw new InvalidOperationException("final-party-state-is-still-in-combat");
+                    RealTimeUnitResultReplication.ApplyPartyCombatEnd(Game.Instance.Player);
+                    finalize();
+                    completion.TrySetResult(true);
+                }
+                catch (Exception failure) { completion.TrySetException(failure); }
+            });
+            return completion.Task;
+        }
+
         public Task<bool?> TryPresentRealTimeActionAsync(NotifyRealTimeAuthoritativeEvent authoritativeEvent, Func<bool> canPresent)
         {
             if (canPresent == null) throw new ArgumentNullException(nameof(canPresent));

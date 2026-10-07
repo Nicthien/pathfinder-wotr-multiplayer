@@ -43,7 +43,7 @@ using WOTRMultiplayer.Services.GameInteraction.Contexts;
 
 namespace WOTRMultiplayer.Services
 {
-    public class MultiplayerClient : MultiplayerActorBase, IMultiplayerClient
+    public partial class MultiplayerClient : MultiplayerActorBase, IMultiplayerClient
     {
         private readonly INetworkClientConnection _networkClient;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
@@ -88,9 +88,11 @@ namespace WOTRMultiplayer.Services
             && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause;
 
         public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
-            && Game.RealTimeCombat != null && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable;
+            && Game.RealTimeCombat != null && (Game.RealTimeCombat.CombatEndPending
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable);
 
         public bool IsSavingBlockedByCombatSync => _disconnectedDuringRealTimeCombat || _turnEndSynchronizationFailed
+            || WaitingForHostCombatEnd
             || IsActive && Game?.RealTimeCombat != null
                 && (Game.RealTimeCombat.BlocksSaving
                     || Game.Combat?.Stage == NetworkCombatStage.Running
@@ -316,7 +318,8 @@ namespace WOTRMultiplayer.Services
 
         public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
         {
-            if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+            if (!IsRealTimeCombatActive || Game.RealTimeCombat.CombatEndPending
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
             {
                 return false;
             }
@@ -862,6 +865,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeCombatCommandAccepted>(OnNotifyRealTimeCombatCommandAccepted)
                .On<NotifyRealTimeCombatCommandRejected>(OnNotifyRealTimeCombatCommandRejected)
                .On<NotifyRealTimeAuthoritativeEvent>(OnNotifyRealTimeAuthoritativeEvent)
+               .On<NotifyRealTimeCombatEnd>(OnNotifyRealTimeCombatEnd)
                .On<NotifyRealTimePauseChanged>(OnNotifyRealTimePauseChanged)
                .On<NotifyRealTimeModeTransition>(OnNotifyRealTimeModeTransition)
                .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
@@ -1517,7 +1521,7 @@ namespace WOTRMultiplayer.Services
         public void TickRealTimePresentation()
         {
             var active = RealTimePresentationRuntime.Enabled && IsRealTimeCombatActive
-                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
+                && !Game.RealTimeCombat.CombatEndPending && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
             CombatInteraction.TickRealTimePresentation(active);
             if (active && ReferenceEquals(Game, _presentationSession)
                 && ReferenceEquals(Game.RealTimeCombat, _presentationCombat)
@@ -1538,6 +1542,7 @@ namespace WOTRMultiplayer.Services
                 var session = Game;
                 var combat = session?.RealTimeCombat;
                 if (!IsRealTimeCombatActive || combat == null || combat.Phase != CombatSynchronizationPhase.Stable
+                    || combat.CombatEndPending
                     || !IsCurrentRealTimeMessage(session, combat, message.Epoch)
                     || string.IsNullOrWhiteSpace(message.SessionId) || message.SessionId != session.Id
                     || message.LoadedSaveSeed != session.LoadedSaveSeed) return;
@@ -1744,7 +1749,7 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.PausedPlayers = [.. message.PausedPlayers];
             Game.RealTimeCombat.ResumeVotes = [.. message.ResumeVotes ?? []];
             if (Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
-                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable)
+                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable && !Game.RealTimeCombat.CombatEndPending)
             {
                 GameInteraction.SetPause(message.IsPaused || Game.ForcedPause != null);
             }
@@ -1920,7 +1925,7 @@ namespace WOTRMultiplayer.Services
                         _localCriticalFaultState = null;
                     }
                     SendRealTimeModeAck(message, true, state.CanonicalStateHash);
-                    GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
+                    GameInteraction.SetPause(state.CombatEndPending || state.IsManualPauseActive || Game.ForcedPause != null);
                     return;
                 }
                 if (stage == RealTimeModeTransitionStage.Complete
@@ -2133,7 +2138,7 @@ namespace WOTRMultiplayer.Services
                         _localCriticalFaultState = null;
                     }
                     SendRealTimeRepairAck(message, true, state.CanonicalStateHash);
-                    GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
+                    GameInteraction.SetPause(state.CombatEndPending || state.IsManualPauseActive || Game.ForcedPause != null);
                     return;
                 }
                 if (stage == RealTimeRepairStage.Resume

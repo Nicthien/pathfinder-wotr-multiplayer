@@ -535,6 +535,13 @@ namespace WOTRMultiplayer.Services
 
         public void CombatStarted()
         {
+            if (TryRetainRealTimeCombatOnStart()) return;
+            if (RealTimePresentationRuntime.Enabled && Game?.RealTimeCombat?.CombatEndPending == true)
+            {
+                GameInteraction.SetPause(true);
+                Logger.LogError("A new combat started before the previous final checkpoint was confirmed; retaining the protected encounter.");
+                return;
+            }
             Logger.LogInformation("Combat started");
             ResetRealTimeRuleRolls();
             if (Game.Combat != null)
@@ -557,6 +564,16 @@ namespace WOTRMultiplayer.Services
         }
 
         public void CombatEnded()
+        {
+            if (TryDeferRealTimeCombatEnd()) return;
+            CompleteCombatEnd();
+        }
+
+        protected virtual bool TryDeferRealTimeCombatEnd() => false;
+
+        protected virtual bool TryRetainRealTimeCombatOnStart() => false;
+
+        protected void CompleteCombatEnd()
         {
             try
             {

@@ -9,6 +9,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 {
     public static class RealTimeUnitResultReplication
     {
+        public static void ApplyPartyCombatEnd(Kingmaker.Player player)
+        {
+            if (player == null) throw new InvalidOperationException("missing-party-combat-state");
+            // The installed setter is a single backing-field write. Do not
+            // replay IPartyCombatHandler/quest/death callbacks on the client.
+            player.IsInCombat = false;
+        }
+
         public static NetworkUnitVitals CaptureVitals(UnitEntityData unit)
         {
             var state = CaptureValues(unit.Descriptor);

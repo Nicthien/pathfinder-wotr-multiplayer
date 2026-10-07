@@ -28,7 +28,7 @@ namespace WOTRMultiplayer.Services
 
         public long PublishAuthoritativeSnapshot(ulong canonicalStateHash)
         {
-            if (_state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable)
+            if (_state.CombatEndPending || _state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable)
             {
                 throw new InvalidOperationException("Authoritative snapshots require stable real-time combat.");
             }
@@ -40,7 +40,7 @@ namespace WOTRMultiplayer.Services
         public bool TryCompareClientSnapshot(long epoch, long sequence, ulong expectedStateHash, ulong clientStateHash, out bool requiresRepair)
         {
             requiresRepair = false;
-            if (_state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable
+            if (_state.CombatEndPending || _state.Mode != CombatMode.RealTimeWithPause || _state.Phase != CombatSynchronizationPhase.Stable
                 || epoch != _state.Epoch || sequence > _state.LastAuthoritativeSequence || sequence <= 0)
             {
                 return false;
@@ -53,6 +53,7 @@ namespace WOTRMultiplayer.Services
         public bool IsCurrent(long epoch, long sequence)
         {
             return _state.Mode == CombatMode.RealTimeWithPause
+                && !_state.CombatEndPending
                 && _state.Phase == CombatSynchronizationPhase.Stable
                 && epoch == _state.Epoch && sequence > 0
                 && sequence > _state.LastAuthoritativeSequence;
@@ -60,7 +61,7 @@ namespace WOTRMultiplayer.Services
 
         public void RequestModeSwitch(CombatMode requestedMode, IEnumerable<long> connectedPlayers)
         {
-            if (_state.Phase != CombatSynchronizationPhase.Stable)
+            if (_state.CombatEndPending || _state.Phase != CombatSynchronizationPhase.Stable)
             {
                 throw new InvalidOperationException("A synchronization barrier is already active.");
             }
