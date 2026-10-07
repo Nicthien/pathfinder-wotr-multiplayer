@@ -146,8 +146,20 @@ namespace WOTRMultiplayer.Services
                 || (expected.Descriptor?.Stats?.DamageNonLethal ?? 0)
                     != (actual.Descriptor?.Stats?.DamageNonLethal ?? 0))
                 causes.Add("damage");
+            if ((expected.Descriptor?.ResourcesCaptured ?? false) != (actual.Descriptor?.ResourcesCaptured ?? false)
+                || expected.Descriptor?.ResourcesCaptured == true
+                    && !(expected.Descriptor.Resources ?? []).OrderBy(resource => resource?.BlueprintId, StringComparer.Ordinal)
+                        .Select(resource => (resource?.BlueprintId, resource?.Amount ?? 0, resource?.RetainCount ?? 0))
+                        .SequenceEqual((actual.Descriptor?.Resources ?? []).OrderBy(resource => resource?.BlueprintId, StringComparer.Ordinal)
+                            .Select(resource => (resource?.BlueprintId, resource?.Amount ?? 0, resource?.RetainCount ?? 0))))
+                causes.Add("resources");
             if (!SameBuffs(expected.BuffCollection?.Buffs, actual.BuffCollection?.Buffs))
                 causes.Add("buffs");
+            if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
+                { SpellbooksCaptured = expected.Descriptor?.SpellbooksCaptured ?? false, Spellbooks = expected.Descriptor?.Spellbooks } }] },
+                new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
+                { SpellbooksCaptured = actual.Descriptor?.SpellbooksCaptured ?? false, Spellbooks = actual.Descriptor?.Spellbooks } }] }))
+                causes.Add("spellbooks");
             var expectedProne = expected.Descriptor?.State?.Prone;
             var actualProne = actual.Descriptor?.State?.Prone;
             if ((expectedProne?.Active ?? false) != (actualProne?.Active ?? false)

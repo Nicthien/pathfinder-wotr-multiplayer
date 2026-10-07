@@ -41,6 +41,87 @@ namespace WOTRMultiplayer.UnitTests.Services
         private IValueGenerator _valueGenerator;
         private IMapper _mapper;
 
+        [TestCase("current", 17, 5, true)]
+        [TestCase("previous", 17, 5, false)]
+        [TestCase("current", 16, 5, false)]
+        [TestCase("current", 17, 4, false)]
+        [TestCase(null, 17, 5, false)]
+        public void HostDeath_RequiresCurrentSessionSaveAndEpoch(string sessionId, int saveSeed,
+            long epoch, bool expected)
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "current", LoadedSaveSeed = 17,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
+                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(_networkClient)(-1,
+                new NotifyRealTimeUnitKilled
+                {
+                    SessionId = sessionId, LoadedSaveSeed = saveSeed, Epoch = epoch,
+                    Sequence = 1, UnitId = "enemy"
+                });
+            var call = A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
+                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._));
+            if (expected) call.MustHaveHappenedOnceExactly();
+            else call.MustNotHaveHappened();
+        }
+
+        [Test]
+        public void HostDeath_SaveReloadedBeforeDispatch_DoesNotApplyOrPauseReplacement()
+        {
+            var session = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "current", LoadedSaveSeed = 17,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            _multiplayerClient.Game = session;
+            A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
+                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._))
+                .ReturnsLazily((string _, NetworkPlayer player, Func<bool> canApply) =>
+                {
+                    session.LoadedSaveSeed++;
+                    Assert.That(canApply(), Is.False);
+                    return Task.FromException<bool?>(new InvalidOperationException("old-save-dispatch"));
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(_networkClient)(-1,
+                new NotifyRealTimeUnitKilled
+                {
+                    SessionId = "current", LoadedSaveSeed = 17, Epoch = 5, Sequence = 1, UnitId = "enemy"
+                });
+            Assert.That(session.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCommandFault>._)).MustNotHaveHappened();
+            A.CallTo(() => _gameInteractionService.SetPause(A<bool>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void HostDeath_ReloadedSaveMayReuseSequenceButDuplicatesAreAppliedOnce()
+        {
+            var session = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "current", LoadedSaveSeed = 17,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
+            };
+            _multiplayerClient.Game = session;
+            A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
+                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
+            var receive = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeUnitKilled>(_networkClient);
+            foreach (var seed in new[] { 17, 17, 18, 18 })
+            {
+                session.LoadedSaveSeed = seed;
+                receive(-1, new NotifyRealTimeUnitKilled
+                {
+                    SessionId = "current", LoadedSaveSeed = seed, Epoch = 5, Sequence = 1, UnitId = "enemy"
+                });
+            }
+            A.CallTo(() => _combatInteractionService.TryApplyRealTimeUnitDeathAsync(
+                A<string>._, A<NetworkPlayer>._, A<Func<bool>>._)).MustHaveHappenedTwiceExactly();
+        }
+
         [Test]
         public void RealTimeSynchronizationBarrier_BlocksSaving()
         {

@@ -220,6 +220,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatCommandAccepted>(clientNetwork)
                 (NetworkConstants.HostPlayerId, new NotifyRealTimeCombatCommandAccepted
                 {
+                    SessionId = host.Game.Id,
+                    LoadedSaveSeed = host.Game.LoadedSaveSeed,
                     Epoch = host.Game.RealTimeCombat.Epoch,
                     AuthoritativeSequence = 1,
                     // Presentation clients reject malformed host data, not commands
@@ -959,6 +961,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 notification, dialog, globalMap, ping, clientCombat, settings, files, clientNetwork, values, mapper);
             host.Game = new NetworkGame(new NetworkGameStartUp())
             {
+                Id = "integration-session",
                 LocalPlayerId = NetworkConstants.HostPlayerId,
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
             };
@@ -966,6 +969,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             host.Game.Players.Add(new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
             client.Game = new NetworkGame(new NetworkGameStartUp())
             {
+                Id = "integration-session",
                 LocalPlayerId = 42,
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running }
             };

@@ -131,11 +131,14 @@ namespace WOTRMultiplayer.Networking.UnitTests
 
                 server.Broadcast(new NotifyRealTimeUnitKilled
                 {
-                    Epoch = 8, Sequence = 10, UnitId = "enemy"
+                    Epoch = 8, Sequence = 10, UnitId = "enemy",
+                    SessionId = "tcp-session", LoadedSaveSeed = 52
                 });
                 Assert.That(await Task.WhenAny(receivedDeath.Task, Task.Delay(5000)), Is.SameAs(receivedDeath.Task));
                 Assert.That(receivedDeath.Task.Result.UnitId, Is.EqualTo("enemy"));
                 Assert.That(receivedDeath.Task.Result.Sequence, Is.EqualTo(10));
+                Assert.That(receivedDeath.Task.Result.SessionId, Is.EqualTo("tcp-session"));
+                Assert.That(receivedDeath.Task.Result.LoadedSaveSeed, Is.EqualTo(52));
 
                 client.Broadcast(new ClientRealTimeStateHash
                 {

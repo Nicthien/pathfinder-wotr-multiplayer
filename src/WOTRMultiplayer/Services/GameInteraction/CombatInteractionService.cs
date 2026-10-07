@@ -549,9 +549,37 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (extra != null)
                 throw new InvalidOperationException(extra);
 
+            foreach (var networkUnit in networkCombatState.Units)
+            {
+                if (networkUnit.Descriptor?.SpellbooksCaptured == true)
+                {
+                    var spellbookError = RealTimeSpellbookState.Validate(networkUnit.Descriptor.Spellbooks,
+                        RealTimeSpellbookReplication.Capture(_gameStateLookupService.GetUnitEntity(networkUnit.Id)));
+                    if (spellbookError != null)
+                        throw new InvalidOperationException($"unit:{networkUnit.Id}:{spellbookError}");
+                }
+                if (networkUnit.Descriptor?.ResourcesCaptured != true) continue;
+                var unit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
+                var resourceError = RealTimeResourceState.Validate(networkUnit.Descriptor.Resources,
+                    CaptureResources(unit));
+                if (resourceError != null)
+                    throw new InvalidOperationException($"unit:{networkUnit.Id}:{resourceError}");
+            }
+
             UpdateCombatState(networkCombatState, requiresFullUpdate: false);
             foreach (var networkUnit in networkCombatState.Units)
             {
+                if (networkUnit.Descriptor?.SpellbooksCaptured == true)
+                    RealTimeSpellbookReplication.ApplyValidated(_gameStateLookupService.GetUnitEntity(networkUnit.Id),
+                        networkUnit.Descriptor.Spellbooks);
+                if (networkUnit.Descriptor?.ResourcesCaptured == true)
+                {
+                    var unit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
+                    var resources = unit.Descriptor.Resources.PersistantResources.ToDictionary(
+                        resource => resource.Blueprint.AssetGuid.ToString(), StringComparer.OrdinalIgnoreCase);
+                    foreach (var resource in networkUnit.Descriptor.Resources)
+                        resources[resource.BlueprintId].Amount = resource.Amount;
+                }
                 if (networkUnit.Descriptor?.State?.IsFinallyDead != true)
                     continue;
                 var localUnit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
@@ -1416,7 +1444,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     Orientation = unitEntity.Orientation,
                     TurnBasedInfo = includeTurnBasedInfo ? GetUnitTurnBasedInfo(unitEntity) : null,
                     CombatState = GetUnitCombatState(unitEntity),
-                    Descriptor = GetUnitDescriptor(unitEntity),
+                    Descriptor = GetUnitDescriptor(unitEntity, captureResources: !includeTurnBasedInfo),
                     BuffCollection = _buffInteractionService.GetUnitBuffs(unitEntity),
                     UnitPartKineticist = _mapper.Map<NetworkUnitPartKineticist>(unitEntity.Get<UnitPartKineticist>()),
                     UnitPartTacticalCombat = _mapper.Map<NetworkUnitPartTacticalCombat>(unitEntity.Get<UnitPartTacticalCombat>())
@@ -1557,10 +1585,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return forcedPath;
         }
 
-        private NetworkUnitDescriptor GetUnitDescriptor(UnitEntityData combatUnit)
+        private NetworkUnitDescriptor GetUnitDescriptor(UnitEntityData combatUnit, bool captureResources = false)
         {
             var descriptor = new NetworkUnitDescriptor
             {
+                ResourcesCaptured = captureResources,
+                Resources = captureResources ? CaptureResources(combatUnit) : [],
+                SpellbooksCaptured = captureResources,
+                Spellbooks = captureResources ? RealTimeSpellbookReplication.Capture(combatUnit) : [],
                 Damage = combatUnit.Descriptor.Damage,
                 Stats = new NetworkCharacterStats
                 {
@@ -1579,6 +1611,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             };
             return descriptor;
         }
+
+        private static List<NetworkAbilityResource> CaptureResources(UnitEntityData unit) =>
+            unit.Descriptor.Resources.PersistantResources.Select(resource => new NetworkAbilityResource
+            {
+                BlueprintId = resource.Blueprint.AssetGuid.ToString(),
+                Amount = resource.Amount,
+                RetainCount = resource.RetainCount
+            }).ToList();
 
         private NetworkUnitTurnBasedInfo GetUnitTurnBasedInfo(UnitEntityData combatUnit)
         {

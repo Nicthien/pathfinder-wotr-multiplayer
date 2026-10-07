@@ -67,6 +67,7 @@ namespace WOTRMultiplayer.Services
         private long _realTimeAIChoiceGeneration;
         private NetworkGame _lastRealTimeDeathSession;
         private long _lastRealTimeDeathEpoch;
+        private int _lastRealTimeDeathSaveSeed;
         private readonly HashSet<long> _appliedRealTimeDeathSequences = [];
         private NetworkRealTimeCombatState _localCriticalFaultState;
         private long _localCriticalFaultEpoch;
@@ -1433,13 +1434,19 @@ namespace WOTRMultiplayer.Services
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null
                 || message.Sequence <= 0 || string.IsNullOrEmpty(message.UnitId))
                 return;
+            NetworkGame session = null;
+            NetworkRealTimeCombatState state = null;
+            NetworkCombat combat = null;
             await _realTimeSnapshotGate.WaitAsync();
             try
             {
-                var session = Game;
-                var state = session?.RealTimeCombat;
-                var combat = session?.Combat;
-                if (combat?.Stage != NetworkCombatStage.Running
+                session = Game;
+                state = session?.RealTimeCombat;
+                combat = session?.Combat;
+                if (string.IsNullOrWhiteSpace(message.SessionId)
+                    || !string.Equals(message.SessionId, session?.Id, StringComparison.Ordinal)
+                    || message.LoadedSaveSeed != session?.LoadedSaveSeed
+                    || combat?.Stage != NetworkCombatStage.Running
                     || state?.Mode != CombatMode.RealTimeWithPause
                     || !(state.Epoch == message.Epoch
                         || state.PreviousMode == CombatMode.RealTimeWithPause
@@ -1447,10 +1454,12 @@ namespace WOTRMultiplayer.Services
                             && state.Epoch == message.Epoch + 1))
                     return;
                 if (!ReferenceEquals(_lastRealTimeDeathSession, session)
-                    || _lastRealTimeDeathEpoch != message.Epoch)
+                    || _lastRealTimeDeathEpoch != message.Epoch
+                    || _lastRealTimeDeathSaveSeed != message.LoadedSaveSeed)
                 {
                     _lastRealTimeDeathSession = session;
                     _lastRealTimeDeathEpoch = message.Epoch;
+                    _lastRealTimeDeathSaveSeed = message.LoadedSaveSeed;
                     _appliedRealTimeDeathSequences.Clear();
                 }
                 if (_appliedRealTimeDeathSequences.Contains(message.Sequence))
@@ -1460,6 +1469,12 @@ namespace WOTRMultiplayer.Services
                     message.UnitId, player,
                     () => ReferenceEquals(Game, session) && ReferenceEquals(Game?.RealTimeCombat, state)
                         && ReferenceEquals(Game?.Combat, combat)
+                        && session.LoadedSaveSeed == message.LoadedSaveSeed
+                        && string.Equals(session.Id, message.SessionId, StringComparison.Ordinal)
+                        && (state.Epoch == message.Epoch
+                            || state.PreviousMode == CombatMode.RealTimeWithPause
+                                && state.Phase != CombatSynchronizationPhase.Stable
+                                && state.Epoch == message.Epoch + 1)
                         && combat.Stage == NetworkCombatStage.Running);
                 if (!applied.HasValue)
                     return;
@@ -1473,6 +1488,11 @@ namespace WOTRMultiplayer.Services
             {
                 Logger.LogError(ex, "Unable to apply host real-time unit death. Epoch={Epoch}, Sequence={Sequence}, UnitId={UnitId}",
                     message.Epoch, message.Sequence, message.UnitId);
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, state)
+                    || !ReferenceEquals(Game?.Combat, combat)
+                    || session?.LoadedSaveSeed != message.LoadedSaveSeed
+                    || !string.Equals(session?.Id, message.SessionId, StringComparison.Ordinal))
+                    return;
                 EnterLocalCriticalFaultBarrier(message.Epoch);
                 Send(new ClientRealTimeCommandFault
                 {

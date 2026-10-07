@@ -22,7 +22,7 @@ namespace WOTRMultiplayer.Services
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write(9); // Hash schema version, distinct from the wire protocol version.
+                writer.Write(11); // Hash schema version, distinct from the wire protocol version.
                 writer.Write(snapshot.RandomState);
 
                 var units = (snapshot.Combat.Units ?? []).OrderBy(x => x?.Id, StringComparer.Ordinal).ToList();
@@ -41,6 +41,46 @@ namespace WOTRMultiplayer.Services
                     writer.Write(Quantize(unit?.Orientation ?? 0));
                     writer.Write(unit?.Descriptor?.Damage ?? 0);
                     writer.Write(unit?.Descriptor?.Stats?.DamageNonLethal ?? 0);
+                    writer.Write(unit?.Descriptor?.ResourcesCaptured ?? false);
+                    if (unit?.Descriptor?.ResourcesCaptured == true)
+                    {
+                        var resources = (unit.Descriptor.Resources ?? [])
+                            .OrderBy(resource => resource?.BlueprintId, StringComparer.Ordinal).ToList();
+                        writer.Write(resources.Count);
+                        foreach (var resource in resources)
+                        {
+                            WriteString(writer, resource?.BlueprintId);
+                            writer.Write(resource?.Amount ?? 0);
+                            writer.Write(resource?.RetainCount ?? 0);
+                        }
+                    }
+                    writer.Write(unit?.Descriptor?.SpellbooksCaptured ?? false);
+                    if (unit?.Descriptor?.SpellbooksCaptured == true)
+                    {
+                        var books = (unit.Descriptor.Spellbooks ?? [])
+                            .OrderBy(book => book?.BlueprintId, StringComparer.Ordinal).ToList();
+                        writer.Write(books.Count);
+                        foreach (var book in books)
+                        {
+                            WriteString(writer, book?.BlueprintId);
+                            var spontaneous = book?.SpontaneousSlots ?? [];
+                            writer.Write(spontaneous.Count);
+                            foreach (var count in spontaneous) writer.Write(count);
+                            var prepared = (book?.PreparedSlots ?? []).OrderBy(slot => slot?.Level)
+                                .ThenBy(slot => slot?.Index).ThenBy(slot => slot?.Type).ToList();
+                            writer.Write(prepared.Count);
+                            foreach (var slot in prepared)
+                            {
+                                writer.Write(slot?.Level ?? -1);
+                                writer.Write(slot?.Index ?? -1);
+                                writer.Write(slot?.Type ?? -1);
+                                WriteString(writer, slot?.SpellBlueprintId);
+                                writer.Write(slot?.Metamagic ?? 0);
+                                writer.Write(slot?.Available ?? false);
+                                writer.Write(slot?.IsOpposition ?? false);
+                            }
+                        }
+                    }
                     writer.Write(unit?.Descriptor?.State?.IsCharging ?? false);
                     writer.Write(unit?.Descriptor?.State?.IsFinallyDead ?? false);
                     writer.Write(unit?.Descriptor?.State?.Prone?.Active ?? false);

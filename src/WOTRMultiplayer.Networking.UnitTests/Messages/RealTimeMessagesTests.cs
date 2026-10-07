@@ -9,6 +9,22 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void Resources_RoundTripAmountsAndExplicitEmptyCapture()
+        {
+            var captured = Serializer.DeepClone(new NetworkUnitDescriptor
+            {
+                ResourcesCaptured = true,
+                Resources = [new NetworkAbilityResource { BlueprintId = "rage", Amount = 2, RetainCount = 1 }]
+            });
+            Assert.That(captured.ResourcesCaptured, Is.True);
+            Assert.That(captured.Resources[0].BlueprintId, Is.EqualTo("rage"));
+            Assert.That(captured.Resources[0].Amount, Is.EqualTo(2));
+            Assert.That(captured.Resources[0].RetainCount, Is.EqualTo(1));
+            var empty = Serializer.DeepClone(new NetworkUnitDescriptor { ResourcesCaptured = true });
+            Assert.That(empty.ResourcesCaptured, Is.True);
+            Assert.That(empty.Resources, Is.Empty);
+        }
+        [Test]
         public void TurnEndSynchronization_RoundTripsFailureAndSequence()
         {
             var checkpoint = Serializer.DeepClone(new NotifyCombatTurnEndSynchronizationRequired

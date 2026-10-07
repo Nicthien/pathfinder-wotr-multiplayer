@@ -19,5 +19,11 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(3)]
         [LogMe]
         public string UnitId { get; set; }
+
+        [ProtoMember(4)]
+        public string SessionId { get; set; }
+
+        [ProtoMember(5)]
+        public int LoadedSaveSeed { get; set; }
     }
 }

@@ -4723,6 +4723,8 @@ namespace WOTRMultiplayer.Services
                         ? state.Epoch - 1 : state.Epoch;
                     Send(new NotifyRealTimeUnitKilled
                     {
+                        SessionId = Game.Id,
+                        LoadedSaveSeed = Game.LoadedSaveSeed,
                         Epoch = epoch,
                         Sequence = Interlocked.Increment(ref _nextRealTimeUnitDeathSequence),
                         UnitId = unitId

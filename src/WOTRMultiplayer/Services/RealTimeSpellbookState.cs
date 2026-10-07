@@ -1,0 +1,61 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using WOTRMultiplayer.Entities.Units;
+
+namespace WOTRMultiplayer.Services
+{
+    public static class RealTimeSpellbookState
+    {
+        // Only availability/counts may differ. Do not repair book/slot topology by
+        // calling Memorize, Rest or Spend: those execute mechanics and callbacks.
+        public static string Validate(IEnumerable<NetworkSpellbookState> expected,
+            IEnumerable<NetworkSpellbookState> actual)
+        {
+            var host = Index(expected);
+            var client = Index(actual);
+            if (host == null || client == null) return "invalid-spellbooks";
+            foreach (var id in host.Keys.Union(client.Keys).OrderBy(x => x, StringComparer.Ordinal))
+            {
+                if (!host.ContainsKey(id)) return "extra-spellbook:" + id;
+                if (!client.ContainsKey(id)) return "missing-spellbook:" + id;
+                var left = host[id];
+                var right = client[id];
+                if (left.SpontaneousSlots.Count != right.SpontaneousSlots.Count)
+                    return "spellbook-levels:" + id;
+                var slots = right.PreparedSlots.ToDictionary(Key);
+                if (left.PreparedSlots.Count != slots.Count) return "spellbook-slots:" + id;
+                foreach (var slot in left.PreparedSlots)
+                {
+                    if (!slots.TryGetValue(Key(slot), out var local)
+                        || !string.Equals(slot.SpellBlueprintId, local.SpellBlueprintId, StringComparison.OrdinalIgnoreCase)
+                        || slot.Metamagic != local.Metamagic || slot.IsOpposition != local.IsOpposition)
+                        return "spellbook-slot-identity:" + id;
+                }
+            }
+            return null;
+        }
+
+        public static (int Level, int Index, int Type) Key(NetworkPreparedSpellState slot) =>
+            (slot.Level, slot.Index, slot.Type);
+
+        private static Dictionary<string, NetworkSpellbookState> Index(IEnumerable<NetworkSpellbookState> books)
+        {
+            if (books == null) return null;
+            var result = new Dictionary<string, NetworkSpellbookState>(StringComparer.OrdinalIgnoreCase);
+            foreach (var book in books)
+            {
+                if (book == null || string.IsNullOrWhiteSpace(book.BlueprintId)
+                    || result.ContainsKey(book.BlueprintId) || book.SpontaneousSlots == null
+                    || book.SpontaneousSlots.Any(count => count < 0) || book.PreparedSlots == null)
+                    return null;
+                var slots = new HashSet<(int, int, int)>();
+                foreach (var slot in book.PreparedSlots)
+                    if (slot == null || slot.Level < 0 || slot.Index < 0 || slot.Type < 0
+                        || !slots.Add(Key(slot))) return null;
+                result.Add(book.BlueprintId, book);
+            }
+            return result;
+        }
+    }
+}

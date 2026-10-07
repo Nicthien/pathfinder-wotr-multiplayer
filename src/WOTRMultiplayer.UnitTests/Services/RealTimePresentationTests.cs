@@ -75,6 +75,31 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(inbox.Enqueue(conflicting), Is.False);
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void IdenticalIdentityWithConflictingPayload_IsRejected(bool alreadyApplied)
+        {
+            var inbox = new RealTimePresentationInbox();
+            Assert.That(inbox.Enqueue(Frame(1)), Is.True);
+            if (alreadyApplied) inbox.Commit(1);
+            Assert.That(inbox.Enqueue(Frame(1, RealTimePresentationStage.Interrupt)), Is.False);
+            Assert.That(inbox.Enqueue(Frame(1)), Is.True);
+        }
+
+        [Test]
+        public void QueuedPayload_IsIsolatedFromSenderAndConsumerMutation()
+        {
+            var inbox = new RealTimePresentationInbox();
+            var original = Frame(1);
+            Assert.That(inbox.Enqueue(original), Is.True);
+            original.Attack.Stage = (int)RealTimePresentationStage.End;
+            Assert.That(inbox.TryPeek(out var first), Is.True);
+            Assert.That(first.Attack.Stage, Is.EqualTo((int)RealTimePresentationStage.Start));
+            first.Attack.Stage = (int)RealTimePresentationStage.Interrupt;
+            Assert.That(inbox.TryPeek(out var retry), Is.True);
+            Assert.That(retry.Attack.Stage, Is.EqualTo((int)RealTimePresentationStage.Start));
+        }
+
         [Test]
         public void Gap_IsBoundedAndExpiresUntilEarlierFrameArrives()
         {
@@ -91,6 +116,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void ActualGame_HasExpectedPresentationPatchTargets()
         {
             Assert.That(RealTimePresentationControllerPatches.Targets().Count(), Is.EqualTo(3));
+            Assert.That(RealTimeResourcePatches.Targets().Count(), Is.EqualTo(2));
             Assert.That(typeof(UnitCommand).GetMethod("StartAnimation",
                 BindingFlags.Instance | BindingFlags.NonPublic, null,
                 new[] { typeof(UnitAnimationActionHandle) }, null), Is.Not.Null);

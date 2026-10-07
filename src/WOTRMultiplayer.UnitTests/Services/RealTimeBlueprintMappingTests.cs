@@ -13,6 +13,27 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class RealTimeBlueprintMappingTests
     {
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ResourceMapping_PreservesCaptureFlagAndAmounts(bool populated)
+        {
+            var mapper = new MapperConfiguration(configuration =>
+                configuration.AddProfile<NetworkMessagesProfile>()).CreateMapper();
+            var source = new NetworkUnitDescriptor { ResourcesCaptured = true };
+            if (populated) source.Resources.Add(new NetworkAbilityResource
+            {
+                BlueprintId = "rage", Amount = 2, RetainCount = 1
+            });
+            var wire = mapper.Map<Networking.Messages.Contracts.NetworkUnitDescriptor>(source);
+            var restored = mapper.Map<NetworkUnitDescriptor>(ProtoBuf.Serializer.DeepClone(wire));
+            Assert.That(restored.ResourcesCaptured, Is.True);
+            Assert.That(restored.Resources.Count, Is.EqualTo(populated ? 1 : 0));
+            if (!populated) return;
+            Assert.That(restored.Resources[0].BlueprintId, Is.EqualTo("rage"));
+            Assert.That(restored.Resources[0].Amount, Is.EqualTo(2));
+            Assert.That(restored.Resources[0].RetainCount, Is.EqualTo(1));
+        }
+
         [Test]
         public void TemporaryNegativeLevelMapping_UsesRemainingDuration()
         {
