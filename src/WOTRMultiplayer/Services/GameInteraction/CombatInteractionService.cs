@@ -627,7 +627,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
                 id => _gameStateLookupService.GetUnitEntity(id) != null,
                 area => _gameStateLookupService.GetAreaEffect(area) != null,
-                area => _gameStateLookupService.GetAreaEffect(area)?.View != null,
+                area => _gameStateLookupService.GetAreaEffect(area)?.View != null
+                    || RealTimePresentationRuntime.Enabled && RealTimeAreaReplicaFactory.IsReplica(
+                        _gameStateLookupService.GetAreaEffect(area)),
                 id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
                 area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString(),
                 id => _gameStateLookupService.GetUnitEntity(id)?.HoldingState?.SceneName,
@@ -743,10 +745,27 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var expected = new HashSet<string>(confirmed.Select(area => area.Id), StringComparer.OrdinalIgnoreCase);
             var removed = _gameStateLookupService.GetAreaEffects()
                 .Where(area => !expected.Contains(area.UniqueId) && RealTimeAreaReplicaFactory.IsReplica(area)).ToList();
-            var prepared = new List<(AreaEffectEntityData Area, SceneEntitiesState Scene, string SceneName)>();
+            var prepared = new List<(AreaEffectEntityData Area, SceneEntitiesState Scene,
+                NetworkAreaEffect State, RealTimeAreaVisual Visual, bool IsNew)>();
+            var retained = new List<AreaEffectEntityData>();
             foreach (var state in confirmed)
             {
-                if (_gameStateLookupService.GetAreaEffect(state) != null) continue;
+                var existing = _gameStateLookupService.GetAreaEffect(state);
+                if (existing != null)
+                {
+                    if (!RealTimeAreaReplicaFactory.IsReplica(existing)) continue;
+                    if (existing.View != null && RealTimeAreaVisual.For(existing.View)?.IsAlive == true)
+                    { retained.Add(existing); continue; }
+                    if (!ReferenceEquals(existing.View, null) && !RealTimeAreaVisual.IsOwned(existing.View))
+                        throw new InvalidOperationException("area-reconstruction-unowned-view:" + existing.UniqueId);
+                    var previousVisuals = RealTimeAreaVisual.ForArea(existing);
+                    var replacement = new RealTimeAreaVisual(existing, state);
+                    try { transaction.TrackAreaVisual(replacement, removed: false); }
+                    catch { replacement.Dispose(); throw; }
+                    foreach (var previous in previousVisuals) transaction.TrackAreaVisual(previous, removed: true);
+                    prepared.Add((existing, existing.HoldingState, state, replacement, false));
+                    continue;
+                }
                 var scene = Game.Instance.State.LoadedAreaState.GetAllSceneStates()
                     .SingleOrDefault(value => value.SceneName == state.SceneName)
                     ?? throw new InvalidOperationException("area-reconstruction-scene-missing:" + state.SceneName);
@@ -770,23 +789,30 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 var visual = new RealTimeAreaVisual(replica, state);
                 try { transaction.TrackAreaVisual(visual, removed: false); }
                 catch { visual.Dispose(); throw; }
-                prepared.Add((replica, scene, state.SceneName));
+                prepared.Add((replica, scene, state, visual, true));
             }
             // Prepare every asset/context before changing the entity registry.
             // The transaction owns new views even if a later asset is rejected.
             foreach (var area in removed)
             {
-                var visual = RealTimeAreaVisual.For(area.View);
-                if (visual == null) throw new InvalidOperationException("area-reconstruction-visual-owner-missing:" + area.UniqueId);
-                transaction.TrackAreaVisual(visual, removed: true);
+                if (!ReferenceEquals(area.View, null) && !RealTimeAreaVisual.IsOwned(area.View))
+                    throw new InvalidOperationException("area-reconstruction-unowned-view:" + area.UniqueId);
+                foreach (var visual in RealTimeAreaVisual.ForArea(area)) transaction.TrackAreaVisual(visual, removed: true);
                 transaction.RemoveArea(EntityService.Instance, area.HoldingState, area);
                 TrackAreaPools(transaction, area, removed: true);
             }
             foreach (var replica in prepared)
             {
-                transaction.RegisterArea(EntityService.Instance, replica.Scene, replica.Area, replica.SceneName);
-                TrackAreaPools(transaction, replica.Area, removed: false);
+                if (replica.IsNew)
+                {
+                    transaction.RegisterArea(EntityService.Instance, replica.Scene, replica.Area, replica.State.SceneName);
+                    TrackAreaPools(transaction, replica.Area, removed: false);
+                }
+                else transaction.RestoreAreaPresence(replica.Area);
+                transaction.BindAreaView(replica.Area, replica.Visual.View);
+                replica.Visual.Show(replica.State);
             }
+            foreach (var area in retained) transaction.RestoreAreaPresence(area);
         }
 
         private static void TrackAreaPools(RealTimeBuffRestoreTransaction transaction, AreaEffectEntityData area, bool removed)

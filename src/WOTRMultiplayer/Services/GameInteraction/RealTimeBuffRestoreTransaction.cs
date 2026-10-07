@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Buffs;
+using Kingmaker.View.MapObjects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 
@@ -23,11 +24,26 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly List<IDisposable> _createdAreaVisuals = new();
         private readonly List<IDisposable> _removedAreaVisuals = new();
         private readonly List<RealTimeAreaPoolMembership> _areaPoolChanges = new();
+        private readonly List<RealTimeAreaViewBinding> _areaViewBindings = new();
+        private readonly List<RealTimeAreaPresence> _areaPresence = new();
         private bool _disposed;
         private bool _committed;
         public bool HasChanges => _registrations.Count != 0 || _removals.Count != 0
             || _areaRegistrations.Count != 0 || _areaRemovals.Count != 0
-            || _createdAreaVisuals.Count != 0 || _removedAreaVisuals.Count != 0 || _areaPoolChanges.Count != 0;
+            || _createdAreaVisuals.Count != 0 || _removedAreaVisuals.Count != 0 || _areaPoolChanges.Count != 0
+            || _areaViewBindings.Count != 0 || _areaPresence.Count != 0;
+
+        public void BindAreaView(AreaEffectEntityData area, AreaEffectView view)
+        {
+            EnsureOpen();
+            _areaViewBindings.Add(new RealTimeAreaViewBinding(area, view));
+        }
+
+        public void RestoreAreaPresence(AreaEffectEntityData area)
+        {
+            EnsureOpen();
+            if (RealTimeAreaPresence.NeedsRestore(area)) _areaPresence.Add(new RealTimeAreaPresence(area));
+        }
 
         public void TrackAreaPool(IList pool, AreaEffectEntityData area, bool removed)
         {
@@ -94,11 +110,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
             foreach (var registration in _areaRegistrations) registration.ValidateForCommit();
             foreach (var removal in _areaRemovals) removal.ValidateForCommit();
             foreach (var change in _areaPoolChanges) change.ValidateForCommit();
+            foreach (var binding in _areaViewBindings) binding.ValidateForCommit();
+            foreach (var presence in _areaPresence) presence.ValidateForCommit();
             foreach (var registration in _registrations) registration.Commit();
             foreach (var removal in _removals) removal.Commit();
             foreach (var registration in _areaRegistrations) registration.Commit();
             foreach (var removal in _areaRemovals) removal.Commit();
             foreach (var change in _areaPoolChanges) change.Commit();
+            foreach (var binding in _areaViewBindings) binding.Commit();
+            foreach (var presence in _areaPresence) presence.Commit();
             _committed = true;
         }
 
@@ -113,6 +133,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (_disposed) return;
             _disposed = true;
             List<Exception> failures = null;
+            for (var i = _areaViewBindings.Count - 1; i >= 0; i--)
+            {
+                try { _areaViewBindings[i].Dispose(); }
+                catch (Exception failure) { (failures ??= new()).Add(failure); }
+            }
+            for (var i = _areaPresence.Count - 1; i >= 0; i--)
+            {
+                try { _areaPresence[i].Dispose(); }
+                catch (Exception failure) { (failures ??= new()).Add(failure); }
+            }
             for (var i = _areaPoolChanges.Count - 1; i >= 0; i--)
             {
                 try { _areaPoolChanges[i].Dispose(); }

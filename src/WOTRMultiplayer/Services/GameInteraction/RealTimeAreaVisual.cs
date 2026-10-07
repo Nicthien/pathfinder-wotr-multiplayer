@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
@@ -23,12 +24,17 @@ namespace WOTRMultiplayer.Services.GameInteraction
     {
         private sealed class Ownership { public RealTimeAreaVisual Visual; }
         private static readonly ConditionalWeakTable<AreaEffectView, Ownership> Owned = new();
+        private static readonly ConditionalWeakTable<AreaEffectEntityData, HashSet<RealTimeAreaVisual>> AreaVisuals = new();
         private static FieldInfo Field(Type type, string name) => AccessTools.Field(type, name)
             ?? throw new MissingFieldException(type.FullName, name);
         private readonly AreaEffectEntityData _area;
         private AreaEffectView _view;
         private GameObject _root;
         private IFxHandle _fx;
+        private GameObject _prefab;
+        private bool _shown;
+        public AreaEffectView View => _view;
+        public bool IsAlive => _root != null && _view != null;
 
         public static bool IsOwned(AreaEffectView view) => !ReferenceEquals(view, null)
             && Owned.TryGetValue(view, out _);
@@ -37,11 +43,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
         internal static void MarkOwned(AreaEffectView view) => Owned.Add(view, new Ownership());
         public static RealTimeAreaVisual For(AreaEffectView view) => !ReferenceEquals(view, null)
             && Owned.TryGetValue(view, out var owner) ? owner.Visual : null;
+        public static IReadOnlyList<RealTimeAreaVisual> ForArea(AreaEffectEntityData area) =>
+            area != null && AreaVisuals.TryGetValue(area, out var visuals) ? visuals.ToArray() : Array.Empty<RealTimeAreaVisual>();
 
         public RealTimeAreaVisual(AreaEffectEntityData area, NetworkAreaEffect confirmed)
         {
-            if (!RealTimePresentationRuntime.Enabled || !RealTimeAreaReplicaFactory.IsReplica(area)
-                || !ReferenceEquals(area.View, null))
+            if (!RealTimePresentationRuntime.Enabled || !RealTimeAreaReplicaFactory.IsReplica(area))
                 throw new InvalidOperationException("invalid-area-visual-owner");
             var error = RealTimeAreaReplication.Validate(area, confirmed);
             if (error != null) throw new InvalidOperationException("area-visual:" + error);
@@ -70,17 +77,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     new TargetWrapper(confirmed.Position.ToUnityVector3(), confirmed.Orientation),
                     TimeSpan.FromTicks(confirmed.CreationGameTimeTicks),
                     confirmed.DurationTicks.HasValue ? TimeSpan.FromTicks(confirmed.DurationTicks.Value) : null);
-                // Raw binding avoids collider links, fact activation, subscriptions
-                // and the native OnViewDidAttach -> SpawnFxs callback chain.
-                Field(typeof(EntityViewBase), "m_Data").SetValue(_view, area);
-                Field(typeof(EntityDataBase), "<View>k__BackingField").SetValue(area, _view);
+                // Data binding belongs to the restore transaction. Keep the old
+                // view intact until all replacement assets have been prepared.
                 _view.UniqueId = area.UniqueId;
                 _view.Transform = _root.transform;
                 Confirm(confirmed);
-                _root.SetActive(true);
-                if (prefab != null)
-                    _fx = FxHelper.SpawnFxOnGameObject(prefab, _root, false);
-                Confirm(confirmed);
+                _prefab = prefab;
+                AreaVisuals.GetValue(area, _ => new HashSet<RealTimeAreaVisual>()).Add(this);
             }
             catch { Dispose(); throw; }
         }
@@ -91,12 +94,26 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public static bool IsAllowedScript(Type type) =>
             type?.FullName == "Kingmaker.Visual.Particles.FxDestroyOnStop";
 
+        public void Show(NetworkAreaEffect confirmed)
+        {
+            if (!IsAlive || !ReferenceEquals(_area.View, _view))
+                throw new InvalidOperationException("area-visual-not-bound");
+            _root.SetActive(true);
+            if (!_shown)
+            {
+                _shown = true;
+                if (_prefab != null) _fx = FxHelper.SpawnFxOnGameObject(_prefab, _root, false);
+            }
+            Confirm(confirmed);
+        }
+
         public void Confirm(NetworkAreaEffect confirmed)
         {
             if (_root == null || confirmed == null || confirmed.Id != _area.UniqueId)
                 throw new InvalidOperationException("area-visual-lost-or-mismatched");
             _root.transform.SetPositionAndRotation(confirmed.Position.ToUnityVector3(),
                 Quaternion.Euler(0, confirmed.Orientation, 0));
+            if (_shown && !_root.activeSelf) _root.SetActive(true);
             // The native FX system can detach an instance from its locator.
             // Follow only confirmed transforms, never a client target calculation.
             if (_fx?.IsSpawned == true && _fx.SpawnedObject != null)
@@ -114,6 +131,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             finally
             {
                 _fx = null;
+                if (AreaVisuals.TryGetValue(_area, out var visuals)) visuals.Remove(this);
                 if (!ReferenceEquals(_view, null))
                 {
                     if (ReferenceEquals(_area.View, _view))

@@ -196,12 +196,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public List<AreaEffectEntityData> GetAreaEffects()
         {
-            return [.. Game.Instance.State.AreaEffects];
+            var pool = Game.Instance.State.AreaEffects;
+            return RealTimePresentationRuntime.Enabled
+                ? RealTimeAreaDiscovery.Collect(pool, pool.All) : [.. pool];
         }
 
         public AreaEffectEntityData GetAreaEffect(NetworkAreaEffect networkAreaEffect)
         {
-            var areaEffect = Game.Instance.State.AreaEffects.FirstOrDefault(a => string.Equals(a.UniqueId, networkAreaEffect.Id, StringComparison.OrdinalIgnoreCase));
+            var areaEffect = GetAreaEffects().FirstOrDefault(a => string.Equals(a.UniqueId, networkAreaEffect.Id, StringComparison.OrdinalIgnoreCase));
             return areaEffect;
         }
 

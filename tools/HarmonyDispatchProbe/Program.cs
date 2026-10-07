@@ -368,6 +368,27 @@ internal static class Program
                 var result = target.Invoke(inertView, arguments);
                 if (target.Name == "CreateEntityData") visualSafe &= result == null;
             }
+            var stateGuards = harmony.CreateClassProcessor(typeof(RealTimeAreaReplicaStatePatches)).Patch();
+            var stateSafe = stateGuards?.Count == 2;
+            using (var presence = new RealTimeAreaPresence(detached))
+            {
+                // Both originals would enter lifecycle callbacks. The patched
+                // setters must leave raw authoritative presence unchanged.
+                detached.IsInGame = false;
+                detached.Suppressed = true;
+                stateSafe &= detached.IsInGame && !detached.Suppressed;
+            }
+            var presenceSafe = !detached.IsInGame && !detached.Suppressed;
+            var bindingSafe = true;
+            using (var binding = new RealTimeAreaViewBinding(detached,
+                (Kingmaker.View.MapObjects.AreaEffectView)inertView))
+            {
+                binding.ValidateForCommit();
+                bindingSafe &= ReferenceEquals(detached.View, inertView);
+            }
+            bindingSafe &= ReferenceEquals(detached.View, null);
+            var discoverySafe = RealTimeAreaDiscovery.Collect(
+                Array.Empty<Kingmaker.EntitySystem.Entities.AreaEffectEntityData>(), new[] { detached }).Count == 1;
             // Do not execute host originals on synthetic worldless objects.
             var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
                 && RealTimeAreaCallbackPatches.Targets().All(target =>
@@ -376,8 +397,11 @@ internal static class Program
                 + "; callback-targets=" + callbacks.Count + "; blocked-without-world=" + blocked
                 + "; host-prefix-allows=" + hostAllowed + "; raw-state-without-world=" + rawApplied
                 + "; detached-factory-and-store=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count
-                + "; visual-lifecycle-without-unity=" + visualSafe + "; native-pool-enumeration=" + poolSafe);
-            return blocked && hostAllowed && rawApplied && detachedSafe && visualSafe && poolSafe;
+                + "; visual-lifecycle-without-unity=" + visualSafe + "; native-pool-enumeration=" + poolSafe
+                + "; owned-state-setters=" + stateSafe + "; raw-presence=" + presenceSafe
+                + "; view-rebinding-without-unity=" + bindingSafe + "; hidden-discovery=" + discoverySafe);
+            return blocked && hostAllowed && rawApplied && detachedSafe && visualSafe && poolSafe
+                && stateSafe && presenceSafe && bindingSafe && discoverySafe;
         }
         catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
         finally
