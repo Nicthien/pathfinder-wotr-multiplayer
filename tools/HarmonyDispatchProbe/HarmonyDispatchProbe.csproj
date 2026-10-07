@@ -18,5 +18,8 @@
     <Reference Include="WOTRMultiplayer">
       <HintPath>$(RtwpProbeModPath)</HintPath>
     </Reference>
+    <Reference Include="WOTRMultiplayer.Networking">
+      <HintPath>$([System.IO.Path]::GetDirectoryName('$(RtwpProbeModPath)'))\WOTRMultiplayer.Networking.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

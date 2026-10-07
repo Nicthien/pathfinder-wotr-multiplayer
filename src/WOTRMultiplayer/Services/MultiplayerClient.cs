@@ -15,6 +15,7 @@ using WOTRMultiplayer.Abstractions.GameInteraction.CombatLog;
 using WOTRMultiplayer.Abstractions.IO;
 using WOTRMultiplayer.Abstractions.Random;
 using WOTRMultiplayer.Abstractions.Settings;
+using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
@@ -46,6 +47,7 @@ namespace WOTRMultiplayer.Services
     public partial class MultiplayerClient : MultiplayerActorBase, IMultiplayerClient
     {
         private readonly INetworkClientConnection _networkClient;
+        private readonly IMainThreadAccessor _mainThreadAccessor;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
         private readonly SemaphoreSlim _turnEndSynchronizationGate = new(1, 1);
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
@@ -208,7 +210,8 @@ namespace WOTRMultiplayer.Services
             IFileSystemService fileSystemService,
             INetworkClientConnection networkClient,
             IValueGenerator valueGenerator,
-            IMapper mapper)
+            IMapper mapper,
+            IMainThreadAccessor mainThreadAccessor)
             : base(logger,
                   mapper,
                   multiplayerSettingsProvider,
@@ -224,6 +227,7 @@ namespace WOTRMultiplayer.Services
                   networkClient)
         {
             _networkClient = networkClient;
+            _mainThreadAccessor = mainThreadAccessor ?? throw new ArgumentNullException(nameof(mainThreadAccessor));
 
             SetupNetworkMessageHandlers();
         }
@@ -253,6 +257,7 @@ namespace WOTRMultiplayer.Services
 
         public void Reset()
         {
+            ResetNativeCheckpointReceive();
             Logger.LogInformation("Resetting");
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
@@ -866,6 +871,8 @@ namespace WOTRMultiplayer.Services
                .On<NotifyRealTimeCombatCommandRejected>(OnNotifyRealTimeCombatCommandRejected)
                .On<NotifyRealTimeAuthoritativeEvent>(OnNotifyRealTimeAuthoritativeEvent)
                .On<NotifyRealTimeCombatEnd>(OnNotifyRealTimeCombatEnd)
+               .On<NotifyRealTimeNativeCheckpoint>(OnNotifyNativeCheckpoint)
+               .On<NotifyRealTimeNativeCheckpointChunk>(OnNotifyNativeCheckpointChunk)
                .On<NotifyRealTimePauseChanged>(OnNotifyRealTimePauseChanged)
                .On<NotifyRealTimeModeTransition>(OnNotifyRealTimeModeTransition)
                .On<NotifyRealTimeRepair>(OnNotifyRealTimeRepair)
@@ -1520,6 +1527,7 @@ namespace WOTRMultiplayer.Services
 
         public void TickRealTimePresentation()
         {
+            TickNativeCheckpointReceive();
             var active = RealTimePresentationRuntime.Enabled && IsRealTimeCombatActive
                 && !Game.RealTimeCombat.CombatEndPending && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
             CombatInteraction.TickRealTimePresentation(active);

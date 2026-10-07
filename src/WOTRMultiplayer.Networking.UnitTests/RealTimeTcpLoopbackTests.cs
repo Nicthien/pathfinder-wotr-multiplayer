@@ -14,7 +14,7 @@ using WOTRMultiplayer.Networking.Messages.Game;
 namespace WOTRMultiplayer.Networking.UnitTests
 {
     [TestFixture]
-    public class RealTimeTcpLoopbackTests
+    public partial class RealTimeTcpLoopbackTests
     {
         [OneTimeSetUp]
         public void RegisterMessages()

@@ -43,8 +43,11 @@ try {
 $probeBin = Join-Path $PSScriptRoot 'HarmonyDispatchProbe\bin\Release\net481'
 $probeExe = Join-Path $probeBin 'HarmonyDispatchProbe.exe'
 $modHash = (Get-FileHash -LiteralPath $modAssembly -Algorithm SHA256).Hash
-if ((Get-FileHash -LiteralPath (Join-Path $probeBin 'WOTRMultiplayer.dll') -Algorithm SHA256).Hash -ne $modHash) {
-    throw 'Le diagnostic ne charge pas le DLL exact demandé.'
+foreach ($name in @('WOTRMultiplayer.dll', 'WOTRMultiplayer.Networking.dll')) {
+    $expected = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $modAssembly) $name) -Algorithm SHA256).Hash
+    if ((Get-FileHash -LiteralPath (Join-Path $probeBin $name) -Algorithm SHA256).Hash -ne $expected) {
+        throw "Le diagnostic ne charge pas la DLL exacte demandée : $name"
+    }
 }
 # No game executable or UnityPlayer is started. The native helper loads Mono
 # and executes only the diagnostic's managed Main; no Game.Instance is accessed.
@@ -56,11 +59,12 @@ $exitCode = $LASTEXITCODE
 $passed = $exitCode -eq 0 -and (Select-String -LiteralPath $logPath -SimpleMatch 'Mono=True' -Quiet)
 $proof = [ordered]@{
     createdUtc = (Get-Date).ToUniversalTime().ToString('o')
-    scope = 'Offline rule/vital/calculated-stat/buff/area and owned-view lifecycle/state guards, raw presence and view rebinding, stat-cache replication, replica rollback and detached context reconstruction; no rendering or game/combat validation'
+    scope = 'Offline rule/vital/calculated-stat/buff/area guards, replica rollback, native memory source and synthetic fragmented checkpoint transfer; no native world capture/load, rendering or game/combat validation'
     success = [bool]$passed
     exitCode = $exitCode
     candidateFingerprint = if ($CandidateFingerprint) { $CandidateFingerprint } else { $null }
     modAssemblySha256 = $modHash
+    networkAssemblySha256 = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $modAssembly) 'WOTRMultiplayer.Networking.dll') -Algorithm SHA256).Hash
     gameAssemblySha256 = (Get-FileHash -LiteralPath $gameAssembly -Algorithm SHA256).Hash
     monoLibrarySha256 = (Get-FileHash -LiteralPath $monoLibrary -Algorithm SHA256).Hash
     harmonyLibrarySha256 = (Get-FileHash -LiteralPath $harmonyLibrary -Algorithm SHA256).Hash

@@ -14,6 +14,8 @@ using Kingmaker.EntitySystem.Stats;
 using Kingmaker.Enums;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Entities.Units;
+using WOTRMultiplayer.Networking;
+using WOTRMultiplayer.Networking.Messages.Game;
 
 // Offline diagnostic. No game process, Game.Instance, Unity initialization,
 // saves, installation writes or real gameplay units/results are involved.
@@ -150,6 +152,7 @@ internal static class Program
                 if (stage != 1) throw new InvalidOperationException("synthetic-host-not-prepared");
                 memory.SaveJson("header", "{\"GameId\":\"offline-native-checkpoint\"}");
                 memory.SaveJson("player", "{}"); memory.SaveJson("party", "{}");
+                memory.SaveBytes("synthetic.bin", new byte[70000]);
             }, () => stage == 0);
             safe &= captured.IsSealed && stage == 0;
             var restoredAfterFailure = false;
@@ -161,6 +164,30 @@ internal static class Program
                 safe = false;
             }
             catch (InvalidOperationException) { safe &= restoredAfterFailure; }
+            var transferBytes = RealTimeNativeCheckpointCodec.Encode(captured);
+            var prepare = new NotifyRealTimeNativeCheckpoint
+            {
+                SessionId = "offline-native-checkpoint", Epoch = 1, LoadedSaveSeed = 17,
+                CheckpointId = "11111111111111111111111111111111", BuildFingerprint = new string('A', 64),
+                LastIncludedSequence = 7, CanonicalStateHash = 123, Stage = (int)RealTimeNativeCheckpointStage.Prepare
+            };
+            var manifest = RealTimeNativeCheckpointLimits.Copy(prepare);
+            manifest.Stage = (int)RealTimeNativeCheckpointStage.Manifest;
+            manifest.ArchiveBytes = transferBytes.Length; manifest.ArchiveHash = RealTimeNativeCheckpointLimits.Hash(transferBytes);
+            manifest.ChunkBytes = RealTimeNativeCheckpointLimits.ChunkBytes;
+            manifest.ChunkCount = (transferBytes.Length + manifest.ChunkBytes - 1) / manifest.ChunkBytes;
+            using var sender = new RealTimeNativeCheckpointSender(42, manifest, transferBytes);
+            using var receiver = new RealTimeNativeCheckpointReceiver(prepare, manifest);
+            foreach (var chunk in sender.GetDueChunks(DateTime.UtcNow).AsEnumerable().Reverse())
+                safe &= receiver.Accept(chunk) && receiver.Accept(chunk);
+            safe &= receiver.IsComplete && receiver.TakeCompleted().SequenceEqual(transferBytes);
+            var ack = new ClientRealTimeNativeCheckpointAck
+            {
+                SessionId = prepare.SessionId, Epoch = prepare.Epoch, LoadedSaveSeed = prepare.LoadedSaveSeed,
+                CheckpointId = prepare.CheckpointId, ArchiveHash = manifest.ArchiveHash, Stage = (int)RealTimeNativeCheckpointAckStage.Received
+            };
+            safe &= !sender.Acknowledge(99, ack) && sender.Acknowledge(42, ack) && sender.IsTransferred;
+            Console.WriteLine("native-checkpoint-transfer: reordered-and-duplicated=" + safe + "; archive-only=True; native-load-not-invoked=True");
             Console.WriteLine("native-host-capture-transaction: synthetic-restoration=" + safe + "; native-world-not-invoked=True");
             Console.WriteLine("native-memory-checkpoint: actual-header-decoder=" + safe + "; game-load-not-invoked=True");
             return safe;

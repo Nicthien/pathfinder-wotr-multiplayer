@@ -1041,7 +1041,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 dialog, globalMap, ping, hostCombat, settings, files, hostNetwork, values,
                 A.Fake<IHashService>(), mapper, mainThread);
             var client = new MultiplayerClient(A.Fake<ILogger<MultiplayerClient>>(), clientGame, leveling,
-                notification, dialog, globalMap, ping, clientCombat, settings, files, clientNetwork, values, mapper);
+                notification, dialog, globalMap, ping, clientCombat, settings, files, clientNetwork, values, mapper, mainThread);
             host.Game = new NetworkGame(new NetworkGameStartUp())
             {
                 Id = "integration-session",

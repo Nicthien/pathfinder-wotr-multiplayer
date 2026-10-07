@@ -209,6 +209,7 @@ namespace WOTRMultiplayer.Services
 
         public void PublishRealTimeCombatSnapshot()
         {
+            TickNativeCheckpointTransfer();
             CheckRealTimeModeSwitchTimeout();
             CheckRealTimeRepairTimeout();
             TickRealTimeCombatEnd();
@@ -857,6 +858,7 @@ namespace WOTRMultiplayer.Services
 
         public void Reset()
         {
+            ResetNativeCheckpointTransfer();
             Logger.LogInformation("Resetting");
             Interlocked.Exchange(ref _realTimeRepairVerificationOwner, null);
             _realTimeRuleRolls.Reset();
@@ -2410,6 +2412,7 @@ namespace WOTRMultiplayer.Services
                .On<ClientRealTimeEntityIdFault>(OnClientRealTimeEntityIdFault)
                .On<ClientRealTimeCommandFault>(OnClientRealTimeCommandFault)
                .On<ClientRealTimeCombatEndAck>(OnClientRealTimeCombatEndAck)
+               .On<ClientRealTimeNativeCheckpointAck>(OnClientNativeCheckpointAck)
 
                // global map & crusade combat
                .On<NotifyTacticalCombatInitializationConfirmed>(OnNotifyTacticalCombatInitializationConfirmed)

@@ -318,7 +318,10 @@
             NotifyRealTimeAuthoritativeEvent,
             NotifyRealTimeCombatEnd,
             ClientRealTimeCombatEndAck,
-            NotifyRealTimeCombatCommandRejected
+            NotifyRealTimeCombatCommandRejected,
+            NotifyRealTimeNativeCheckpoint,
+            NotifyRealTimeNativeCheckpointChunk,
+            ClientRealTimeNativeCheckpointAck
         }
 
         public static class Mods

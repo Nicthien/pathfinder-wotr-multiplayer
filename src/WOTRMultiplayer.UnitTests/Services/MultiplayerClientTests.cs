@@ -359,7 +359,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 _fileSystemService,
                 _networkClient,
                 _valueGenerator,
-                _mapper);
+                _mapper, A.Fake<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>());
         }
 
         [Test]

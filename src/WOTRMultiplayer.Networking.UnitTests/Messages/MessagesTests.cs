@@ -152,7 +152,10 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
 
             var trees = new[] { "MultiplayerClient", "MultiplayerHost", "MultiplayerActorBase" }
                 .SelectMany(name => Directory.GetFiles(rootLocation, name + "*.cs"))
-                .Select(Create).ToList(); // Include the actors' partial implementations.
+                // Transport helpers also create messages. Scan production sources,
+                // never test fixtures, so a test-only creation cannot hide dead messages.
+                .Concat(Directory.GetFiles(Path.GetFullPath(@"..\..\..\..\WOTRMultiplayer.Networking"), "*.cs"))
+                .Select(Create).ToList();
 
             var allMessages = Assembly
                 .GetAssembly(typeof(BeetleXMessageTypes.ProtobufServerPacket))
@@ -198,12 +201,14 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(notCreatedMessages, Is.Empty, $"Some messages are never created ({notCreatedMessages.Count})");
         }
 
-        private (CSharpCompilation, SemanticModel, ClassDeclarationSyntax) Create(string path)
+        private (CSharpCompilation, SemanticModel, CompilationUnitSyntax) Create(string path)
         {
             var code = File.ReadAllText(path);
             var tree = CSharpSyntaxTree.ParseText(code);
 
-            var classDeclaration = tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First();
+            // Include every type in the file: the sender can follow limits and
+            // receiver types in the same compilation unit.
+            var compilationUnit = (CompilationUnitSyntax)tree.GetRoot();
 
             var compilation = CSharpCompilation.Create("whatever", [tree], [
                 MetadataReference.CreateFromFile(typeof(WOTRMultiplayer.Main).Assembly.Location),
@@ -211,7 +216,7 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 MetadataReference.CreateFromFile(Assembly.GetExecutingAssembly().Location)
                 ]);
             var semanticModel = compilation.GetSemanticModel(tree);
-            return (compilation, semanticModel, classDeclaration);
+            return (compilation, semanticModel, compilationUnit);
         }
     }
 }
