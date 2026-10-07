@@ -173,10 +173,19 @@ internal static class Program
                 .Invoke(confirmedParameters, new object[] { 23 });
             RealTimeBuffContextReplication.Apply(initialized, captured, _ => confirmedParameters);
             var contextApplied = ranks[0] == 15 && initialized.Params.DC == 23;
+            captured[0].MainTarget = new WOTRMultiplayer.Entities.NetworkTargetWrapper(
+                new WOTRMultiplayer.Entities.NetworkVector3(4, 5, 6), 0.5f, null);
+            var restored = RealTimeBuffContextFactory.Create(captured, _ => blueprint,
+                _ => throw new InvalidOperationException("unexpected-unit-lookup"),
+                _ => throw new InvalidOperationException("unexpected-item-lookup"),
+                _ => throw new InvalidOperationException("unexpected-ability-lookup"), _ => confirmedParameters);
+            var contextRestored = RealTimeBuffContextReplication.Validate(restored, captured) == null
+                && restored.Params.DC == 23 && restored.ParentContext == null;
+            Console.WriteLine("installed-buff-context-factory: restored-without-world=" + contextRestored);
             Console.WriteLine("installed-buff-context: captured-without-world=" + contextCopied + "; applied-without-recalculation=" + contextApplied);
             Console.WriteLine("installed-buff-replica: empty=" + initiallyEmpty + "; registered-without-components=" + registered
                 + "; cache-rollback=" + rolledBack);
-            return initiallyEmpty && registered && rolledBack && contextCopied && contextApplied;
+            return initiallyEmpty && registered && rolledBack && contextCopied && contextApplied && contextRestored;
         }
         catch (Exception failure) { Console.WriteLine("installed-buff-replica: FAILED: " + failure); return false; }
     }
