@@ -112,7 +112,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (Game.Instance?.Player == null || Game.Instance.Player.PartyAndPets.Any(unit => unit.IsInCombat))
                         throw new InvalidOperationException("final-party-state-is-still-in-combat");
                     if (RealTimePresentationRuntime.Enabled)
+                    {
                         RealTimeBuffReplicaStore.RequireMechanicalState(Game.Instance.State.Units);
+                        RealTimeAreaReplicaFactory.RequireMechanicalState(Game.Instance.State.AreaEffects);
+                    }
                     RealTimeUnitResultReplication.ApplyPartyCombatEnd(Game.Instance.Player);
                     finalize();
                     completion.TrySetResult(true);

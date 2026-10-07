@@ -13,7 +13,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
     {
         private static bool SavingBlocked => Main.Multiplayer?.IsSavingBlockedByCombatSync == true
             || RealTimePresentationRuntime.Enabled
-                && RealTimeBuffReplicaStore.RequiresMechanicalRebuild(Game.Instance?.State?.Units);
+                && (RealTimeBuffReplicaStore.RequiresMechanicalRebuild(Game.Instance?.State?.Units)
+                    || RealTimeAreaReplicaFactory.RequiresMechanicalRebuild(Game.Instance?.State?.AreaEffects));
 
         [HarmonyPatch(typeof(SaveManager), nameof(SaveManager.IsSaveAllowed))]
         [HarmonyPostfix]

@@ -39,7 +39,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var occupants = state.UnitsInside.Select(id =>
             {
                 var unit = resolveUnit(id);
-                if (unit == null || !string.Equals(unit.UniqueId, id, StringComparison.OrdinalIgnoreCase))
+                if (unit == null || ReferenceEquals(unit.Proxy, null)
+                    || !string.Equals(unit.UniqueId, id, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("unresolved-area-occupant:" + id);
                 return new AreaEffectEntityData.UnitInfo { Reference = unit, InsideThisTick = true };
             }).ToList();

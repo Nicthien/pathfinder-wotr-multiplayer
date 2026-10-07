@@ -279,14 +279,58 @@ internal static class Program
             RealTimeAreaReplication.Apply(replica, state, _ => null, _ => null);
             rawApplied &= areaType.GetField("m_Duration", fields).GetValue(replica) == null;
             _suppress = false;
+            var blueprintData = (Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbilityAreaEffect)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbilityAreaEffect));
+            blueprintData.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("11111111111111111111111111111111");
+            var context = (Kingmaker.UnitLogic.Mechanics.MechanicsContext)Activator.CreateInstance(
+                typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext), fields, null,
+                new object[] { default(Kingmaker.EntitySystem.Persistence.JsonUtility.JsonConstructorMark) }, null);
+            typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext).GetField("AssociatedBlueprint", fields).SetValue(context, blueprintData);
+            var node = new NetworkBuffContextState
+            {
+                BlueprintId = blueprintData.AssetGuid.ToString(), Params = new(), Direction = new(), SpellLevel = 5,
+                Ranks = ((int[])context.GetType().GetField("m_Ranks", fields).GetValue(context)).ToList(),
+                SharedValues = ((int[])context.GetType().GetField("m_SharedValues", fields).GetValue(context)).ToList(),
+                Properties = ((int[])context.GetType().GetField("m_Properties", fields).GetValue(context)).ToList()
+            };
+            state.Id = "replica"; state.BlueprintId = node.BlueprintId;
+            state.TargetPoint = new WOTRMultiplayer.Entities.NetworkVector3(1, 0, 1);
+            state.ContextChain = new System.Collections.Generic.List<NetworkBuffContextState> { node };
+            var detached = RealTimeAreaReplicaFactory.CreateDetached(blueprintData, context, state, _ => null,
+                _ => (Kingmaker.UnitLogic.Abilities.AbilityParams)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Abilities.AbilityParams)));
+            var lifecycle = harmony.CreateClassProcessor(typeof(RealTimeAreaReplicaLifecyclePatches)).Patch();
+            if (lifecycle?.Count != 12) throw new InvalidOperationException("Area replica lifecycle guards were not installed.");
+            foreach (var target in RealTimeAreaReplicaLifecyclePatches.Targets().Cast<MethodInfo>())
+                target.Invoke(detached, target.GetParameters().Select(p => p.ParameterType.IsValueType
+                    ? Activator.CreateInstance(p.ParameterType) : null).ToArray());
+            var detachedSafe = RealTimeAreaReplicaFactory.IsReplica(detached) && detached.UniqueId == "replica"
+                && detached.Context.SpellLevel == 5 && !detached.IsTurnedOn && !detached.Facts.List.Any()
+                && detached.Parts != null && detached.HoldingState == null && _reports == 6;
+            var targetUnit = (Kingmaker.EntitySystem.Entities.UnitEntityData)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.EntitySystem.Entities.UnitEntityData));
+            typeof(Kingmaker.EntitySystem.Entities.UnitEntityData).GetField("<Descriptor>k__BackingField", fields).SetValue(targetUnit,
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(UnitDescriptor)));
+            typeof(Kingmaker.EntitySystem.EntityDataBase).GetField("<UniqueId>k__BackingField", fields).SetValue(targetUnit, "target");
+            var proxyField = typeof(Kingmaker.EntitySystem.EntityDataBase).GetField("<Proxy>k__BackingField", fields);
+            proxyField.SetValue(targetUnit, System.Runtime.Serialization.FormatterServices.GetUninitializedObject(proxyField.FieldType));
+            state.TargetPoint = null; state.TargetUnitId = "target"; state.IsAttachedToUnit = true;
+            var attached = RealTimeAreaReplicaFactory.CreateDetached(blueprintData, context, state, _ => targetUnit,
+                _ => (Kingmaker.UnitLogic.Abilities.AbilityParams)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Abilities.AbilityParams)));
+            var targetData = (Kingmaker.Utility.TargetWrapper)typeof(Kingmaker.EntitySystem.Entities.AreaEffectEntityData)
+                .GetField("m_Target", fields).GetValue(attached);
+            detachedSafe &= targetData.UnitRef.Id == "target" && attached.HoldingState == null && _reports == 6;
             // Do not execute host originals on synthetic worldless objects.
             var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
                 && RealTimeAreaCallbackPatches.Targets().All(target =>
                     RealTimeAreaCallbackPatches.BeforeCallback(target, null));
             Console.WriteLine("installed-area-authority: scheduler-targets=" + scheduler.Count
                 + "; callback-targets=" + callbacks.Count + "; blocked-without-world=" + blocked
-                + "; host-prefix-allows=" + hostAllowed + "; raw-state-without-world=" + rawApplied);
-            return blocked && hostAllowed && rawApplied;
+                + "; host-prefix-allows=" + hostAllowed + "; raw-state-without-world=" + rawApplied
+                + "; detached-factory=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count);
+            return blocked && hostAllowed && rawApplied && detachedSafe;
         }
         catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
         finally
