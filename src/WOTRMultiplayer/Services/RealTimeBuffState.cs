@@ -9,6 +9,28 @@ namespace WOTRMultiplayer.Services
     // different casters, durations and ranks. Never match by blueprint alone.
     public static class RealTimeBuffState
     {
+        public static List<NetworkBuff> MissingForPresentationRestore(NetworkUnitBuffCollection expected,
+            NetworkUnitBuffCollection local)
+        {
+            if (expected?.Buffs == null || local?.Buffs == null)
+                throw new InvalidOperationException("missing-buff-collection");
+            var localIds = new HashSet<string>(local.Buffs.Where(buff => buff != null).Select(buff => buff.Id),
+                StringComparer.OrdinalIgnoreCase);
+            var missing = expected.Buffs.Where(buff => buff != null && !localIds.Contains(buff.Id)).ToList();
+            // Validate the prospective collection, without treating a matching
+            // blueprint as a matching instance or ignoring extra local facts.
+            var error = ValidateCollection(expected, new NetworkUnitBuffCollection
+            {
+                Buffs = local.Buffs.Concat(missing).ToList(), NegativeLevels = local.NegativeLevels
+            });
+            if (error != null) throw new InvalidOperationException(error);
+            foreach (var buff in missing)
+                if (buff.ContextChain == null || !string.Equals(buff.ContextChain[0].BlueprintId,
+                    buff.BlueprintId, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("missing-or-mismatched-buff-restoration-context:" + buff.Id);
+            return missing;
+        }
+
         public static string ValidateCollection(NetworkUnitBuffCollection expected, NetworkUnitBuffCollection local)
         {
             var error = Validate(expected?.Buffs, local?.Buffs);

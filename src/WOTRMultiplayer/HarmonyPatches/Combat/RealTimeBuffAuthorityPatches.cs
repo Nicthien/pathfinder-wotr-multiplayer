@@ -4,6 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using Kingmaker.UnitLogic.Buffs;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
 {
@@ -24,6 +25,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         }
 
         [HarmonyPrefix]
-        public static bool BeforeScheduledMutation() => !RealTimePresentationRuntime.IsClientActive;
+        public static bool BeforeScheduledMutation(BuffCollection __instance) => !RealTimePresentationRuntime.IsClientActive
+            && !RealTimeBuffReplicaStore.RequiresMechanicalRebuild(__instance?.Manager);
     }
 }

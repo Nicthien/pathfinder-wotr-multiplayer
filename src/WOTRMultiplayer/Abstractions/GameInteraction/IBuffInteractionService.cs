@@ -14,5 +14,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         void UpdateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
 
         string ValidateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
+
+        void StageMissingUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection,
+            WOTRMultiplayer.Services.GameInteraction.RealTimeBuffRestoreTransaction transaction);
     }
 }

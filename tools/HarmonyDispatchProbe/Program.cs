@@ -155,6 +155,43 @@ internal static class Program
                 registered = ReferenceEquals(manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Single(), buff)
                     && ReferenceEquals(manager.FindById(buff.UniqueId), buff) && !buff.IsActive && !buff.IsSubscribedOnEventBus;
             var rolledBack = !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any() && buff.Manager == null;
+            var replicaHarmony = new Harmony("WOTRMultiplayer.OfflineProbe.replica-lifecycle");
+            var replicaGuards = replicaHarmony.CreateClassProcessor(typeof(RealTimeBuffReplicaLifecyclePatches)).Patch();
+            if (replicaGuards == null || replicaGuards.Count != 5) throw new InvalidOperationException("Replica lifecycle guards were not installed.");
+            try
+            {
+                using (var rollback = new RealTimeBuffRestoreTransaction())
+                {
+                    rollback.Register(manager, buff, null);
+                    foreach (var target in RealTimeBuffReplicaLifecyclePatches.Targets())
+                        ((MethodInfo)target).Invoke(buff, target.GetParameters().Length == 0 ? null : new object[] { TimeSpan.Zero });
+                    if (!ReferenceEquals(manager.FindById(buff.UniqueId), buff)) throw new InvalidOperationException("Replica removed itself.");
+                    var expected = new WOTRMultiplayer.Entities.Combat.NetworkCombatState();
+                    var actual = new WOTRMultiplayer.Entities.Combat.NetworkCombatState
+                        { Units = new System.Collections.Generic.List<NetworkUnit> { new NetworkUnit { Id = "unexpected" } } };
+                    try { rollback.VerifyAndCommit(expected, actual); throw new InvalidOperationException("Bad checkpoint was committed."); }
+                    catch (InvalidOperationException mismatch) when (mismatch.Message == "buff-restoration-checkpoint-hash-mismatch") { }
+                }
+                rolledBack &= !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any() && buff.Manager == null;
+                Console.WriteLine("installed-buff-restoration: guarded-callbacks=" + replicaGuards.Count + "; mismatch-rollback=" + rolledBack);
+                using (var registration = RealTimeBuffReplicaStore.Register(manager, buff)) registration.Commit();
+                using (var removal = new RealTimeBuffRestoreTransaction()) removal.Remove(manager, buff, null);
+                var removalRolledBack = ReferenceEquals(manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Single(), buff);
+                using (var removal = new RealTimeBuffRestoreTransaction())
+                {
+                    removal.Remove(manager, buff, null);
+                    removal.VerifyAndCommit(new WOTRMultiplayer.Entities.Combat.NetworkCombatState(),
+                        new WOTRMultiplayer.Entities.Combat.NetworkCombatState());
+                }
+                var removalCommitted = !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any() && buff.Manager == null;
+                rolledBack &= removalRolledBack && removalCommitted;
+                Console.WriteLine("installed-buff-removal: rollback=" + removalRolledBack + "; commit=" + removalCommitted);
+            }
+            finally
+            {
+                foreach (var target in RealTimeBuffReplicaLifecyclePatches.Targets())
+                    replicaHarmony.Unpatch(target, HarmonyPatchType.All, replicaHarmony.Id);
+            }
             var initialized = (Kingmaker.UnitLogic.Mechanics.MechanicsContext)Activator.CreateInstance(
                 typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext), BindingFlags.Instance | BindingFlags.NonPublic,
                 null, new object[] { default(Kingmaker.EntitySystem.Persistence.JsonUtility.JsonConstructorMark) }, null);

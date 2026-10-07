@@ -1,5 +1,7 @@
 # Rapport de développement — Multijoueur temps réel avec pause, sans DLC
 
+> Incrément du 7 octobre 2026 : variante 0.4.16.13, protocole 49. Création des buffs de présentation branchée aux états réseau, retraits des représentations expirées, vérification et annulation transactionnelles. Prototype : 661 tests et diagnostic Mono du candidat exact réussis. Voir le [bilan de restauration](rtwp-buff-restoration-2026-10-07.md). Les représentations ne sont pas des buffs mécaniques complets : sauvegarde, fermeture et tour par tour restent protégés tant qu'elles ne sont pas reconstruites mécaniquement. Aucune récupération jouable ou validation en combat réel n'est annoncée.
+
 > Incrément du 7 octobre 2026 : fabrique de contextes de présentation détachés ajoutée à la variante 0.4.16.12, protocole 48. Compilation prototype, 644 tests et diagnostic Mono du candidat exact réussis, sans lancement du jeu. Voir le [bilan de reconstruction des contextes](rtwp-buff-context-factory-2026-10-07.md). Le branchement transactionnel à la réparation réseau reste à faire ; aucun combat réel n'est validé.
 
 > Incrément du 7 octobre 2026 : variante 0.4.16.12, protocole 48, empreinte schéma 14. Capture et transport des valeurs de contexte des buffs, vérification de leur chaîne et application sans recalcul aux contextes existants. Voir le [bilan des contextes](rtwp-buff-context-2026-10-07.md). Les créations de buffs absents ne sont pas encore branchées à la restauration transactionnelle ; aucune validation en combat réel.

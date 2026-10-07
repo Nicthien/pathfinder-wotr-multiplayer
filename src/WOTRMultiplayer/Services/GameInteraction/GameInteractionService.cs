@@ -348,6 +348,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         completion.TrySetResult(false);
                         return;
                     }
+                    if (enabled && RealTimePresentationRuntime.Enabled)
+                        RealTimeBuffReplicaStore.RequireMechanicalState(Game.Instance.State.Units);
                     SettingsRoot.Game.TurnBased.EnableTurnBasedMode.SetValueAndConfirm(enabled);
                     if (SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue() != enabled)
                     {

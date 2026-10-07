@@ -111,6 +111,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (!canFinalize()) { completion.TrySetResult(false); return; }
                     if (Game.Instance?.Player == null || Game.Instance.Player.PartyAndPets.Any(unit => unit.IsInCombat))
                         throw new InvalidOperationException("final-party-state-is-still-in-combat");
+                    if (RealTimePresentationRuntime.Enabled)
+                        RealTimeBuffReplicaStore.RequireMechanicalState(Game.Instance.State.Units);
                     RealTimeUnitResultReplication.ApplyPartyCombatEnd(Game.Instance.Player);
                     finalize();
                     completion.TrySetResult(true);
@@ -559,7 +561,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    ApplyRealTimeCombatState(networkCombatState);
+                    using var restoration = new RealTimeBuffRestoreTransaction();
+                    ApplyRealTimeCombatState(networkCombatState, restoration);
+                    if (restoration.HasChanges)
+                        restoration.VerifyAndCommit(networkCombatState, GetRealTimeCombatState());
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)
@@ -591,8 +596,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         completion.TrySetResult(null);
                         return;
                     }
-                    ApplyRealTimeCombatState(networkCombatState);
-                    completion.TrySetResult(GetRealTimeCombatState());
+                    using var restoration = new RealTimeBuffRestoreTransaction();
+                    ApplyRealTimeCombatState(networkCombatState, restoration);
+                    var applied = GetRealTimeCombatState();
+                    restoration.VerifyAndCommit(networkCombatState, applied);
+                    completion.TrySetResult(applied);
                 }
                 catch (Exception ex)
                 {
@@ -603,7 +611,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
-        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState)
+        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState, RealTimeBuffRestoreTransaction restoration)
         {
             var projectileStates = networkCombatState.ProjectilesCaptured
                 ? RealTimeProjectileReplica.ValidateAndCopy(networkCombatState.Projectiles) : null;
@@ -617,7 +625,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName,
                 getLocalBuffs: id => _buffInteractionService.GetUnitBuffs(
                     _gameStateLookupService.GetUnitEntity(id)).Buffs,
-                canRecreateBuff: _buffInteractionService.CanRecreateBuff,
+                canRecreateBuff: buff => RealTimePresentationRuntime.Enabled
+                    ? buff?.ContextChain != null && RealTimeBuffContextChain.Validate(buff.ContextChain) == null
+                    : _buffInteractionService.CanRecreateBuff(buff),
                 getLocalArea: area => _mapper.Map<NetworkAreaEffect>(
                     _gameStateLookupService.GetAreaEffect(area)));
             if (missing != null)
@@ -633,6 +643,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 localAreaIds: localCombatState.AreaEffects.Select(area => area.Id));
             if (extra != null)
                 throw new InvalidOperationException(extra);
+
+            if (RealTimePresentationRuntime.Enabled)
+                foreach (var networkUnit in networkCombatState.Units)
+                    _buffInteractionService.StageMissingUnitBuffsPresentation(
+                        _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection, restoration);
 
             foreach (var networkUnit in networkCombatState.Units)
             {

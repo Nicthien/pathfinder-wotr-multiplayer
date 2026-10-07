@@ -67,6 +67,52 @@ namespace WOTRMultiplayer.Services.GameInteraction
             && !string.IsNullOrEmpty(buff.BlueprintId)
             && _recreatableBuffs.ContainsKey(buff.BlueprintId);
 
+        public void StageMissingUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection,
+            RealTimeBuffRestoreTransaction transaction)
+        {
+            if (!RealTimePresentationRuntime.Enabled) throw new InvalidOperationException("presentation-prototype-disabled");
+            var expectedIds = new HashSet<string>(unitBuffCollection.Buffs.Where(buff => buff != null).Select(buff => buff.Id),
+                StringComparer.OrdinalIgnoreCase);
+            var removable = GetSyncableUnitBuffs(unit).Where(buff => RealTimeBuffReplicaStore.IsReplica(buff)
+                && !expectedIds.Contains(buff.UniqueId)).ToList();
+            var removableIds = new HashSet<string>(removable.Select(buff => buff.UniqueId), StringComparer.OrdinalIgnoreCase);
+            var local = GetUnitBuffs(unit);
+            var missing = RealTimeBuffState.MissingForPresentationRestore(unitBuffCollection, new NetworkUnitBuffCollection
+            {
+                Buffs = local.Buffs.Where(buff => !removableIds.Contains(buff.Id)).ToList(), NegativeLevels = local.NegativeLevels
+            });
+            if (missing.Count == 0 && removable.Count == 0) return;
+            var prepared = new List<Buff>();
+            var baseTime = BuffBaseTime;
+            foreach (var confirmed in missing)
+            {
+                var blueprint = ResourcesLibrary.TryGetBlueprint<BlueprintBuff>(confirmed.BlueprintId);
+                var referencedUnits = confirmed.ContextChain.SelectMany(node => new[] { node.CasterId, node.OwnerId })
+                    .Where(id => id != null).Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(id => _gameStateLookupService.GetUnitEntity(id)).Where(value => value != null)
+                    .Concat(new[] { unit }).Distinct().ToList();
+                var context = RealTimeBuffContextFactory.Create(confirmed.ContextChain,
+                    id => ResourcesLibrary.TryGetBlueprint<BlueprintScriptableObject>(id),
+                    id => _gameStateLookupService.GetUnitEntity(id),
+                    id => referencedUnits.SelectMany(owner => owner.Inventory.Items)
+                        .FirstOrDefault(item => string.Equals(item.UniqueId, id, StringComparison.OrdinalIgnoreCase)),
+                    node =>
+                    {
+                        var caster = _gameStateLookupService.GetUnitEntity(node.CasterId);
+                        return caster == null ? null : _gameStateLookupService.FindAbility(caster, node.SourceAbility);
+                    },
+                    parameters => _mapper.Map<AbilityParams>(parameters));
+                prepared.Add(RealTimeBuffReplicaStore.CreateDetached(blueprint, context, confirmed, baseTime));
+            }
+            // Resolve the entire unit's missing effects before registering any.
+            foreach (var replica in removable)
+                transaction.Remove(unit.Facts, replica, () => unit.Buffs.UpdateNextEvent());
+            foreach (var replica in prepared)
+                transaction.Register(unit.Facts, replica, () => unit.Buffs.UpdateNextEvent());
+            _logger.LogInformation("Staged host buff replicas: added={Added}, removed={Removed}. UnitId={UnitId}",
+                prepared.Count, removable.Count, unit.UniqueId);
+        }
+
         public string ValidateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection)
         {
             var error = RealTimeBuffState.ValidateCollection(unitBuffCollection, GetUnitBuffs(unit));
