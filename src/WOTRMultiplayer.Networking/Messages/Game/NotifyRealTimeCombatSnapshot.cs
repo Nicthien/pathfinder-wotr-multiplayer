@@ -42,5 +42,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(9)]
         [LogMe]
         public long IncludedEventSequence { get; set; }
+
+        [ProtoMember(10)]
+        public NetworkAcceptedOrderReference AcceptedOrders { get; set; }
     }
 }

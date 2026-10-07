@@ -37,8 +37,15 @@ internal static partial class Program
             try { RealTimeAcceptedOrderLedger.RestoreReference(client, reference, "offline-session", 4, 3, 8, () => true); }
             catch (InvalidOperationException) { rejected = true; }
             safe &= rejected;
+            var verifiedHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
+            { ActiveOrders = new System.Collections.Generic.List<RealTimeCommandEnvelope>(RealTimeAcceptedOrderLedger.MaterializeReference(reference)) });
+            RealTimeAcceptedOrderLedger.CommitSnapshotReference(client, reference, "offline-session", 4, 3, 8, verifiedHash, () => true);
+            var metadataCommit = client.LastAuthoritativeSequence == 8 && client.CanonicalStateHash == verifiedHash
+                && client.AcceptedOrders.Count == 1 && client.Phase == CombatSynchronizationPhase.Stable;
+            safe &= metadataCommit;
             Console.WriteLine("accepted-order-reference: evidence-restored=" + safe
                 + "; cursor-not-advanced=True; snapshot-isolated=True; stable-restoration-rejected=" + rejected
+                + "; separate-stable-snapshot-metadata-commit=" + metadataCommit
                 + "; native-commands-not-invoked=True");
             return safe;
         }

@@ -381,6 +381,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
+                Id = "snapshot-session",
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
             };
             A.CallTo(() => _combatInteractionService.TryApplyAndReadRealTimeCombatStateAsync(
@@ -388,14 +389,9 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .Returns(Task.FromResult(new NetworkCombatState()));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
 
-            handler.Invoke(-1, new NotifyRealTimeCombatSnapshot
-            {
-                Epoch = 2,
-                Sequence = 1,
-                ResponseTimeMs = 42,
-                MissingReplies = 3,
-                State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
-            });
+            var snapshot = StandaloneSnapshot();
+            snapshot.ResponseTimeMs = 42; snapshot.MissingReplies = 3;
+            handler.Invoke(-1, snapshot);
 
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>.That.Matches(x => x.Epoch == 2 && x.Sequence == 1)))
                 .MustHaveHappenedOnceExactly();
@@ -413,6 +409,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
+                Id = "snapshot-session",
                 RealTimeCombat = new NetworkRealTimeCombatState
                 {
                     Mode = CombatMode.RealTimeWithPause, Epoch = 2
@@ -428,12 +425,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                     return Task.FromResult<NetworkCombatState>(null);
                 });
 
-            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient)(-1,
-                new NotifyRealTimeCombatSnapshot
-                {
-                    Epoch = 2, Sequence = 1,
-                    State = new Networking.Messages.Contracts.NetworkCombatState()
-                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient)(-1, StandaloneSnapshot());
 
             Assert.That(_multiplayerClient.Game, Is.SameAs(replacement));
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>._))
@@ -445,6 +437,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
             {
+                Id = "snapshot-session",
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 2 }
             };
             A.CallTo(() => _combatInteractionService.TryApplyAndReadRealTimeCombatStateAsync(
@@ -452,16 +445,21 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .Returns(Task.FromException<NetworkCombatState>(new InvalidOperationException("missing unit")));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatSnapshot>(_networkClient);
 
-            handler.Invoke(-1, new NotifyRealTimeCombatSnapshot
-            {
-                Epoch = 2, Sequence = 1,
-                State = new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState()
-            });
+            handler.Invoke(-1, StandaloneSnapshot());
 
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeStateHash>.That.Matches(x =>
                 x.Epoch == 2 && x.Sequence == 1 && !x.Applied && x.FailureReason.Contains("missing unit"))))
                 .MustHaveHappenedOnceExactly();
         }
+
+        private static NotifyRealTimeCombatSnapshot StandaloneSnapshot() => new()
+        {
+            SessionId = "snapshot-session", Epoch = 2, Sequence = 1,
+            State = new Networking.Messages.Contracts.NetworkCombatState(),
+            CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot()),
+            AcceptedOrders = new Networking.Messages.Contracts.NetworkAcceptedOrderReference
+            { SessionId = "snapshot-session", Epoch = 2, LastIncludedSequence = 1 }
+        };
 
         [Test]
         public void RealTimeCommand_OnlyOwnedUnitIsSentWithIncreasingSequence()

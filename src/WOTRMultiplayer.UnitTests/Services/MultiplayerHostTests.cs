@@ -290,6 +290,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
             {
+                Id = "snapshot-session",
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
             };
@@ -308,6 +309,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         public void RealTimeSnapshot_ClientApplicationFailure_StartsPausedRepair()
         {
             PrepareRealTimeRepairTest();
+            _multiplayerHost.Game.Id = "snapshot-session";
             A.CallTo(() => _combatInteractionService.GetRealTimeCombatState()).Returns(new NetworkCombatState());
             _multiplayerHost.PublishRealTimeCombatSnapshot();
             var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeStateHash>(_networkServer);

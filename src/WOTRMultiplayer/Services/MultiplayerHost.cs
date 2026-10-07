@@ -236,13 +236,17 @@ namespace WOTRMultiplayer.Services
 
             var state = CombatInteraction.GetRealTimeCombatState();
             EnsurePresentationLane(Game.RealTimeCombat);
+            var orders = RealTimePresentationRuntime.Enabled
+                ? RealTimeAcceptedOrderLedger.CaptureReference(Game.RealTimeCombat, Game.Id, Game.LoadedSaveSeed) : null;
             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
             {
                 Combat = state,
-                ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(Game.RealTimeCombat).ToList()
+                ActiveOrders = orders == null ? RealTimeAcceptedOrderLedger.Snapshot(Game.RealTimeCombat).ToList()
+                    : RealTimeAcceptedOrderLedger.MaterializeReference(orders).ToList()
             });
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             var sequence = coordinator.PublishAuthoritativeSnapshot(hash);
+            if (orders != null) orders.LastIncludedSequence = sequence;
             _realTimeSnapshotHashes[(Game.RealTimeCombat.Epoch, sequence)] = hash;
             _realTimeSnapshotSentAt[(Game.RealTimeCombat.Epoch, sequence)] = DateTime.UtcNow;
             foreach (var key in _realTimeSnapshotHashes.Keys)
@@ -264,6 +268,7 @@ namespace WOTRMultiplayer.Services
                 SessionId = Game.Id,
                 LoadedSaveSeed = Game.LoadedSaveSeed,
                 IncludedEventSequence = _presentationSequence,
+                AcceptedOrders = orders,
                 CanonicalStateHash = hash,
                 ResponseTimeMs = Game.RealTimeCombat.ResponseTimeMs,
                 MissingReplies = Game.RealTimeCombat.MissingSnapshotReplies,

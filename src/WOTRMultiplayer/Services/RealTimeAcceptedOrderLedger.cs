@@ -107,6 +107,41 @@ namespace WOTRMultiplayer.Services
                 throw new InvalidOperationException("native-order-ledger-changed");
         }
 
+        public static RealTimeCommandEnvelope[] MaterializeReference(NetworkAcceptedOrderReference reference)
+        {
+            RealTimeAcceptedOrderReferenceValidation.RequireValid(reference);
+            var copy = Serializer.DeepClone(reference);
+            RealTimeAcceptedOrderReferenceValidation.RequireValid(copy);
+            return copy.Orders.Select(order => new RealTimeCommandEnvelope
+            {
+                Epoch = copy.Epoch, Sequence = order.Sequence, PlayerId = order.PlayerId, UnitId = order.UnitId,
+                Kind = (RealTimeCommandKind)order.Kind, Payload = order.PayloadHash, CommandId = order.CommandId,
+                SessionId = copy.SessionId, LoadedSaveSeed = copy.LoadedSaveSeed
+            }).ToArray();
+        }
+
+        // Caller must first verify actual combat data/hash under the snapshot gate.
+        // Metadata/cursor commit only: no gameplay, native graph or resume permission.
+        public static void CommitSnapshotReference(NetworkRealTimeCombatState state, NetworkAcceptedOrderReference reference,
+            string session, int save, long epoch, long includedSequence, ulong verifiedHash, Func<bool> authorized)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            if (authorized == null) throw new ArgumentNullException(nameof(authorized));
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(reference, session, save, epoch, includedSequence);
+            var copy = Serializer.DeepClone(reference);
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(copy, session, save, epoch, includedSequence);
+            var replacement = MaterializeReference(copy).ToList();
+            lock (state)
+            {
+                if (!authorized() || state.Mode != CombatMode.RealTimeWithPause || state.Phase != CombatSynchronizationPhase.Stable
+                    || state.CombatEndPending || state.Epoch != epoch || state.LastAuthoritativeSequence >= includedSequence)
+                    throw new InvalidOperationException("snapshot-order-commit-revoked");
+                state.AcceptedOrders = replacement;
+                state.LastAuthoritativeSequence = includedSequence;
+                state.CanonicalStateHash = verifiedHash;
+            }
+        }
+
         // Restores bounded evidence only, never native commands, command-gate watermarks,
         // event cursors, combat phase or permission to resume/save. Commit owns those.
         public static void RestoreReference(NetworkRealTimeCombatState state, NetworkAcceptedOrderReference reference,

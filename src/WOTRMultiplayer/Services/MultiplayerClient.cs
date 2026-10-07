@@ -1366,6 +1366,19 @@ namespace WOTRMultiplayer.Services
                 combat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
 
                 var state = Mapper.Map<NetworkCombatState>(message.State);
+                Networking.Messages.Contracts.NetworkAcceptedOrderReference orders = null;
+                if (RealTimePresentationRuntime.Enabled)
+                {
+                    RealTimeAcceptedOrderReferenceValidation.RequireIdentity(message.AcceptedOrders,
+                        session.Id, session.LoadedSaveSeed, combat.Epoch, message.Sequence);
+                    orders = ProtoBuf.Serializer.DeepClone(message.AcceptedOrders);
+                    RealTimeAcceptedOrderReferenceValidation.RequireIdentity(orders,
+                        session.Id, session.LoadedSaveSeed, combat.Epoch, message.Sequence);
+                    var advertisedHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
+                    { Combat = state, ActiveOrders = RealTimeAcceptedOrderLedger.MaterializeReference(orders).ToList() });
+                    if (advertisedHash != message.CanonicalStateHash)
+                        throw new InvalidOperationException("snapshot-order-reference-not-bound-to-state-hash");
+                }
                 bool CanApply() => IsCurrentRealTimeMessage(session, combat, message.Epoch)
                     && combat.Mode == CombatMode.RealTimeWithPause && combat.Phase == CombatSynchronizationPhase.Stable
                     && !combat.CombatEndPending && coordinator.IsCurrent(message.Epoch, message.Sequence);
@@ -1377,17 +1390,27 @@ namespace WOTRMultiplayer.Services
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
                 {
                     Combat = actual,
-                    ActiveOrders = RealTimeAcceptedOrderLedger.Snapshot(combat).ToList()
+                    ActiveOrders = orders == null ? RealTimeAcceptedOrderLedger.Snapshot(combat).ToList()
+                        : RealTimeAcceptedOrderLedger.MaterializeReference(orders).ToList()
                 });
                 var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(state, actual);
-                combat.LastAuthoritativeSequence = message.Sequence;
-                combat.CanonicalStateHash = message.CanonicalStateHash;
+                var applied = temporalMismatch == null && (orders == null || hash == message.CanonicalStateHash);
+                if (orders != null)
+                {
+                    if (applied) RealTimeAcceptedOrderLedger.CommitSnapshotReference(combat, orders, session.Id,
+                        session.LoadedSaveSeed, combat.Epoch, message.Sequence, hash, CanApply);
+                }
+                else
+                {
+                    combat.LastAuthoritativeSequence = message.Sequence;
+                    combat.CanonicalStateHash = message.CanonicalStateHash;
+                }
                 Send(new ClientRealTimeStateHash
                 {
                     Epoch = message.Epoch,
                     Sequence = message.Sequence,
                     CanonicalStateHash = hash,
-                    Applied = temporalMismatch == null,
+                    Applied = applied,
                     FailureReason = temporalMismatch ??
                         (hash == message.CanonicalStateHash ? null : RealTimeCombatDiff.Summarize(state, actual))
                 });

@@ -146,5 +146,41 @@ namespace WOTRMultiplayer.UnitTests.Services
             if (fault == "missing") host.AcceptedOrders.Clear();
             Assert.Catch(() => RealTimeAcceptedOrderLedger.RequireUnchanged(host, reference, "session", 12));
         }
+
+        [Test]
+        public void VerifiedSnapshotCommitsOnlyEvidenceAndItsCursorInStableRealTime()
+        {
+            var host = RepairState(); RecordBoundOrder(host);
+            var reference = RealTimeAcceptedOrderLedger.CaptureReference(host, "session", 12);
+            var client = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 };
+            RealTimeAcceptedOrderLedger.CommitSnapshotReference(client, reference, "session", 12, 3, 9, 123, () => true);
+            Assert.That(client.LastAuthoritativeSequence, Is.EqualTo(9));
+            Assert.That(client.CanonicalStateHash, Is.EqualTo(123));
+            Assert.That(client.AcceptedOrders.Single().CommandId, Is.EqualTo("42:3:1"));
+            Assert.That(client.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            reference.Orders[0].UnitId = "mutated";
+            Assert.That(client.AcceptedOrders.Single().UnitId, Is.EqualTo("hero"));
+        }
+
+        [TestCase("revoked")][TestCase("repair")][TestCase("turn-based")][TestCase("end")]
+        [TestCase("epoch")][TestCase("duplicate")][TestCase("ahead")]
+        public void SnapshotCommitCannotReleaseABarrierOrRegressItsCursor(string fault)
+        {
+            var host = RepairState(); RecordBoundOrder(host);
+            var reference = RealTimeAcceptedOrderLedger.CaptureReference(host, "session", 12);
+            var client = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3, CanonicalStateHash = 99 };
+            if (fault == "repair") client.Phase = CombatSynchronizationPhase.Repairing;
+            if (fault == "turn-based") client.Mode = CombatMode.TurnBased;
+            if (fault == "end") client.CombatEndPending = true;
+            if (fault == "epoch") client.Epoch++;
+            if (fault == "duplicate") client.LastAuthoritativeSequence = 9;
+            if (fault == "ahead") client.LastAuthoritativeSequence = 10;
+            var cursor = client.LastAuthoritativeSequence; var journal = client.AcceptedOrders;
+            Assert.Throws<InvalidOperationException>(() => RealTimeAcceptedOrderLedger.CommitSnapshotReference(
+                client, reference, "session", 12, 3, 9, 123, () => fault != "revoked"));
+            Assert.That(client.LastAuthoritativeSequence, Is.EqualTo(cursor));
+            Assert.That(client.AcceptedOrders, Is.SameAs(journal));
+            Assert.That(client.CanonicalStateHash, Is.EqualTo(99));
+        }
     }
 }

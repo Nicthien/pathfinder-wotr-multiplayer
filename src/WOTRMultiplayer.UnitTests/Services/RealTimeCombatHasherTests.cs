@@ -10,6 +10,19 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public class RealTimeCombatHasherTests
     {
+        [TestCase("session")][TestCase("save")][TestCase("command")]
+        public void AcceptedOrderIdentityIsIncludedInTheCanonicalHash(string field)
+        {
+            var first = Sample(); var second = Sample();
+            RealTimeCommandEnvelope Order() => new()
+            { Epoch = 3, Sequence = 1, PlayerId = 42, UnitId = "hero", Payload = "hash", SessionId = "session", LoadedSaveSeed = 4, CommandId = "42:3:1" };
+            first.ActiveOrders.Add(Order()); second.ActiveOrders.Add(Order());
+            Assert.That(RealTimeCombatHasher.Compute(first), Is.EqualTo(RealTimeCombatHasher.Compute(second)));
+            if (field == "session") second.ActiveOrders[0].SessionId = "other";
+            if (field == "save") second.ActiveOrders[0].LoadedSaveSeed++;
+            if (field == "command") second.ActiveOrders[0].CommandId = "42:3:2";
+            Assert.That(RealTimeCombatHasher.Compute(first), Is.Not.EqualTo(RealTimeCombatHasher.Compute(second)));
+        }
         [Test]
         public void KineticistBurnAndMissingPartAreNotEquivalentReferenceStates()
         {

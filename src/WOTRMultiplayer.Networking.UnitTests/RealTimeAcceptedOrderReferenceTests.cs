@@ -28,6 +28,16 @@ namespace WOTRMultiplayer.Networking.UnitTests
             RealTimeAcceptedOrderReferenceValidation.RequireValid(decoded);
         }
 
+        [Test]
+        public void FrequentSnapshotCarriesIndependentAcceptedEvidenceInFieldTen()
+        {
+            var original = new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeCombatSnapshot { Sequence = 9, AcceptedOrders = Reference() };
+            var copy = ProtoBuf.Serializer.DeepClone(original);
+            original.AcceptedOrders.Orders[0].UnitId = "mutated";
+            Assert.That(copy.AcceptedOrders.Orders[0].UnitId, Is.EqualTo("hero"));
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(copy.AcceptedOrders, "session", 4, 5, 9);
+        }
+
         [TestCase("session")][TestCase("save")][TestCase("epoch")][TestCase("sequence")]
         public void OtherBarrierIdentityIsRejected(string fault)
         {
