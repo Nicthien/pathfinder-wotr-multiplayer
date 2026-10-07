@@ -19,7 +19,7 @@ using WOTRMultiplayer.Networking.Messages.Game;
 
 // Offline diagnostic. No game process, Game.Instance, Unity initialization,
 // saves, installation writes or real gameplay units/results are involved.
-internal static class Program
+internal static partial class Program
 {
     private static bool _suppress = true;
     private static int _reports;
@@ -116,6 +116,7 @@ internal static class Program
             success &= ProbeBuffReplica();
             success &= ProbeNativeCheckpoint();
             success &= ProbeNativeLoadLease();
+            success &= ProbeNativeGraphInspection();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;

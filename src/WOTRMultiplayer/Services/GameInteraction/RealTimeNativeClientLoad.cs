@@ -120,6 +120,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         if (!pending)
                         {
                             drained = true;
+                            lease.MarkWorkersDrained();
                             if (!lease.NativeCallbackCompleted || lease.Fault != null || game?.Player?.GameId != campaignId
                                 || previousPlayer == null || ReferenceEquals(game.Player, previousPlayer)
                                 || game.State?.LoadedAreaState == null || game.CurrentlyLoadedArea != lease.Info.Area
@@ -135,7 +136,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         // If the native loading handle is still live, keep
                         // watching it; do not assume an observation error means
                         // worker completion or start another native load.
-                        if (observed && !pending) { drained = true; break; }
+                        if (observed && !pending) { drained = true; lease.MarkWorkersDrained(); break; }
                     }
                     yield return null;
                 }

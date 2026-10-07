@@ -14,6 +14,22 @@ namespace WOTRMultiplayer.UnitTests.Services
 {
     public partial class RealTimeNativeClientLoadTests
     {
+        [Test]
+        public void CompletedReceiptRequiresDrainedLeaseAndNoLateFault()
+        {
+            var info = Info();
+            using var lease = RealTimeNativeLoadLease.Begin(new object(), info, () => true, (_, _) => { });
+            Assert.That(lease.IsDrainedAndCompleted, Is.False);
+            RealTimeNativeLoadLease.AdmitAreaLoad(info); lease.MarkNativeCallback();
+            Assert.That(lease.IsDrainedAndCompleted, Is.False);
+            lease.Dispose();
+            Assert.That(lease.IsDrainedAndCompleted, Is.False); // Disposal alone cannot certify native worker completion.
+            lease.MarkWorkersDrained();
+            Assert.That(lease.IsDrainedAndCompleted, Is.True);
+            lease.Fail("late-native-fault");
+            Assert.That(lease.IsDrainedAndCompleted, Is.False);
+        }
+
         private static IEnumerable<MethodBase> LifecycleTargets() => RealTimeNativeLifecycleFailurePatches.TargetMethods();
 
         [TestCaseSource(nameof(LifecycleTargets))]

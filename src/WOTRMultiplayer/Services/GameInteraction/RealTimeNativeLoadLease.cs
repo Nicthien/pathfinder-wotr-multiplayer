@@ -19,11 +19,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private int _disposed;
         private int _admitted;
         private int _completed;
+        private int _workersDrained;
         private string _fault;
         internal object Owner { get; }
         internal SaveInfo Info { get; }
         internal bool NativeCallbackCompleted => Volatile.Read(ref _completed) != 0;
         internal string Fault => Volatile.Read(ref _fault);
+        internal bool IsDrainedAndCompleted => Volatile.Read(ref _disposed) != 0
+            && Volatile.Read(ref _workersDrained) != 0 && NativeCallbackCompleted && Fault == null;
         internal static bool IsActive => Volatile.Read(ref _current) != null;
         internal static bool IsHydrating => Hydration.Value is { } lease
             && ReferenceEquals(Volatile.Read(ref _current), lease) && lease.IsAuthorized;
@@ -92,6 +95,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (!IsAuthorized || Fault != null || Volatile.Read(ref _admitted) == 0) return;
             Interlocked.Exchange(ref _completed, 1);
         }
+
+        // Called only after a positive observation that the native loading
+        // process has drained. Disposal or an observation timeout is not proof.
+        internal void MarkWorkersDrained() => Interlocked.Exchange(ref _workersDrained, 1);
 
         internal static IDisposable EnterHydration(SaveInfo info)
         {

@@ -26,6 +26,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 {
                     if (!canApply()) { completion.TrySetResult(null); return; }
                     if (!RealTimePresentationRuntime.Enabled || reference?.Units == null || reference.AreaEffects == null
+                        || repairOwner is not RealTimeNativeLoadLease { IsDrainedAndCompleted: true }
                         || !RealTimeNativeGraphRepair.Contains(expectedWorld, repairOwner))
                         throw new InvalidOperationException("native-reference-receipt-or-state-invalid");
                     reference = _mapper.Map<NetworkCombatState>(ProtoBuf.Serializer.DeepClone(
@@ -39,6 +40,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                             || game.CurrentMode != GameModeType.Default && game.CurrentMode != GameModeType.Pause
                             || IsInCrusadeTacticalCombat()
                             || game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress
+                            || repairOwner is not RealTimeNativeLoadLease { IsDrainedAndCompleted: true }
                             || LoadingProcess.Instance.IsLoadingInProcess || game.EntityCreator.CreationQueue.Any()
                             || !RealTimeNativeGraphRepair.Contains(expectedWorld, repairOwner))
                             throw new InvalidOperationException("native-reference-world-not-ready");
@@ -47,6 +49,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         RealTimeAreaReplicaFactory.RequireMechanicalState(game.State.AreaEffects);
                     }
                     RequireCurrentWorld();
+                    RealTimeNativeGraphInspection.RequireState(game.State.Units.All, game.State.AreaEffects, canApply);
                     var participants = RealTimeEncounterParticipants<UnitEntityData>.For(Main.Multiplayer?.RealTimeCombatIdentity)
                         ?? throw new InvalidOperationException("native-reference-encounter-missing");
                     var nativeUnits = game.State.Units.All.ToDictionary(unit => unit.UniqueId, StringComparer.Ordinal);
@@ -62,6 +65,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         ApplyRealTimeCombatState(reference, transaction, requireNativeEntities: true);
                         RequireCurrentWorld();
+                        RealTimeNativeGraphInspection.RequireState(game.State.Units.All, game.State.AreaEffects, canApply);
                         applied = GetRealTimeCombatState();
                         var difference = RealTimeCombatTemporalDiff.Summarize(reference, applied);
                         if (difference != null || RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference })
