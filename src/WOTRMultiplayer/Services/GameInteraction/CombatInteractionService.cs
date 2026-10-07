@@ -57,7 +57,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly IBuffInteractionService _buffInteractionService;
         private readonly IMapper _mapper;
 
-        private readonly Dictionary<string, (string ActionId, UnitAnimationActionHandle Handle, DateTime Started)> _presentedAttacks = new();
+        private readonly Dictionary<string, (string ActionId, UnitAnimationActionHandle Handle, RealTimePresentationLifetime Lifetime)> _presentedAttacks = new();
         private readonly Dictionary<string, VisualMove> _visualMoves = new();
         private readonly HashSet<RealTimeProjectileVisual> _projectileVisuals = [];
         private readonly RealTimeProjectileReplica _projectileReplica;
@@ -84,10 +84,21 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
             foreach (var pair in _presentedAttacks.ToArray())
             {
-                if (active && !pair.Value.Handle.IsFinished && !pair.Value.Handle.IsReleased
-                    && DateTime.UtcNow - pair.Value.Started < TimeSpan.FromSeconds(15)) continue;
+                string failure = null;
+                if (active && !pair.Value.Handle.IsFinished && !pair.Value.Handle.IsReleased)
+                {
+                    failure = pair.Value.Lifetime.FailureAt(Game.Instance.TimeController.GameTime);
+                    if (failure == null) continue;
+                }
                 pair.Value.Handle.Release(0f);
                 _presentedAttacks.Remove(pair.Key);
+                if (failure != null)
+                {
+                    _logger.LogError("Host action presentation failed. UnitId={UnitId}, ActionId={ActionId}, Reason={Reason}",
+                        pair.Key, pair.Value.ActionId, failure);
+                    Main.Multiplayer.ReportRealTimeAIActionFault(pair.Key, pair.Value.ActionId, failure);
+                    break; // The report revokes the stable presentation phase.
+                }
             }
             foreach (var pair in _visualMoves.ToArray())
             {
@@ -216,6 +227,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     var spell = ability == null ? null : ResourcesLibrary.TryGetBlueprint<BlueprintAbility>(ability.BlueprintId);
                     if (ability != null && spell == null)
                     { completion.TrySetResult(false); return; }
+                    var lifetime = new RealTimePresentationLifetime(Game.Instance.TimeController.GameTime,
+                        ability?.CastingTime ?? 0, presentation.SpeedScale);
                     UnitAnimationActionHandle handle;
                     if (type == UnitAnimationType.SpecialAttack)
                     {
@@ -246,7 +259,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     }
                     if (_presentedAttacks.TryGetValue(authoritativeEvent.UnitId, out var previous)) previous.Handle.Release(0f);
                     manager.Execute(handle);
-                    _presentedAttacks[authoritativeEvent.UnitId] = (authoritativeEvent.ActionId, handle, DateTime.UtcNow);
+                    _presentedAttacks[authoritativeEvent.UnitId] = (authoritativeEvent.ActionId, handle, lifetime);
                     createdHandle = null;
                     _logger.LogInformation("Presented host action without a local combat command. Kind={Kind}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}",
                         authoritativeEvent.Kind, authoritativeEvent.UnitId, authoritativeEvent.Epoch, authoritativeEvent.Sequence);
