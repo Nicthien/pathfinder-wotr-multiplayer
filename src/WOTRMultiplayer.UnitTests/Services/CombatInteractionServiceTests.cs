@@ -19,6 +19,29 @@ namespace WOTRMultiplayer.UnitTests.Services
     {
         [TestCase(false)]
         [TestCase(true)]
+        public void AbilityPresentation_StaleOrMalformed_DoesNotLookUpUnits(bool current)
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => action());
+            var lookup = A.Fake<IGameStateLookupService>();
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+            var task = service.TryPresentRealTimeActionAsync(
+                new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent
+                {
+                    UnitId = "hero", ActionId = "cast",
+                    Kind = (int)WOTRMultiplayer.Networking.Messages.Game.RealTimeAuthoritativeEventKind.AbilityPresentation,
+                    Ability = new WOTRMultiplayer.Networking.Messages.Game.RealTimeAbilityPresentationPayload
+                        { Stage = 1, SpeedScale = 1, BlueprintId = "not-a-blueprint" }
+                }, () => current);
+            Assert.That(task.Result, Is.EqualTo(current ? (bool?)false : null));
+            A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
         public void AttackPresentation_StaleOrMalformed_DoesNotLookUpUnits(bool current)
         {
             var mainThread = A.Fake<IMainThreadAccessor>();
@@ -28,7 +51,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A.Fake<ILogger<CombatInteractionService>>(), lookup,
                 A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
                 mainThread, A.Fake<IMapper>());
-            var task = service.TryPresentRealTimeAttackAsync(
+            var task = service.TryPresentRealTimeActionAsync(
                 new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent
                 {
                     UnitId = "unit-a",

@@ -9,6 +9,33 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
     public class RealTimeMessagesTests
     {
         [Test]
+        public void AbilityPresentation_RoundTripsIdentityAndCastParameters()
+        {
+            var frame = Serializer.DeepClone(new NotifyRealTimeAuthoritativeEvent
+            {
+                SessionId = "session", LoadedSaveSeed = 18, Epoch = 9, Sequence = 42,
+                EventId = "9:42", ActionId = "hero:ability:5", UnitId = "hero", TargetUnitId = "enemy",
+                Kind = (int)RealTimeAuthoritativeEventKind.AbilityPresentation,
+                Ability = new RealTimeAbilityPresentationPayload
+                {
+                    Stage = 1, BlueprintId = "blueprint", AnimationType = 8, CastStyle = 3,
+                    SpecialBehaviour = 2, CastingTime = 2.5f, SpeedScale = 1.1f,
+                    WeaponStyle = 4, TargetDistance = 12, IsMounted = true, MinimalTransitionOut = 0.3f
+                }
+            });
+            Assert.That(frame.SessionId, Is.EqualTo("session"));
+            Assert.That(frame.LoadedSaveSeed, Is.EqualTo(18));
+            Assert.That(frame.EventId, Is.EqualTo("9:42"));
+            Assert.That(frame.ActionId, Is.EqualTo("hero:ability:5"));
+            Assert.That(frame.Attack, Is.Null);
+            Assert.That(frame.Ability.BlueprintId, Is.EqualTo("blueprint"));
+            Assert.That(frame.Ability.CastingTime, Is.EqualTo(2.5f));
+            Assert.That(frame.Ability.SpecialBehaviour, Is.EqualTo(2));
+            Assert.That(frame.Ability.IsMounted, Is.True);
+            Assert.That(frame.Ability.MinimalTransitionOut, Is.EqualTo(0.3f));
+        }
+
+        [Test]
         public void Resources_RoundTripAmountsAndExplicitEmptyCapture()
         {
             var captured = Serializer.DeepClone(new NetworkUnitDescriptor

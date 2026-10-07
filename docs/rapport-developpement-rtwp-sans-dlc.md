@@ -1,6 +1,6 @@
 # Rapport de développement — Multijoueur temps réel avec pause, sans DLC
 
-> Mise à jour du 7 octobre 2026 : variante locale 0.4.16.4, protocole 42. Ressources de capacités et disponibilités de sorts ajoutées aux états autoritaires ; aucune validation de combat dans le moteur. Le [bilan hors jeu du 7 octobre](rtwp-offline-progress-2026-10-07.md) distingue les changements vérifiés des travaux encore ouverts. Aucun jeu ne doit être lancé pendant la génération des voix.
+> Mise à jour du 7 octobre 2026 : variante locale 0.4.16.5, protocole 43. Ressources et disponibilités de sorts répliquées, puis ajout d'un canal de présentation d'animations de sorts. Aucune validation de combat dans le moteur. Voir le [bilan des ressources](rtwp-offline-progress-2026-10-07.md) et le [bilan des actions de sorts](rtwp-action-presentation-2026-10-07.md) pour les preuves et les limites. Aucun jeu ne doit être lancé pendant la génération des voix.
 
 > Mise à jour du 4 octobre 2026 : dépôt retrouvé dans `D:\Codex\PathFinder\WotR-Multiplayer-RTwP`. Le prototype de présentation utilise désormais le protocole 41 et la version locale 0.4.16.3. Il reste désactivé par défaut et non validé en combat. Voir le [bilan de l'étape A](a0-presentation-prototype-2026-10-04.md). Les résultats et le protocole 38 décrits ci-dessous constituent la référence historique, pas le statut courant du prototype.
 

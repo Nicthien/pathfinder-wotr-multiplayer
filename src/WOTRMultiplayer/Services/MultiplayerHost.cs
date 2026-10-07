@@ -107,8 +107,7 @@ namespace WOTRMultiplayer.Services
         public void PublishRealTimeAuthoritativeEvent(NotifyRealTimeAuthoritativeEvent authoritativeEvent)
         {
             if (!RealTimePresentationRuntime.Enabled || authoritativeEvent == null
-                || authoritativeEvent.Kind != (int)RealTimeAuthoritativeEventKind.AttackPresentation
-                || authoritativeEvent.Attack == null
+                || !RealTimeAuthoritativePresentation.IsSupported(authoritativeEvent)
                 || !IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
                 return;
             var combat = Game.RealTimeCombat;
@@ -123,7 +122,8 @@ namespace WOTRMultiplayer.Services
                 HostGameTimeTicks = authoritativeEvent.HostGameTimeTicks,
                 ActionId = authoritativeEvent.ActionId,
                 Kind = authoritativeEvent.Kind,
-                Attack = new RealTimeAttackPresentationPayload
+                Ability = authoritativeEvent.Ability == null ? null : ProtoBuf.Serializer.DeepClone(authoritativeEvent.Ability),
+                Attack = authoritativeEvent.Attack == null ? null : new RealTimeAttackPresentationPayload
                 {
                     Stage = authoritativeEvent.Attack.Stage,
                     AnimationType = authoritativeEvent.Attack.AnimationType,

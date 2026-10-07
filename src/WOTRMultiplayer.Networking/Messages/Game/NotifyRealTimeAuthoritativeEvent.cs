@@ -4,7 +4,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 {
     public enum RealTimeAuthoritativeEventKind
     {
-        AttackPresentation = 1
+        AttackPresentation = 1,
+        AbilityPresentation = 2
     }
 
     [ProtoContract]
@@ -39,5 +40,22 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(9)] public string UnitId { get; set; }
         [ProtoMember(10)] public string TargetUnitId { get; set; }
         [ProtoMember(11)] public RealTimeAttackPresentationPayload Attack { get; set; }
+        [ProtoMember(12)] public RealTimeAbilityPresentationPayload Ability { get; set; }
+    }
+
+    [ProtoContract]
+    public class RealTimeAbilityPresentationPayload
+    {
+        [ProtoMember(1)] public int Stage { get; set; }
+        [ProtoMember(2)] public string BlueprintId { get; set; }
+        [ProtoMember(3)] public int AnimationType { get; set; }
+        [ProtoMember(4)] public int CastStyle { get; set; }
+        [ProtoMember(5)] public int SpecialBehaviour { get; set; }
+        [ProtoMember(6)] public float CastingTime { get; set; }
+        [ProtoMember(7)] public float SpeedScale { get; set; }
+        [ProtoMember(8)] public int WeaponStyle { get; set; }
+        [ProtoMember(9)] public float TargetDistance { get; set; }
+        [ProtoMember(10)] public bool IsMounted { get; set; }
+        [ProtoMember(11)] public float MinimalTransitionOut { get; set; }
     }
 }

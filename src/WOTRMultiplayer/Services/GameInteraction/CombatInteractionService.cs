@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
 using Kingmaker;
+using Kingmaker.Blueprints;
 using Kingmaker.Armies.TacticalCombat;
 using Kingmaker.Armies.TacticalCombat.Blueprints;
 using Kingmaker.Armies.TacticalCombat.Commands;
@@ -18,6 +19,7 @@ using Kingmaker.Pathfinding;
 using Kingmaker.PubSubSystem;
 using Kingmaker.TurnBasedMode;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Class.Kineticist;
 using Kingmaker.UnitLogic.Commands;
 using Kingmaker.UnitLogic.Commands.Base;
@@ -86,7 +88,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
-        public Task<bool?> TryPresentRealTimeAttackAsync(NotifyRealTimeAuthoritativeEvent authoritativeEvent, Func<bool> canPresent)
+        public Task<bool?> TryPresentRealTimeActionAsync(NotifyRealTimeAuthoritativeEvent authoritativeEvent, Func<bool> canPresent)
         {
             if (canPresent == null) throw new ArgumentNullException(nameof(canPresent));
             var completion = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -96,11 +98,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 try
                 {
                     if (!canPresent()) { completion.TrySetResult(null); return; }
-                    if (authoritativeEvent == null
-                        || authoritativeEvent.Kind != (int)RealTimeAuthoritativeEventKind.AttackPresentation
-                        || authoritativeEvent.Attack == null)
+                    if (!RealTimeAuthoritativePresentation.IsSupported(authoritativeEvent))
                     { completion.TrySetResult(false); return; }
-                    var presentation = authoritativeEvent.Attack;
+                    var ability = authoritativeEvent.Ability;
+                    var presentation = authoritativeEvent.Attack ?? new RealTimeAttackPresentationPayload
+                    {
+                        Stage = ability.Stage, AnimationType = ability.AnimationType,
+                        WeaponStyle = ability.WeaponStyle, SpeedScale = ability.SpeedScale,
+                        TargetDistance = ability.TargetDistance, IsMounted = ability.IsMounted
+                    };
                     var stage = (RealTimePresentationStage)presentation.Stage;
                     if (stage == RealTimePresentationStage.Impact)
                     {
@@ -123,6 +129,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (string.IsNullOrWhiteSpace(authoritativeEvent.UnitId)
                         || string.IsNullOrWhiteSpace(authoritativeEvent.ActionId)
                         || stage != RealTimePresentationStage.Start
+                        || ability != null && !RealTimeAuthoritativePresentation.IsValidAbilityStart(ability)
                         || !Enum.IsDefined(typeof(UnitAnimationType), presentation.AnimationType)
                         || !Enum.IsDefined(typeof(WeaponAnimationStyle), presentation.WeaponStyle)
                         || float.IsNaN(presentation.SpeedScale) || float.IsInfinity(presentation.SpeedScale)
@@ -133,8 +140,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     var unit = _gameStateLookupService.GetUnitEntity(authoritativeEvent.UnitId);
                     var manager = unit?.View?.AnimationManager;
                     var type = (UnitAnimationType)presentation.AnimationType;
-                    if (manager == null || (type != UnitAnimationType.MainHandAttack
-                        && type != UnitAnimationType.OffHandAttack && type != UnitAnimationType.SpecialAttack))
+                    if (manager == null || (ability != null ? type != UnitAnimationType.CastSpell
+                        : type != UnitAnimationType.MainHandAttack
+                            && type != UnitAnimationType.OffHandAttack && type != UnitAnimationType.SpecialAttack))
+                    { completion.TrySetResult(false); return; }
+                    var spell = ability == null ? null : ResourcesLibrary.TryGetBlueprint<BlueprintAbility>(ability.BlueprintId);
+                    if (ability != null && spell == null)
                     { completion.TrySetResult(false); return; }
                     UnitAnimationActionHandle handle;
                     if (type == UnitAnimationType.SpecialAttack)
@@ -148,7 +159,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     createdHandle = handle;
                     handle.AttackWeaponStyle = (WeaponAnimationStyle)presentation.WeaponStyle;
                     // Sequence/custom clips are not reconstructed by the A0 prototype.
-                    if (presentation.Variant < 0 || presentation.Variant >= handle.VariantsCount)
+                    if (ability == null && (presentation.Variant < 0 || presentation.Variant >= handle.VariantsCount))
                     { handle.Release(0f); completion.TrySetResult(false); return; }
                     handle.Variant = presentation.Variant;
                     handle.SpeedScale = presentation.SpeedScale;
@@ -156,12 +167,20 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     handle.IsChargeAttack = presentation.IsCharge;
                     handle.IsRendAttack = presentation.IsRend;
                     handle.IsMounted = presentation.IsMounted;
+                    if (ability != null)
+                    {
+                        handle.Spell = spell;
+                        handle.CastStyle = (UnitAnimationActionCastSpell.CastAnimationStyle)ability.CastStyle;
+                        handle.SpecialCastBehaviour = (UnitAnimationActionCastSpell.SpecialBehaviourType)ability.SpecialBehaviour;
+                        handle.CastingTime = ability.CastingTime;
+                        handle.MinimalTransitionOut = ability.MinimalTransitionOut;
+                    }
                     if (_presentedAttacks.TryGetValue(authoritativeEvent.UnitId, out var previous)) previous.Handle.Release(0f);
                     manager.Execute(handle);
                     _presentedAttacks[authoritativeEvent.UnitId] = (authoritativeEvent.ActionId, handle, DateTime.UtcNow);
                     createdHandle = null;
-                    _logger.LogInformation("Presented host attack without a local combat command. UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}",
-                        authoritativeEvent.UnitId, authoritativeEvent.Epoch, authoritativeEvent.Sequence);
+                    _logger.LogInformation("Presented host action without a local combat command. Kind={Kind}, UnitId={UnitId}, Epoch={Epoch}, Sequence={Sequence}",
+                        authoritativeEvent.Kind, authoritativeEvent.UnitId, authoritativeEvent.Epoch, authoritativeEvent.Sequence);
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)

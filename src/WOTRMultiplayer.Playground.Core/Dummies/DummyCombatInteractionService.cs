@@ -13,7 +13,7 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyCombatInteractionService : ICombatInteractionService
     {
-        public Task<bool?> TryPresentRealTimeAttackAsync(
+        public Task<bool?> TryPresentRealTimeActionAsync(
             WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent,
             Func<bool> canPresent) => Task.FromResult<bool?>(canPresent() ? true : null);
 

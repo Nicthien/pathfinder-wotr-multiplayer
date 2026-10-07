@@ -71,7 +71,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         bool ExecuteRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability);
 
-        Task<bool?> TryPresentRealTimeAttackAsync(
+        Task<bool?> TryPresentRealTimeActionAsync(
             WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent,
             Func<bool> canPresent);
 

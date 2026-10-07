@@ -521,13 +521,18 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCombatCommand>._)).MustNotHaveHappened();
         }
 
-        [TestCase(-1, "presentation-session", 7, 5, true)]
-        [TestCase(42, "presentation-session", 7, 5, false)]
-        [TestCase(-1, "old-session", 7, 5, false)]
-        [TestCase(-1, "presentation-session", 6, 5, false)]
-        [TestCase(-1, "presentation-session", 7, 4, false)]
-        public void AttackPresentation_RequiresHostAndCurrentSession(long sender, string sessionId,
-            int saveSeed, long epoch, bool expected)
+        [TestCase(-1, "presentation-session", 7, 5, true, false)]
+        [TestCase(42, "presentation-session", 7, 5, false, false)]
+        [TestCase(-1, "old-session", 7, 5, false, false)]
+        [TestCase(-1, "presentation-session", 6, 5, false, false)]
+        [TestCase(-1, "presentation-session", 7, 4, false, false)]
+        [TestCase(-1, "presentation-session", 7, 5, true, true)]
+        [TestCase(42, "presentation-session", 7, 5, false, true)]
+        [TestCase(-1, "old-session", 7, 5, false, true)]
+        [TestCase(-1, "presentation-session", 6, 5, false, true)]
+        [TestCase(-1, "presentation-session", 7, 4, false, true)]
+        public void ActionPresentation_RequiresHostAndCurrentSession(long sender, string sessionId,
+            int saveSeed, long epoch, bool expected, bool ability)
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
@@ -536,19 +541,20 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
                 RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 5 }
             };
-            A.CallTo(() => _combatInteractionService.TryPresentRealTimeAttackAsync(
+            A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
                 A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._)).Returns(Task.FromResult<bool?>(true));
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeAuthoritativeEvent>(_networkClient);
             var frame = new NotifyRealTimeAuthoritativeEvent
             {
                 SessionId = sessionId, LoadedSaveSeed = saveSeed, Epoch = epoch, Sequence = 1,
-                EventId = "5:1", UnitId = "unit-a",
-                Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
-                Attack = new RealTimeAttackPresentationPayload()
+                EventId = "5:1", UnitId = "unit-a", ActionId = "action-a",
+                Kind = (int)(ability ? RealTimeAuthoritativeEventKind.AbilityPresentation : RealTimeAuthoritativeEventKind.AttackPresentation),
+                Attack = ability ? null : new RealTimeAttackPresentationPayload(),
+                Ability = ability ? new RealTimeAbilityPresentationPayload() : null
             };
             handler(sender, frame);
             handler(sender, frame);
-            var call = A.CallTo(() => _combatInteractionService.TryPresentRealTimeAttackAsync(
+            var call = A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
                 A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._));
             if (RealTimePresentationRuntime.Enabled && expected) call.MustHaveHappenedOnceExactly();
             else call.MustNotHaveHappened();
@@ -557,8 +563,9 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A<NetworkAbilityUse>._, A<Func<bool>>._)).MustNotHaveHappened();
         }
 
-        [Test]
-        public void AttackPresentation_ReplacedSessionBeforeRenderingIsIgnored()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ActionPresentation_ReplacedSessionBeforeRenderingIsIgnored(bool ability)
         {
             A.CallTo(() => _networkClient.IsActive).Returns(true);
             _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
@@ -569,7 +576,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
             var original = _multiplayerClient.Game;
             var replacement = new NetworkGame(new NetworkGameStartUp());
-            A.CallTo(() => _combatInteractionService.TryPresentRealTimeAttackAsync(
+            A.CallTo(() => _combatInteractionService.TryPresentRealTimeActionAsync(
                 A<NotifyRealTimeAuthoritativeEvent>._, A<Func<bool>>._))
                 .ReturnsLazily((NotifyRealTimeAuthoritativeEvent _, Func<bool> canPresent) =>
                 {
@@ -581,9 +588,10 @@ namespace WOTRMultiplayer.UnitTests.Services
                 new NotifyRealTimeAuthoritativeEvent
                 {
                     SessionId = original.Id, LoadedSaveSeed = 7, Epoch = 5, Sequence = 1,
-                    EventId = "5:1", UnitId = "unit-a",
-                    Kind = (int)RealTimeAuthoritativeEventKind.AttackPresentation,
-                    Attack = new RealTimeAttackPresentationPayload()
+                    EventId = "5:1", UnitId = "unit-a", ActionId = "action-a",
+                    Kind = (int)(ability ? RealTimeAuthoritativeEventKind.AbilityPresentation : RealTimeAuthoritativeEventKind.AttackPresentation),
+                    Attack = ability ? null : new RealTimeAttackPresentationPayload(),
+                    Ability = ability ? new RealTimeAbilityPresentationPayload() : null
                 });
             Assert.That(_multiplayerClient.Game, Is.SameAs(RealTimePresentationRuntime.Enabled ? replacement : original));
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeCommandFault>._)).MustNotHaveHappened();

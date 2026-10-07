@@ -1541,8 +1541,7 @@ namespace WOTRMultiplayer.Services
                     || string.IsNullOrWhiteSpace(message.SessionId) || message.SessionId != session.Id
                     || message.LoadedSaveSeed != session.LoadedSaveSeed) return;
                 if (!string.Equals(message.EventId, $"{message.Epoch}:{message.Sequence}", StringComparison.Ordinal)
-                    || message.Kind != (int)RealTimeAuthoritativeEventKind.AttackPresentation
-                    || message.Attack == null)
+                    || !RealTimeAuthoritativePresentation.IsSupported(message))
                 {
                     ReportRealTimeCommandFault(message.Epoch, Math.Max(1, message.Sequence),
                         "malformed-authoritative-event");
@@ -1570,11 +1569,11 @@ namespace WOTRMultiplayer.Services
                         && IsRealTimeCombatActive && combat.Phase == CombatSynchronizationPhase.Stable
                         && next.SessionId == session.Id && next.LoadedSaveSeed == session.LoadedSaveSeed
                         && ReferenceEquals(inbox, _presentationInbox);
-                    var applied = await CombatInteraction.TryPresentRealTimeAttackAsync(next, canPresent);
+                    var applied = await CombatInteraction.TryPresentRealTimeActionAsync(next, canPresent);
                     if (!canPresent()) return;
                     if (applied != true)
                     {
-                        ReportRealTimeCommandFault(next.Epoch, next.Sequence, "attack-presentation-not-applied");
+                        ReportRealTimeCommandFault(next.Epoch, next.Sequence, "action-presentation-not-applied");
                         return;
                     }
                     inbox.Commit(next.Sequence);
@@ -1582,9 +1581,9 @@ namespace WOTRMultiplayer.Services
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Host attack presentation failed. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
+                Logger.LogError(ex, "Host action presentation failed. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
                 if (ReferenceEquals(Game, _presentationSession))
-                    ReportRealTimeCommandFault(message.Epoch, Math.Max(1, message.Sequence), "attack-presentation-exception");
+                    ReportRealTimeCommandFault(message.Epoch, Math.Max(1, message.Sequence), "action-presentation-exception");
             }
             finally { _realTimeSnapshotGate.Release(); }
         }

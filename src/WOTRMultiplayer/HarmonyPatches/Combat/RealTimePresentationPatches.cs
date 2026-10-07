@@ -37,6 +37,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void UnitCommand_StartAnimation_Postfix(UnitCommand __instance, UnitAnimationActionHandle __0)
         {
+            RealTimeAbilityPresentationPatches.AfterStartAnimation(__instance, __0);
             if (!CanPublish || __instance is not UnitAttack attack || __0?.Action == null) return;
             var actionId = ActionIds.GetOrAdd(__instance, _ =>
                 $"{attack.Executor?.UniqueId}:{Interlocked.Increment(ref _nextActionId)}");
@@ -69,6 +70,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void UnitCommand_OnEnded_Postfix(UnitCommand __instance)
         {
+            RealTimeAbilityPresentationPatches.AfterEnded(__instance);
             if (__instance is not UnitAttack attack || !ActionIds.TryRemove(__instance, out var actionId)) return;
             if (!string.IsNullOrWhiteSpace(attack.Executor?.UniqueId))
                 UnitActions.TryRemove(attack.Executor.UniqueId, out _);
