@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
@@ -19,10 +20,29 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly HashSet<string> _areaRegistrationsById = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _areaRemovalsById = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<Action> _refreshAfterRollback = new();
+        private readonly List<IDisposable> _createdAreaVisuals = new();
+        private readonly List<IDisposable> _removedAreaVisuals = new();
+        private readonly List<RealTimeAreaPoolMembership> _areaPoolChanges = new();
         private bool _disposed;
         private bool _committed;
         public bool HasChanges => _registrations.Count != 0 || _removals.Count != 0
-            || _areaRegistrations.Count != 0 || _areaRemovals.Count != 0;
+            || _areaRegistrations.Count != 0 || _areaRemovals.Count != 0
+            || _createdAreaVisuals.Count != 0 || _removedAreaVisuals.Count != 0 || _areaPoolChanges.Count != 0;
+
+        public void TrackAreaPool(IList pool, AreaEffectEntityData area, bool removed)
+        {
+            EnsureOpen();
+            _areaPoolChanges.Add(new RealTimeAreaPoolMembership(pool, area, removed));
+        }
+
+        public void TrackAreaVisual(IDisposable visual, bool removed)
+        {
+            EnsureOpen();
+            if (visual == null) throw new ArgumentNullException(nameof(visual));
+            if (_createdAreaVisuals.Contains(visual) || _removedAreaVisuals.Contains(visual))
+                throw new InvalidOperationException("duplicate-area-visual-ownership");
+            (removed ? _removedAreaVisuals : _createdAreaVisuals).Add(visual);
+        }
 
         public void RegisterArea(EntityService service, SceneEntitiesState scene, AreaEffectEntityData area, string expectedSceneName)
         {
@@ -73,10 +93,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
             foreach (var registration in _areaRegistrations) registration.ValidateForCommit();
             foreach (var removal in _areaRemovals) removal.ValidateForCommit();
+            foreach (var change in _areaPoolChanges) change.ValidateForCommit();
             foreach (var registration in _registrations) registration.Commit();
             foreach (var removal in _removals) removal.Commit();
             foreach (var registration in _areaRegistrations) registration.Commit();
             foreach (var removal in _areaRemovals) removal.Commit();
+            foreach (var change in _areaPoolChanges) change.Commit();
             _committed = true;
         }
 
@@ -91,6 +113,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (_disposed) return;
             _disposed = true;
             List<Exception> failures = null;
+            for (var i = _areaPoolChanges.Count - 1; i >= 0; i--)
+            {
+                try { _areaPoolChanges[i].Dispose(); }
+                catch (Exception failure) { (failures ??= new()).Add(failure); }
+            }
             for (var i = _areaRegistrations.Count - 1; i >= 0; i--)
             {
                 try { _areaRegistrations[i].Dispose(); }
@@ -111,7 +138,17 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 try { _removals[i].Dispose(); }
                 catch (Exception failure) { (failures ??= new()).Add(failure); }
             }
-            if (_committed) return;
+            var visuals = _committed ? _removedAreaVisuals : _createdAreaVisuals;
+            for (var i = visuals.Count - 1; i >= 0; i--)
+            {
+                try { visuals[i].Dispose(); }
+                catch (Exception failure) { (failures ??= new()).Add(failure); }
+            }
+            if (_committed)
+            {
+                if (failures != null) throw new AggregateException("area-restoration-commit-cleanup-failed", failures);
+                return;
+            }
             // Restore scheduler references only after all new facts are removed.
             foreach (var refresh in _refreshAfterRollback)
             {

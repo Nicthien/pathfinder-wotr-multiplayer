@@ -21,7 +21,9 @@ namespace WOTRMultiplayer.Services
             IEnumerable<string> localAreaIds = null,
             Func<string, IEnumerable<NetworkBuff>> getLocalBuffs = null,
             Func<NetworkBuff, bool> canRecreateBuff = null,
-            Func<NetworkAreaEffect, NetworkAreaEffect> getLocalArea = null)
+            Func<NetworkAreaEffect, NetworkAreaEffect> getLocalArea = null,
+            Func<NetworkAreaEffect, bool> canRecreateArea = null,
+            Func<string, bool> canRemoveArea = null)
         {
             if (checkpoint == null || hasUnit == null || hasArea == null)
             {
@@ -95,32 +97,38 @@ namespace WOTRMultiplayer.Services
                 if (area?.Id != null && !areaIds.Add(area.Id))
                     missing.Add($"duplicate-area:{area.Id}");
                 var exists = area?.Id != null && hasArea(area);
-                if (!exists)
+                if (!exists && (area?.Id == null || canRecreateArea == null || !canRecreateArea(area)))
                 {
                     missing.Add($"missing-area:{area?.Id ?? "<null>"}");
                 }
                 else
                 {
                     if (string.IsNullOrEmpty(area.BlueprintId) ||
-                        (getAreaBlueprintId != null && !string.Equals(area.BlueprintId,
+                        (exists && getAreaBlueprintId != null && !string.Equals(area.BlueprintId,
                             getAreaBlueprintId(area), StringComparison.OrdinalIgnoreCase)))
                         missing.Add($"invalid-area:{area.Id}:blueprint");
-                    if (getAreaSceneName != null && !string.Equals(area.SceneName,
+                    if (exists && getAreaSceneName != null && !string.Equals(area.SceneName,
                         getAreaSceneName(area), StringComparison.Ordinal))
                         missing.Add($"invalid-area:{area.Id}:scene");
-                    if (hasAreaView != null && !hasAreaView(area))
+                    if (exists && hasAreaView != null && !hasAreaView(area))
                         missing.Add($"invalid-area:{area.Id}:view");
                     if (!IsFinite(area.Position)) missing.Add($"invalid-area:{area.Id}:position");
                     if (float.IsNaN(area.Orientation) || float.IsInfinity(area.Orientation))
                         missing.Add($"invalid-area:{area.Id}:orientation");
                     var contextError = RealTimeBuffContextChain.Validate(area.ContextChain);
                     if (contextError != null) missing.Add($"invalid-area:{area.Id}:{contextError}");
+                    if (!exists && (area.ContextChain == null || area.ContextChain.Count == 0))
+                        missing.Add($"invalid-area:{area.Id}:reconstruction-context");
                     if (area.TargetPoint != null && !IsFinite(area.TargetPoint))
                         missing.Add($"invalid-area:{area.Id}:target-point");
                     if (area.TargetOrientation.HasValue &&
                         (float.IsNaN(area.TargetOrientation.Value) || float.IsInfinity(area.TargetOrientation.Value)))
                         missing.Add($"invalid-area:{area.Id}:target-orientation");
-                    if (getLocalArea != null)
+                    if (!exists && (string.IsNullOrWhiteSpace(area.Id) || string.IsNullOrWhiteSpace(area.SceneName)
+                        || (area.TargetPoint == null) == (area.TargetUnitId == null)
+                        || area.IsAttachedToUnit && area.TargetUnitId == null))
+                        missing.Add($"invalid-area:{area.Id}:reconstruction-target-or-scene");
+                    if (exists && getLocalArea != null)
                     {
                         var local = getLocalArea(area);
                         if (local == null || !string.Equals(area.CasterUnitId, local.CasterUnitId, StringComparison.Ordinal)
@@ -135,6 +143,9 @@ namespace WOTRMultiplayer.Services
                             missing.Add($"invalid-area:{area.Id}:target");
                     }
                     if (area.UnitsInside == null) missing.Add($"invalid-area:{area.Id}:occupants");
+                    else if (area.UnitsInside.Any(string.IsNullOrWhiteSpace)
+                        || area.UnitsInside.Distinct(StringComparer.OrdinalIgnoreCase).Count() != area.UnitsInside.Count)
+                        missing.Add($"invalid-area:{area.Id}:occupants");
                 }
                 if (area?.Id == null) { continue; }
                 if (area.TargetUnitId != null && !hasUnit(area.TargetUnitId))
@@ -158,7 +169,8 @@ namespace WOTRMultiplayer.Services
             {
                 foreach (var id in localAreaIds)
                 {
-                    if (id != null && !areaIds.Contains(id)) missing.Add($"extra-area:{id}");
+                    if (id != null && !areaIds.Contains(id) && (canRemoveArea == null || !canRemoveArea(id)))
+                        missing.Add($"extra-area:{id}");
                 }
             }
             if (missing.Count == 0)

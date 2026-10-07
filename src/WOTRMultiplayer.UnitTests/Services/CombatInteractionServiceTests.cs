@@ -105,7 +105,10 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(task.IsFaulted, Is.True);
             Assert.That(task.Exception?.GetBaseException().Message,
-                Is.EqualTo("missing-area:cloud,missing-unit:summon"));
+                Is.EqualTo(RealTimePresentationRuntime.Enabled
+                    ? "invalid-area:cloud:blueprint,invalid-area:cloud:position,invalid-area:cloud:reconstruction-context,invalid-area:cloud:reconstruction-target-or-scene,missing-unit:summon"
+                    : "missing-area:cloud,missing-unit:summon"));
+            A.CallTo(() => lookup.GetAreaEffects()).MustNotHaveHappened();
         }
 
         [Test]
@@ -170,7 +173,10 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(dispatches, Is.EqualTo(1));
             Assert.That(task.IsFaulted, Is.True);
-            Assert.That(task.Exception?.GetBaseException().Message, Is.EqualTo("missing-area:missing-area"));
+            Assert.That(task.Exception?.GetBaseException().Message, Is.EqualTo(RealTimePresentationRuntime.Enabled
+                ? "invalid-area:missing-area:blueprint,invalid-area:missing-area:position,invalid-area:missing-area:reconstruction-context,invalid-area:missing-area:reconstruction-target-or-scene"
+                : "missing-area:missing-area"));
+            A.CallTo(() => lookup.GetAreaEffects()).MustNotHaveHappened();
         }
 
         [Test]

@@ -14,6 +14,7 @@ using Kingmaker.Controllers;
 using Kingmaker.Controllers.Combat;
 using Kingmaker.Designers;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.EntitySystem;
 using Kingmaker.GameModes;
 using Kingmaker.Pathfinding;
 using Kingmaker.PubSubSystem;
@@ -564,10 +565,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    using var restoration = new RealTimeBuffRestoreTransaction();
-                    ApplyRealTimeCombatState(networkCombatState, restoration);
-                    if (restoration.HasChanges)
-                        restoration.VerifyAndCommit(networkCombatState, GetRealTimeCombatState());
+                    using (var restoration = new RealTimeBuffRestoreTransaction())
+                    {
+                        ApplyRealTimeCombatState(networkCombatState, restoration);
+                        if (restoration.HasChanges)
+                            restoration.VerifyAndCommit(networkCombatState, GetRealTimeCombatState());
+                    }
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)
@@ -599,10 +602,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         completion.TrySetResult(null);
                         return;
                     }
-                    using var restoration = new RealTimeBuffRestoreTransaction();
-                    ApplyRealTimeCombatState(networkCombatState, restoration);
-                    var applied = GetRealTimeCombatState();
-                    restoration.VerifyAndCommit(networkCombatState, applied);
+                    NetworkCombatState applied;
+                    using (var restoration = new RealTimeBuffRestoreTransaction())
+                    {
+                        ApplyRealTimeCombatState(networkCombatState, restoration);
+                        applied = GetRealTimeCombatState();
+                        restoration.VerifyAndCommit(networkCombatState, applied);
+                    }
                     completion.TrySetResult(applied);
                 }
                 catch (Exception ex)
@@ -632,7 +638,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     ? buff?.ContextChain != null && RealTimeBuffContextChain.Validate(buff.ContextChain) == null
                     : _buffInteractionService.CanRecreateBuff(buff),
                 getLocalArea: area => _mapper.Map<NetworkAreaEffect>(
-                    _gameStateLookupService.GetAreaEffect(area)));
+                    _gameStateLookupService.GetAreaEffect(area)),
+                canRecreateArea: RealTimePresentationRuntime.Enabled ? _ => true : null);
             if (missing != null)
                 throw new InvalidOperationException(missing);
 
@@ -643,9 +650,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 id => _gameStateLookupService.GetUnitEntity(id) != null,
                 area => _gameStateLookupService.GetAreaEffect(area) != null,
                 localCombatUnitIds: localCombatState.Units.Select(unit => unit.Id),
-                localAreaIds: localCombatState.AreaEffects.Select(area => area.Id));
+                localAreaIds: localCombatState.AreaEffects.Select(area => area.Id),
+                canRecreateArea: RealTimePresentationRuntime.Enabled ? _ => true : null,
+                canRemoveArea: RealTimePresentationRuntime.Enabled
+                    ? id => RealTimeAreaReplicaFactory.IsReplica(_gameStateLookupService.GetAreaEffect(
+                        new NetworkAreaEffect { Id = id })) : null);
             if (extra != null)
                 throw new InvalidOperationException(extra);
+
+            if (RealTimePresentationRuntime.Enabled)
+                StageAreaPresentation(networkCombatState.AreaEffects, restoration);
 
             if (RealTimePresentationRuntime.Enabled)
                 foreach (var area in networkCombatState.AreaEffects)
@@ -720,6 +734,69 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     _logger.LogWarning("Applied host final death from real-time checkpoint. UnitId={UnitId}", networkUnit.Id);
                 }
             }
+        }
+
+        private void StageAreaPresentation(List<NetworkAreaEffect> confirmed, RealTimeBuffRestoreTransaction transaction)
+        {
+            if (TacticalCombatHelper.IsActive || Game.Instance.CurrentlyLoadedArea is BlueprintTacticalCombatArea)
+                throw new InvalidOperationException("area-presentation-not-supported-in-crusade");
+            var expected = new HashSet<string>(confirmed.Select(area => area.Id), StringComparer.OrdinalIgnoreCase);
+            var removed = _gameStateLookupService.GetAreaEffects()
+                .Where(area => !expected.Contains(area.UniqueId) && RealTimeAreaReplicaFactory.IsReplica(area)).ToList();
+            var prepared = new List<(AreaEffectEntityData Area, SceneEntitiesState Scene, string SceneName)>();
+            foreach (var state in confirmed)
+            {
+                if (_gameStateLookupService.GetAreaEffect(state) != null) continue;
+                var scene = Game.Instance.State.LoadedAreaState.GetAllSceneStates()
+                    .SingleOrDefault(value => value.SceneName == state.SceneName)
+                    ?? throw new InvalidOperationException("area-reconstruction-scene-missing:" + state.SceneName);
+                var blueprint = ResourcesLibrary.TryGetBlueprint<BlueprintAbilityAreaEffect>(state.BlueprintId)
+                    ?? throw new InvalidOperationException("area-reconstruction-blueprint-missing:" + state.BlueprintId);
+                var referencedUnits = state.ContextChain.SelectMany(node => new[] { node.CasterId, node.OwnerId })
+                    .Where(id => id != null).Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(id => _gameStateLookupService.GetUnitEntity(id)).Where(unit => unit != null).ToList();
+                var context = RealTimeBuffContextFactory.Create(state.ContextChain,
+                    id => ResourcesLibrary.TryGetBlueprint<BlueprintScriptableObject>(id),
+                    id => _gameStateLookupService.GetUnitEntity(id),
+                    id => referencedUnits.SelectMany(unit => unit.Inventory.Items)
+                        .FirstOrDefault(item => string.Equals(item.UniqueId, id, StringComparison.OrdinalIgnoreCase)),
+                    node =>
+                    {
+                        var caster = _gameStateLookupService.GetUnitEntity(node.CasterId);
+                        return caster == null ? null : _gameStateLookupService.FindAbility(caster, node.SourceAbility);
+                    }, parameters => _mapper.Map<AbilityParams>(parameters));
+                var replica = RealTimeAreaReplicaFactory.CreateDetached(blueprint, context, state,
+                    id => _gameStateLookupService.GetUnitEntity(id), parameters => _mapper.Map<AbilityParams>(parameters));
+                var visual = new RealTimeAreaVisual(replica, state);
+                try { transaction.TrackAreaVisual(visual, removed: false); }
+                catch { visual.Dispose(); throw; }
+                prepared.Add((replica, scene, state.SceneName));
+            }
+            // Prepare every asset/context before changing the entity registry.
+            // The transaction owns new views even if a later asset is rejected.
+            foreach (var area in removed)
+            {
+                var visual = RealTimeAreaVisual.For(area.View);
+                if (visual == null) throw new InvalidOperationException("area-reconstruction-visual-owner-missing:" + area.UniqueId);
+                transaction.TrackAreaVisual(visual, removed: true);
+                transaction.RemoveArea(EntityService.Instance, area.HoldingState, area);
+                TrackAreaPools(transaction, area, removed: true);
+            }
+            foreach (var replica in prepared)
+            {
+                transaction.RegisterArea(EntityService.Instance, replica.Scene, replica.Area, replica.SceneName);
+                TrackAreaPools(transaction, replica.Area, removed: false);
+            }
+        }
+
+        private static void TrackAreaPools(RealTimeBuffRestoreTransaction transaction, AreaEffectEntityData area, bool removed)
+        {
+            var state = Game.Instance.State;
+            transaction.TrackAreaPool(state.AreaEffects.All, area, removed);
+            transaction.TrackAreaPool(state.Entities.All, area, removed);
+            if (area.IsSuppressible) transaction.TrackAreaPool(state.SuppressibleEntities.All, area, removed);
+            if (area.RequiresSphereBoundsCollider) transaction.TrackAreaPool(state.EntitiesWithBounds.All, area, removed);
+            if (area.IsAffectedByFogOfWar) transaction.TrackAreaPool(state.EntitiesAffectedByFogOfWar.All, area, removed);
         }
 
         public void RunTacticalUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand)
@@ -1649,6 +1726,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         parameters => _mapper.Map<AbilityParams>(parameters));
                     localAreaEffect.View.transform.position = areaEffect.Position.ToUnityVector3();
                     localAreaEffect.View.transform.rotation = UnityEngine.Quaternion.Euler(0, areaEffect.Orientation, 0);
+                    RealTimeAreaVisual.For(localAreaEffect.View)?.Confirm(areaEffect);
                     continue;
                 }
 

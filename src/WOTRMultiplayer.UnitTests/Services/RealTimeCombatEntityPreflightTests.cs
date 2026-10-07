@@ -130,7 +130,7 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             Assert.That(RealTimeCombatEntityPreflight.FindMissing(checkpoint,
                 _ => false, area => area.Id == "cloud"),
-                Is.EqualTo("missing-area-unit:cloud:missing"));
+                Is.EqualTo("invalid-area:cloud:occupants,missing-area-unit:cloud:missing"));
         }
 
         [Test]

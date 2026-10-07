@@ -344,6 +344,30 @@ internal static class Program
                 && !unresolvedProxy.IsDisposed && detached.Proxy == null && areaCache.Count == 1;
             using (var removal = RealTimeAreaReplicaStore.RemoveReplica(entities, scene, attached)) removal.Commit();
             detachedSafe &= unresolvedProxy.IsDisposed && areaCache.Count == 0 && scene.AllEntityData.Count == 0;
+            var pool = new System.Collections.Generic.List<Kingmaker.EntitySystem.Entities.AreaEffectEntityData>();
+            var poolSafe = true;
+            using (var membership = new RealTimeAreaPoolMembership(pool, detached, removed: false))
+            {
+                var enumerator = new Kingmaker.EntitySystem.EntityPoolEnumerator<Kingmaker.EntitySystem.Entities.AreaEffectEntityData>(pool);
+                poolSafe &= enumerator.MoveNext() && ReferenceEquals(enumerator.Current, detached);
+                using (new RealTimeAreaPoolMembership(pool, detached, removed: true))
+                    poolSafe &= pool.Count == 0 && !detached.IsInGame;
+                poolSafe &= pool.Count == 1 && detached.IsInGame;
+            }
+            poolSafe &= pool.Count == 0 && !detached.IsInGame;
+            var visualGuards = harmony.CreateClassProcessor(typeof(RealTimeAreaVisualLifecyclePatches)).Patch();
+            var inertView = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.View.MapObjects.AreaEffectView));
+            typeof(RealTimeAreaVisual).GetMethod("MarkOwned", BindingFlags.NonPublic | BindingFlags.Static)
+                .Invoke(null, new[] { inertView });
+            var visualSafe = visualGuards?.Count == 6;
+            foreach (var target in RealTimeAreaVisualLifecyclePatches.Targets().Cast<MethodInfo>())
+            {
+                var arguments = target.GetParameters().Select(p => p.ParameterType.IsValueType
+                    ? Activator.CreateInstance(p.ParameterType) : null).ToArray();
+                var result = target.Invoke(inertView, arguments);
+                if (target.Name == "CreateEntityData") visualSafe &= result == null;
+            }
             // Do not execute host originals on synthetic worldless objects.
             var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
                 && RealTimeAreaCallbackPatches.Targets().All(target =>
@@ -351,8 +375,9 @@ internal static class Program
             Console.WriteLine("installed-area-authority: scheduler-targets=" + scheduler.Count
                 + "; callback-targets=" + callbacks.Count + "; blocked-without-world=" + blocked
                 + "; host-prefix-allows=" + hostAllowed + "; raw-state-without-world=" + rawApplied
-                + "; detached-factory-and-store=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count);
-            return blocked && hostAllowed && rawApplied && detachedSafe;
+                + "; detached-factory-and-store=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count
+                + "; visual-lifecycle-without-unity=" + visualSafe + "; native-pool-enumeration=" + poolSafe);
+            return blocked && hostAllowed && rawApplied && detachedSafe && visualSafe && poolSafe;
         }
         catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
         finally

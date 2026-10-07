@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.EntitySystem;
+using System.Collections.Generic;
 using Kingmaker.EntitySystem.Persistence.JsonUtility;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
@@ -57,6 +59,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(area.Context.SpellLevel, Is.EqualTo(4));
             Assert.That(((int[])typeof(MechanicsContext).GetField("m_Ranks", Fields).GetValue(area.Context))[0], Is.EqualTo(7));
             Assert.That(area.IsTurnedOn, Is.False);
+            Assert.That(area.IsInGame, Is.False);
             Assert.That(area.Facts.List, Is.Empty);
             Assert.That(area.Parts, Is.Not.Null);
             Assert.That(area.HoldingState, Is.Null);
@@ -165,6 +168,23 @@ namespace WOTRMultiplayer.UnitTests.Services
             var ordinary = new AreaEffectEntityData(default(JsonConstructorMark));
             Assert.That(RealTimeAreaReplicaFactory.RequiresMechanicalRebuild(new[] { ordinary }), Is.False);
             Assert.DoesNotThrow(() => RealTimeAreaReplicaFactory.RequireMechanicalState(new[] { ordinary }));
+        }
+
+        [Test]
+        public void InactiveOrSuppressedReplicaStillBlocksSaveAndMechanicalReuse()
+        {
+            var source = Source();
+            var area = RealTimeAreaReplicaFactory.CreateDetached(source.Blueprint, source.Context, source.State,
+                _ => null, _ => Bare<AbilityParams>());
+            var pool = Bare<EntityPool<AreaEffectEntityData>>();
+            typeof(EntityPool<AreaEffectEntityData>).GetField("m_Entities", Fields)
+                .SetValue(pool, new List<AreaEffectEntityData> { area });
+            Assert.That(pool.ToList(), Is.Empty);
+            Assert.That(RealTimeAreaReplicaFactory.RequiresMechanicalRebuild(pool), Is.True);
+            typeof(EntityDataBase).GetField("m_IsInGame", Fields).SetValue(area, true);
+            typeof(EntityDataBase).GetField("m_Suppressed", Fields).SetValue(area, true);
+            Assert.That(pool.ToList(), Is.Empty);
+            Assert.Throws<InvalidOperationException>(() => RealTimeAreaReplicaFactory.RequireMechanicalState(pool));
         }
     }
 }

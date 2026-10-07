@@ -27,7 +27,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public static bool IsReplica(AreaEffectEntityData area) => area != null && Replicas.TryGetValue(area, out _);
         public static bool RequiresMechanicalRebuild(IEnumerable<AreaEffectEntityData> areas) =>
-            areas != null && areas.Any(IsReplica);
+            // Pool enumeration hides suppressed/out-of-game replicas. They
+            // still exist in the save graph and must block mechanical reuse.
+            areas is EntityPool<AreaEffectEntityData> pool ? pool.All.Any(IsReplica)
+                : areas != null && areas.Any(IsReplica);
 
         public static void RequireMechanicalState(IEnumerable<AreaEffectEntityData> areas)
         {
@@ -75,6 +78,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             // constructors Recalculate/CheckSelective/HandleSpawn and subscribe
             // damage triggers. None of those paths is used here.
             var area = new AreaEffectEntityData(default(JsonConstructorMark));
+            // Native JSON defaults mark an entity in-game before registration.
+            // A detached replica must remain outside the enumerator until its
+            // explicit pool membership has been staged by the transaction.
+            Field(typeof(EntityDataBase), "m_IsInGame").SetValue(area, false);
             Field(typeof(AreaEffectEntityData), "m_Blueprint").SetValue(area, blueprint);
             Field(typeof(AreaEffectEntityData), "m_Context").SetValue(area, context);
             Field(typeof(AreaEffectEntityData), "m_Target").SetValue(area, target);
