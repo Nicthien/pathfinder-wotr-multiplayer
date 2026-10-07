@@ -110,12 +110,43 @@ internal static class Program
             success &= ProbeDelegate();
             success &= ProbeRulebook();
             success &= ProbeVitals();
+            success &= ProbeBuffReplica();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;
     }
 
     private static int _statCallbacks;
+
+    private static bool ProbeBuffReplica()
+    {
+        try
+        {
+            var blueprint = (Kingmaker.UnitLogic.Buffs.Blueprints.BlueprintBuff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Kingmaker.UnitLogic.Buffs.Blueprints.BlueprintBuff));
+            var context = (Kingmaker.UnitLogic.Mechanics.MechanicsContext)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext));
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("11111111111111111111111111111111");
+            var owner = (Kingmaker.EntitySystem.Entities.UnitEntityData)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Kingmaker.EntitySystem.Entities.UnitEntityData));
+            var manager = new Kingmaker.EntitySystem.EntityFactsManager(owner);
+            var initiallyEmpty = !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any();
+            var buff = RealTimeBuffReplicaStore.CreateDetached(blueprint, context, new NetworkBuff
+            {
+                Id = "offline-host-buff", BlueprintId = blueprint.AssetGuid.ToString(), Rank = 3,
+                TimeLeft = TimeSpan.FromSeconds(12), NextTickTime = TimeSpan.MaxValue, NextResourceSpendingTime = TimeSpan.MaxValue
+            }, TimeSpan.FromSeconds(100));
+            bool registered;
+            using (RealTimeBuffReplicaStore.Register(manager, buff))
+                registered = ReferenceEquals(manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Single(), buff)
+                    && ReferenceEquals(manager.FindById(buff.UniqueId), buff) && !buff.IsActive && !buff.IsSubscribedOnEventBus;
+            var rolledBack = !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any() && buff.Manager == null;
+            Console.WriteLine("installed-buff-replica: empty=" + initiallyEmpty + "; registered-without-components=" + registered
+                + "; cache-rollback=" + rolledBack);
+            return initiallyEmpty && registered && rolledBack;
+        }
+        catch (Exception failure) { Console.WriteLine("installed-buff-replica: FAILED: " + failure); return false; }
+    }
     private static void StatChanged(ModifiableValue stat, int previous) { _statCallbacks++; }
 
     private static bool ProbeVitals()
