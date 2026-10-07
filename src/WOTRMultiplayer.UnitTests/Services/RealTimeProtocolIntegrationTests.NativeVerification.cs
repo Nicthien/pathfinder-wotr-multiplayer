@@ -27,8 +27,10 @@ namespace WOTRMultiplayer.UnitTests.Services
             var owner = Activator.CreateInstance(type, nonPublic: true);
             void Set(string name, object value) => type.GetField(name).SetValue(owner, value);
             reference.NativeTopology ??= new Networking.Messages.Contracts.NetworkNativeTopology();
+            reference.AcceptedOrderReference ??= RealTimeAcceptedOrderLedger.CaptureReference(host.Game.RealTimeCombat,
+                host.Game.Id, host.Game.LoadedSaveSeed);
             var bytes = RealTimeNativeReferenceCodec.Encode(new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState
-            { NativeTopology = reference.NativeTopology });
+            { NativeTopology = reference.NativeTopology, AcceptedOrderReference = reference.AcceptedOrderReference });
             Set("Session", host.Game); Set("Combat", host.Game.Combat); Set("State", host.Game.RealTimeCombat);
             Set("Phase", CombatSynchronizationPhase.Repairing); Set("BarrierOwned", (Func<bool>)(() => true));
             Set("Peer", 42L); Set("Prepare", prepare); Set("Manifest", manifest); Set("LoadRequested", true);
@@ -47,6 +49,9 @@ namespace WOTRMultiplayer.UnitTests.Services
         [TestCase("invalid-format")]
         [TestCase("topology-mismatch")]
         [TestCase("missing-topology")]
+        [TestCase("missing-orders")]
+        [TestCase("wrong-order-sequence")]
+        [TestCase("restore-orders")]
         public async Task NativeVerification_TwoActorsBindReferenceReceiptWithoutCommittingMechanics(string scenario)
         {
             var (host, client, hostNetwork, clientNetwork, queued, combat) = CreatePair();
@@ -69,6 +74,16 @@ namespace WOTRMultiplayer.UnitTests.Services
                 { AreaEffects = new() { new() { Id = "unexpected-area" } } } : scenario == "topology-mismatch"
                     ? new NetworkCombatState { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology
                     { Entities = new() { new() { Id = "unexpected-native-unit", Kind = "unit" } } } } : reference));
+            if (scenario == "restore-orders")
+            {
+                host.Game.RealTimeCombat.Epoch = prepare.Epoch;
+                RealTimeAcceptedOrderLedger.Record(host.Game.RealTimeCombat, new NotifyRealTimeCombatCommandAccepted
+                {
+                    SessionId = prepare.SessionId, LoadedSaveSeed = prepare.LoadedSaveSeed, Epoch = prepare.Epoch,
+                    AuthoritativeSequence = 3, PlayerId = 42, CommandId = "42:epoch:1",
+                    Movement = new Networking.Messages.Contracts.NetworkUnitMoveTo { InitiatorUnitId = "hero" }
+                });
+            }
             SeedNativeVerificationHost(host, prepare, manifest, reference);
             queued.Clear();
             A.CallTo(() => hostNetwork.Send(42, A<object>._)).Invokes(call => queued.Enqueue(call.Arguments[1]));
@@ -87,10 +102,19 @@ namespace WOTRMultiplayer.UnitTests.Services
                 verify.ReferenceStateBytes = RealTimeNativeReferenceCodec.Encode(state);
                 verify.ReferenceStateHash = RealTimeNativeCheckpointLimits.Hash(verify.ReferenceStateBytes);
             }
+            if (scenario == "missing-orders" || scenario == "wrong-order-sequence")
+            {
+                var state = RealTimeNativeReferenceCodec.Decode(verify.ReferenceStateBytes);
+                if (scenario == "missing-orders") state.AcceptedOrderReference = null;
+                else state.AcceptedOrderReference.LastIncludedSequence++;
+                verify.ReferenceStateBytes = RealTimeNativeReferenceCodec.Encode(state);
+                verify.ReferenceStateHash = RealTimeNativeCheckpointLimits.Hash(verify.ReferenceStateBytes);
+            }
             NativeHeader(clientNetwork, ProtoBuf.Serializer.DeepClone(verify));
             var first = (ClientRealTimeNativeCheckpointAck)queued.Dequeue();
             var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeNativeCheckpointAck>(hostNetwork);
-            if (scenario == "restore-mismatch" || scenario == "invalid-format" || scenario == "topology-mismatch" || scenario == "missing-topology")
+            if (scenario == "restore-mismatch" || scenario == "invalid-format" || scenario == "topology-mismatch" || scenario == "missing-topology"
+                || scenario == "missing-orders" || scenario == "wrong-order-sequence")
             {
                 Assert.That(first.Stage, Is.EqualTo((int)RealTimeNativeCheckpointAckStage.Failed));
                 handler(42, first);
@@ -109,7 +133,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                 if (scenario == "payload-mismatch") ack.ReferenceStateHash = new string('B', 64);
                 handler(42, ProtoBuf.Serializer.DeepClone(ack));
             }
-            Assert.That(await verified, Is.EqualTo(scenario == "success"));
+            Assert.That(await verified, Is.EqualTo(scenario == "success" || scenario == "restore-orders"));
+            if (scenario == "restore-orders")
+            {
+                Assert.That(RealTimeAcceptedOrderLedger.Snapshot(client.Game.RealTimeCombat).Single().CommandId, Is.EqualTo("42:epoch:1"));
+                Assert.That(RealTimeAcceptedOrderLedger.Snapshot(client.Game.RealTimeCombat).Single().Payload,
+                    Is.EqualTo(RealTimeAcceptedOrderLedger.Snapshot(host.Game.RealTimeCombat).Single().Payload));
+            }
             Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
             Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
             Assert.That(RealTimeNativeGraphRepair.Contains(world, obligation), Is.True);
@@ -177,6 +207,28 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(await host.VerifyCurrentNativeReferenceAsync(manifest, () => true), Is.False);
             Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
             Assert.That(host.Game.RealTimeCombat.BlocksSaving, Is.True);
+            A.CallTo(() => NativeInteraction(host).SetPauseAsync(false)).MustNotHaveHappened();
+            host.Reset();
+        }
+
+        [Test]
+        public async Task NativeVerification_HostJournalChangedWithoutSequenceChangeAbortsBeforeVerify()
+        {
+            var (host, client, _, _, _, _) = CreatePair();
+            var prepare = NativePrepare(client);
+            if (!RealTimePresentationRuntime.Enabled) return;
+            var reference = new NetworkCombatState();
+            prepare.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
+            var (manifest, _) = NativeArchive(prepare);
+            SeedNativeVerificationHost(host, prepare, manifest, reference);
+            RealTimeAcceptedOrderLedger.Record(host.Game.RealTimeCombat, new NotifyRealTimeCombatCommandAccepted
+            {
+                SessionId = prepare.SessionId, LoadedSaveSeed = prepare.LoadedSaveSeed, Epoch = prepare.Epoch,
+                AuthoritativeSequence = 3, PlayerId = 42, CommandId = "42:epoch:1",
+                Movement = new Networking.Messages.Contracts.NetworkUnitMoveTo { InitiatorUnitId = "hero" }
+            });
+            Assert.That(await host.VerifyCurrentNativeReferenceAsync(manifest, () => true), Is.False);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
             A.CallTo(() => NativeInteraction(host).SetPauseAsync(false)).MustNotHaveHappened();
             host.Reset();
         }

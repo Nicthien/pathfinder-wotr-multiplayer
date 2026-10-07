@@ -94,6 +94,8 @@ namespace WOTRMultiplayer.Services
                             || RealTimeNativeCheckpointLimits.Hash(transfer.ReferenceBytes) != transfer.ReferenceHash)
                             throw new InvalidOperationException("native-reference-host-source-invalid");
                         var current = CombatInteraction.GetRealTimeNativeReferenceState();
+                        RealTimeAcceptedOrderLedger.RequireUnchanged(transfer.State, transfer.Reference.AcceptedOrderReference,
+                            transfer.Session.Id, transfer.Session.LoadedSaveSeed);
                         if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current }) != manifest.CanonicalStateHash
                             || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null
                             || RealTimeNativeTopologyComparison.Difference(transfer.Reference.NativeTopology, current.NativeTopology) != null)
@@ -157,6 +159,7 @@ namespace WOTRMultiplayer.Services
                             throw new InvalidOperationException("native-transfer-build-fingerprint-mismatch");
                         var reference = CombatInteraction.GetRealTimeNativeReferenceState();
                         RealTimeNativeTopologyComparison.RequireValid(reference.NativeTopology);
+                        reference.AcceptedOrderReference = RealTimeAcceptedOrderLedger.CaptureReference(Game.RealTimeCombat, Game.Id, Game.LoadedSaveSeed);
                         var referenceBytes = RealTimeNativeReferenceCodec.Encode(Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(reference));
                         var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
                         var owner = new NativeTransfer
@@ -207,6 +210,8 @@ namespace WOTRMultiplayer.Services
                         {
                             if (!IsCurrentNativeTransfer(transfer)) { installed.TrySetResult(false); return; }
                             var current = CombatInteraction.GetRealTimeNativeReferenceState();
+                            RealTimeAcceptedOrderLedger.RequireUnchanged(transfer.State, transfer.Reference.AcceptedOrderReference,
+                                transfer.Session.Id, transfer.Session.LoadedSaveSeed);
                             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current });
                             if (hash != transfer.Prepare.CanonicalStateHash || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null
                                 || RealTimeNativeTopologyComparison.Difference(transfer.Reference.NativeTopology, current.NativeTopology) != null)

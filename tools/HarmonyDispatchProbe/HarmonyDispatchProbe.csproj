@@ -21,5 +21,10 @@
     <Reference Include="WOTRMultiplayer.Networking">
       <HintPath>$([System.IO.Path]::GetDirectoryName('$(RtwpProbeModPath)'))\WOTRMultiplayer.Networking.dll</HintPath>
     </Reference>
+    <!-- protobuf-net discovers this transitive dependency at runtime. Resolve
+         the exact packaged DLL, never a test runner or NuGet substitute. -->
+    <Reference Include="System.Collections.Immutable">
+      <HintPath>$([System.IO.Path]::GetDirectoryName('$(RtwpProbeModPath)'))\System.Collections.Immutable.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

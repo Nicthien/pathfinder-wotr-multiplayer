@@ -5,13 +5,15 @@ using System.Security.Cryptography;
 using ProtoBuf;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Networking.Messages.Game;
+using WOTRMultiplayer.Networking;
+using WOTRMultiplayer.Networking.Messages.Contracts;
 
 namespace WOTRMultiplayer.Services
 {
     /// <summary>Bounded fingerprint of host-accepted orders, shared by both peers in one combat epoch.</summary>
     public static class RealTimeAcceptedOrderLedger
     {
-        private const int RetainedOrders = 32;
+        private const int RetainedOrders = RealTimeAcceptedOrderReferenceValidation.MaximumOrders;
 
         public static void Record(NetworkRealTimeCombatState state, NotifyRealTimeCombatCommandAccepted accepted)
         {
@@ -60,7 +62,74 @@ namespace WOTRMultiplayer.Services
         {
             if (state == null) return [];
             lock (state)
-                return state.AcceptedOrders?.Where(order => order.Epoch == state.Epoch).ToArray() ?? [];
+                return state.AcceptedOrders?.Where(order => order.Epoch == state.Epoch).Select(Clone).ToArray() ?? [];
+        }
+
+        private static RealTimeCommandEnvelope Clone(RealTimeCommandEnvelope order) => new()
+        {
+            Epoch = order.Epoch, Sequence = order.Sequence, PlayerId = order.PlayerId,
+            UnitId = order.UnitId, Kind = order.Kind, Payload = order.Payload,
+            SessionId = order.SessionId, LoadedSaveSeed = order.LoadedSaveSeed,
+            CommandId = order.CommandId, ObservedStateHash = order.ObservedStateHash
+        };
+
+        public static NetworkAcceptedOrderReference CaptureReference(NetworkRealTimeCombatState state, string session, int save)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            lock (state)
+            {
+                var orders = Snapshot(state);
+                if (orders.Any(order => order.SessionId != session || order.LoadedSaveSeed != save))
+                    throw new InvalidOperationException("native-order-ledger-session-mismatch");
+                var result = new NetworkAcceptedOrderReference
+                {
+                    SessionId = session, LoadedSaveSeed = save, Epoch = state.Epoch,
+                    LastIncludedSequence = state.LastAuthoritativeSequence,
+                    Orders = orders.Select(order => new NetworkAcceptedOrderEvidence
+                    {
+                        Sequence = order.Sequence, PlayerId = order.PlayerId, UnitId = order.UnitId,
+                        Kind = (int)order.Kind, PayloadHash = order.Payload, CommandId = order.CommandId
+                    }).ToList()
+                };
+                RealTimeAcceptedOrderReferenceValidation.RequireValid(result);
+                return result;
+            }
+        }
+
+        public static void RequireUnchanged(NetworkRealTimeCombatState state, NetworkAcceptedOrderReference expected,
+            string session, int save)
+        {
+            var actual = CaptureReference(state, session, save);
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(expected, session, save, actual.Epoch, actual.LastIncludedSequence);
+            using var left = new MemoryStream(); using var right = new MemoryStream();
+            Serializer.Serialize(left, expected); Serializer.Serialize(right, actual);
+            if (!left.ToArray().SequenceEqual(right.ToArray()))
+                throw new InvalidOperationException("native-order-ledger-changed");
+        }
+
+        // Restores bounded evidence only, never native commands, command-gate watermarks,
+        // event cursors, combat phase or permission to resume/save. Commit owns those.
+        public static void RestoreReference(NetworkRealTimeCombatState state, NetworkAcceptedOrderReference reference,
+            string session, int save, long epoch, long includedSequence, Func<bool> authorized)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            if (authorized == null) throw new ArgumentNullException(nameof(authorized));
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(reference, session, save, epoch, includedSequence);
+            var copy = Serializer.DeepClone(reference ?? throw new ArgumentNullException(nameof(reference)));
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(copy, session, save, epoch, includedSequence);
+            var replacement = copy.Orders.Select(order => new RealTimeCommandEnvelope
+            {
+                Epoch = epoch, Sequence = order.Sequence, PlayerId = order.PlayerId, UnitId = order.UnitId,
+                Kind = (RealTimeCommandKind)order.Kind, Payload = order.PayloadHash, CommandId = order.CommandId,
+                SessionId = session, LoadedSaveSeed = save
+            }).ToList();
+            lock (state)
+            {
+                if (!authorized() || state.Mode != CombatMode.RealTimeWithPause || state.Phase == CombatSynchronizationPhase.Stable
+                    || state.Epoch != epoch || state.LastAuthoritativeSequence > includedSequence)
+                    throw new InvalidOperationException("native-order-restoration-barrier-invalid");
+                state.AcceptedOrders = replacement;
+            }
         }
     }
 }

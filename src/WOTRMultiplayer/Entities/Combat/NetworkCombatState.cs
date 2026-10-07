@@ -16,6 +16,7 @@ namespace WOTRMultiplayer.Entities.Combat
 
         public bool ProjectilesCaptured { get; set; }
         public Networking.Messages.Contracts.NetworkNativeTopology NativeTopology { get; set; }
+        public Networking.Messages.Contracts.NetworkAcceptedOrderReference AcceptedOrderReference { get; set; }
 
         public List<RealTime.NetworkProjectileState> Projectiles { get; set; } = [];
     }

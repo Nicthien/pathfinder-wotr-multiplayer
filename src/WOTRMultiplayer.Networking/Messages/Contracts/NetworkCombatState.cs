@@ -27,5 +27,6 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(6)] public bool ProjectilesCaptured { get; set; }
         // Only populated for the native reconstruction reference, not frequent snapshots.
         [ProtoMember(7)] public NetworkNativeTopology NativeTopology { get; set; }
+        [ProtoMember(8)] public NetworkAcceptedOrderReference AcceptedOrderReference { get; set; }
     }
 }

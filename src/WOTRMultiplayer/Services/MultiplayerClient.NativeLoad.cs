@@ -24,6 +24,8 @@ namespace WOTRMultiplayer.Services
             var checkpoint = Mapper.Map<NetworkCombatState>(ProtoBuf.Serializer.DeepClone(
                 Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(reference)));
             RealTimeNativeTopologyComparison.RequireValid(checkpoint.NativeTopology);
+            RealTimeAcceptedOrderReferenceValidation.RequireIdentity(checkpoint.AcceptedOrderReference,
+                manifest.SessionId, manifest.LoadedSaveSeed, manifest.Epoch, manifest.LastIncludedSequence);
             if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = checkpoint }) != manifest.CanonicalStateHash)
                 throw new InvalidOperationException("native-reference-not-bound-to-manifest");
             var owner = new object();
@@ -56,6 +58,11 @@ namespace WOTRMultiplayer.Services
                     throw new InvalidOperationException("native-reference-restoration-differs:" + difference);
                 var topologyDifference = RealTimeNativeTopologyComparison.Difference(checkpoint.NativeTopology, actual.NativeTopology);
                 if (topologyDifference != null) throw new InvalidOperationException("native-reference-topology-differs:" + topologyDifference);
+                lock (ActionLock)
+                {
+                    RealTimeAcceptedOrderLedger.RestoreReference(Game?.RealTimeCombat, checkpoint.AcceptedOrderReference,
+                        manifest.SessionId, manifest.LoadedSaveSeed, manifest.Epoch, manifest.LastIncludedSequence, Authorized);
+                }
                 return hash;
             }
             finally

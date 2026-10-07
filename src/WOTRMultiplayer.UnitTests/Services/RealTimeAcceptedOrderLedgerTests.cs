@@ -1,4 +1,5 @@
 using System.Linq;
+using System;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using ProtoBuf;
@@ -84,5 +85,66 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Destination = new NetworkVector3(x, 0, 0)
             }
         };
+
+        private static NetworkRealTimeCombatState RepairState() => new()
+        {
+            Epoch = 3, LastAuthoritativeSequence = 9, Mode = CombatMode.RealTimeWithPause,
+            Phase = CombatSynchronizationPhase.Repairing
+        };
+
+        private static void RecordBoundOrder(NetworkRealTimeCombatState state)
+        {
+            var accepted = Move(3, 7, 1);
+            accepted.SessionId = "session"; accepted.LoadedSaveSeed = 12; accepted.CommandId = "42:3:1";
+            RealTimeAcceptedOrderLedger.Record(state, accepted);
+        }
+
+        [Test]
+        public void RestoreEvidenceDoesNotExecuteCommandsOrAdvanceTheCursorOrReleaseBarrier()
+        {
+            var host = RepairState(); RecordBoundOrder(host);
+            var reference = RealTimeAcceptedOrderLedger.CaptureReference(host, "session", 12);
+            var client = RepairState(); client.LastAuthoritativeSequence = 1;
+            RealTimeAcceptedOrderLedger.RestoreReference(client, reference, "session", 12, 3, 9, () => true);
+            Assert.That(RealTimeAcceptedOrderLedger.Snapshot(client).Single().Payload,
+                Is.EqualTo(RealTimeAcceptedOrderLedger.Snapshot(host).Single().Payload));
+            Assert.That(client.LastAuthoritativeSequence, Is.EqualTo(1));
+            Assert.That(client.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(client.BlocksSaving, Is.True);
+            reference.Orders[0].UnitId = "changed-after-restoration";
+            var snapshot = RealTimeAcceptedOrderLedger.Snapshot(client); snapshot[0].UnitId = "changed-snapshot";
+            Assert.That(RealTimeAcceptedOrderLedger.Snapshot(client).Single().UnitId, Is.EqualTo("hero"));
+        }
+
+        [TestCase("revoked")][TestCase("stable")][TestCase("turn-based")][TestCase("epoch")][TestCase("ahead")]
+        [TestCase("session")][TestCase("save")][TestCase("included")]
+        public void InvalidBarrierDoesNotReplaceExistingLedger(string fault)
+        {
+            var host = RepairState(); RecordBoundOrder(host);
+            var reference = RealTimeAcceptedOrderLedger.CaptureReference(host, "session", 12);
+            var client = RepairState(); RecordBoundOrder(client);
+            var existing = client.AcceptedOrders;
+            if (fault == "stable") client.Phase = CombatSynchronizationPhase.Stable;
+            if (fault == "turn-based") client.Mode = CombatMode.TurnBased;
+            if (fault == "epoch") client.Epoch++;
+            if (fault == "ahead") client.LastAuthoritativeSequence++;
+            Assert.Catch(() => RealTimeAcceptedOrderLedger.RestoreReference(client, reference,
+                fault == "session" ? "other" : "session", fault == "save" ? 13 : 12,
+                3, fault == "included" ? 10 : 9, () => fault != "revoked"));
+            Assert.That(client.AcceptedOrders, Is.SameAs(existing));
+        }
+
+        [TestCase("payload")][TestCase("session")][TestCase("sequence")][TestCase("missing")]
+        public void HostCannotVerifyAChangedJournal(string fault)
+        {
+            var host = RepairState(); RecordBoundOrder(host);
+            var reference = RealTimeAcceptedOrderLedger.CaptureReference(host, "session", 12);
+            RealTimeAcceptedOrderLedger.RequireUnchanged(host, reference, "session", 12);
+            if (fault == "payload") host.AcceptedOrders[0].Payload = Convert.ToBase64String(new byte[32]);
+            if (fault == "session") host.AcceptedOrders[0].SessionId = "other";
+            if (fault == "sequence") host.LastAuthoritativeSequence++;
+            if (fault == "missing") host.AcceptedOrders.Clear();
+            Assert.Catch(() => RealTimeAcceptedOrderLedger.RequireUnchanged(host, reference, "session", 12));
+        }
     }
 }

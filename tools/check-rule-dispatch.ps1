@@ -42,8 +42,9 @@ try {
 } finally { $env:WOTR_PATH = $previousGamePath }
 $probeBin = Join-Path $PSScriptRoot 'HarmonyDispatchProbe\bin\Release\net481'
 $probeExe = Join-Path $probeBin 'HarmonyDispatchProbe.exe'
+$probeConfig = "$probeExe.config"
 $modHash = (Get-FileHash -LiteralPath $modAssembly -Algorithm SHA256).Hash
-foreach ($name in @('WOTRMultiplayer.dll', 'WOTRMultiplayer.Networking.dll')) {
+foreach ($name in @('WOTRMultiplayer.dll', 'WOTRMultiplayer.Networking.dll', 'System.Collections.Immutable.dll')) {
     $expected = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $modAssembly) $name) -Algorithm SHA256).Hash
     if ((Get-FileHash -LiteralPath (Join-Path $probeBin $name) -Algorithm SHA256).Hash -ne $expected) {
         throw "Le diagnostic ne charge pas la DLL exacte demandée : $name"
@@ -59,7 +60,7 @@ $exitCode = $LASTEXITCODE
 $passed = $exitCode -eq 0 -and (Select-String -LiteralPath $logPath -SimpleMatch 'Mono=True' -Quiet)
 $proof = [ordered]@{
     createdUtc = (Get-Date).ToUniversalTime().ToString('o')
-    scope = 'Offline rule/vital/calculated-stat/buff/area guards, native memory/fragment transfer and client load lease with synthetic field hydration; no native world capture/load, rendering or game/combat validation'
+    scope = 'Offline guards, memory transfer, native load lease, detached graph and accepted-order evidence; standalone binding redirects; no game loader dependency validation, native world capture/load, rendering or combat validation'
     success = [bool]$passed
     exitCode = $exitCode
     candidateFingerprint = if ($CandidateFingerprint) { $CandidateFingerprint } else { $null }
@@ -69,6 +70,9 @@ $proof = [ordered]@{
     monoLibrarySha256 = (Get-FileHash -LiteralPath $monoLibrary -Algorithm SHA256).Hash
     harmonyLibrarySha256 = (Get-FileHash -LiteralPath $harmonyLibrary -Algorithm SHA256).Hash
     managedProbeSha256 = (Get-FileHash -LiteralPath $probeExe -Algorithm SHA256).Hash
+    managedProbeConfigSha256 = (Get-FileHash -LiteralPath $probeConfig -Algorithm SHA256).Hash
+    immutableAssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $probeBin 'System.Collections.Immutable.dll') -Algorithm SHA256).Hash
+    usesStandaloneBindingRedirects = $true
     nativeProbeSha256 = (Get-FileHash -LiteralPath $nativeExe -Algorithm SHA256).Hash
     gameStarted = $false
     runtimeValidated = $false
@@ -78,6 +82,6 @@ if (-not $passed) { throw "Le diagnostic hors jeu a échoué. Voir $logPath" }
 if ($CandidateFingerprint) {
     $evidenceRoot = Join-Path (Split-Path -Parent (Split-Path -Parent $modAssembly)) 'offline-rule-dispatch'
     New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
-    Copy-Item -LiteralPath $logPath, (Join-Path $probeRoot 'latest.json'), $probeExe, $nativeExe -Destination $evidenceRoot -Force
+    Copy-Item -LiteralPath $logPath, (Join-Path $probeRoot 'latest.json'), $probeExe, $probeConfig, $nativeExe -Destination $evidenceRoot -Force
 }
 Write-Output "Interception des callbacks vérifiée hors jeu : $modHash"

@@ -338,7 +338,15 @@ namespace WOTRMultiplayer.UnitTests.Services
         {
             var (_, client, _, network, queued, combat) = CreatePair();
             var prepare = NativePrepare(client);
-            var reference = new NetworkCombatState { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology() };
+            var reference = new NetworkCombatState
+            {
+                NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology(),
+                AcceptedOrderReference = new Networking.Messages.Contracts.NetworkAcceptedOrderReference
+                {
+                    SessionId = prepare.SessionId, LoadedSaveSeed = prepare.LoadedSaveSeed,
+                    Epoch = prepare.Epoch, LastIncludedSequence = prepare.LastIncludedSequence
+                }
+            };
             prepare.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
             NativeHeader(network, prepare);
             if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
