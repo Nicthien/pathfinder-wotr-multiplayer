@@ -57,6 +57,47 @@ namespace WOTRMultiplayer.UnitTests.Services
             => FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeNativeCheckpoint>(network)(peer, header);
 
         [Test]
+        public void NativeLoad_RequestBeforeVerifiedBytesCannotScheduleWorldReplacement()
+        {
+            var (_, client, _, network, queued, _) = CreatePair();
+            var prepare = NativePrepare(client); NativeHeader(network, prepare);
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
+            var (manifest, _) = NativeArchive(prepare); NativeHeader(network, manifest);
+            queued.Clear();
+            var load = RealTimeNativeCheckpointLimits.Copy(manifest); load.Stage = (int)RealTimeNativeCheckpointStage.Load;
+            NativeHeader(network, load);
+            Assert.That(queued, Is.Empty);
+            Assert.That(typeof(MultiplayerClient).GetField("_nativeLoadOperation", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(client), Is.Null);
+            Assert.That(RealTimeNativeLoadLease.IsActive, Is.False);
+        }
+
+        [Test]
+        public async System.Threading.Tasks.Task NativeLoad_RepeatedRequestReturnsExistingReceiptWithoutLoadingGame()
+        {
+            var (_, client, _, network, queued, _) = CreatePair();
+            var prepare = NativePrepare(client); NativeHeader(network, prepare);
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
+            var (manifest, bytes) = NativeArchive(prepare); NativeHeader(network, manifest);
+            using var sender = new RealTimeNativeCheckpointSender(42, manifest, bytes);
+            foreach (var chunk in sender.GetDueChunks(DateTime.UtcNow))
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeNativeCheckpointChunk>(network)(NetworkConstants.HostPlayerId, chunk);
+            // Seed only a synthetic successful operation. Never invoke the native loader.
+            var operation = new RealTimeNativeLoadOperation(() => true);
+            await operation.RunAsync(() => System.Threading.Tasks.Task.FromResult(new RealTimeNativeWorldLoadResult
+            { World = new object(), RepairObligation = new object() }));
+            typeof(MultiplayerClient).GetField("_nativeLoadOperation", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(client, operation);
+            queued.Clear();
+            var load = RealTimeNativeCheckpointLimits.Copy(manifest); load.Stage = (int)RealTimeNativeCheckpointStage.Load;
+            NativeHeader(network, load); NativeHeader(network, load);
+            Assert.That(queued.OfType<ClientRealTimeNativeCheckpointAck>().Count(), Is.EqualTo(2));
+            Assert.That(queued.OfType<ClientRealTimeNativeCheckpointAck>().All(ack => ack.Stage == (int)RealTimeNativeCheckpointAckStage.Loaded), Is.True);
+            Assert.That(RealTimeNativeLoadLease.IsActive, Is.False);
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(client.Game.RealTimeCombat.BlocksSaving, Is.True);
+            A.CallTo(() => NativeInteraction(client).SetPauseAsync(false)).MustNotHaveHappened();
+        }
+
+        [Test]
         public void NativeTransfer_ClientEndpointAssemblesSourceButNeverAppliesMechanicsOrResumes()
         {
             var (_, client, _, network, queued, combat) = CreatePair();
@@ -236,6 +277,55 @@ namespace WOTRMultiplayer.UnitTests.Services
             using var intact = client.CloneTransferredNativeCheckpoint(manifest);
             Assert.That(intact.IsSealed, Is.True);
             Assert.That(client.Game.RealTimeCombat.BlocksSaving, Is.True);
+        }
+
+        [TestCase("valid")]
+        [TestCase("not-requested")]
+        [TestCase("not-transferred")]
+        [TestCase("foreign-peer")]
+        [TestCase("old-save")]
+        [TestCase("chunk-number")]
+        public void NativeLoad_HostOnlyAcceptsRequestedLoadedReceiptAndNeverCommits(string mutation)
+        {
+            var (host, client, hostNetwork, _, queued, _) = CreatePair();
+            var prepare = NativePrepare(client);
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
+            host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
+            host.Game.RealTimeCombat.Epoch = prepare.Epoch;
+            host.Game.RealTimeCombat.LastAuthoritativeSequence = prepare.LastIncludedSequence;
+            var (manifest, _) = NativeArchive(prepare);
+            var type = typeof(MultiplayerHost).GetNestedType("NativeTransfer", BindingFlags.NonPublic);
+            var transfer = Activator.CreateInstance(type, nonPublic: true);
+            void Set(string name, object value) => type.GetField(name).SetValue(transfer, value);
+            Set("Session", host.Game); Set("Combat", host.Game.Combat); Set("State", host.Game.RealTimeCombat);
+            Set("Phase", CombatSynchronizationPhase.Repairing); Set("BarrierOwned", (Func<bool>)(() => true));
+            Set("Peer", 42L); Set("Prepare", prepare); Set("Manifest", manifest);
+            Set("LoadRequested", mutation != "not-requested"); Set("Deadline", DateTime.UtcNow.AddMinutes(2));
+            typeof(MultiplayerHost).GetField("_nativeTransfer", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(host, transfer);
+            var transferred = (System.Threading.Tasks.TaskCompletionSource<bool>)type.GetField("Transferred").GetValue(transfer);
+            if (mutation != "not-transferred") transferred.SetResult(true);
+            var loaded = (System.Threading.Tasks.TaskCompletionSource<bool>)type.GetField("Loaded").GetValue(transfer);
+            var ack = new ClientRealTimeNativeCheckpointAck
+            {
+                SessionId = manifest.SessionId, LoadedSaveSeed = manifest.LoadedSaveSeed + (mutation == "old-save" ? 1 : 0),
+                Epoch = manifest.Epoch, CheckpointId = manifest.CheckpointId, ArchiveHash = manifest.ArchiveHash,
+                Number = mutation == "chunk-number" ? 1 : 0, Stage = (int)RealTimeNativeCheckpointAckStage.Loaded
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeNativeCheckpointAck>(hostNetwork);
+            handler(mutation == "foreign-peer" ? 99 : 42, ack);
+            Assert.That(loaded.Task.IsCompleted, Is.EqualTo(mutation == "valid"));
+            if (mutation == "valid")
+            {
+                var deadline = type.GetField("Deadline").GetValue(transfer);
+                handler(42, ack);
+                Assert.That(type.GetField("Deadline").GetValue(transfer), Is.EqualTo(deadline));
+                Assert.That(loaded.Task.Result, Is.True);
+            }
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.Game.RealTimeCombat.BlocksSaving, Is.True);
+            A.CallTo(() => NativeInteraction(host).SetPauseAsync(false)).MustNotHaveHappened();
+            host.Reset();
         }
     }
 }

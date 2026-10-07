@@ -2953,6 +2953,13 @@ namespace WOTRMultiplayer.Services
 
         private void CheckRealTimeRepairTimeout()
         {
+            // The native barrier owns its bounded transfer/load deadlines. Do
+            // not race its workers with the old 30-second snapshot retry/repli.
+            if (_nativeTransfer != null && IsCurrentNativeTransfer(_nativeTransfer))
+            {
+                _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
+                return;
+            }
             if (!_realTimeRepairStage.HasValue || _realTimeRepairDeadline == default
                 || DateTime.UtcNow <= _realTimeRepairDeadline)
             {

@@ -44,6 +44,14 @@ namespace WOTRMultiplayer.Networking
             && frame.ArchiveBytes > 0 && frame.ArchiveBytes <= MaximumArchiveBytes
             && frame.ChunkBytes == ChunkBytes && frame.ChunkCount == (frame.ArchiveBytes + ChunkBytes - 1) / ChunkBytes;
 
+        public static NotifyRealTimeNativeCheckpoint AsManifest(NotifyRealTimeNativeCheckpoint frame)
+        {
+            if (frame == null || frame.Stage != (int)RealTimeNativeCheckpointStage.Load) return null;
+            var manifest = Copy(frame);
+            manifest.Stage = (int)RealTimeNativeCheckpointStage.Manifest;
+            return IsManifest(manifest) ? manifest : null;
+        }
+
         public static NotifyRealTimeNativeCheckpoint Copy(NotifyRealTimeNativeCheckpoint frame) => new()
         {
             SessionId = frame.SessionId, LoadedSaveSeed = frame.LoadedSaveSeed, Epoch = frame.Epoch,

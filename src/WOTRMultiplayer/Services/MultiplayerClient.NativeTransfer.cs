@@ -23,6 +23,7 @@ namespace WOTRMultiplayer.Services
         private bool _nativeReceivePrepared;
         private bool _nativeReceiveFailed;
         private DateTime _nativeReceiveDeadline;
+        private RealTimeNativeLoadOperation _nativeLoadOperation;
 
         private bool IsCurrentNativeReceive()
         {
@@ -79,6 +80,31 @@ namespace WOTRMultiplayer.Services
                             FailNativeCheckpointReceive("native-transfer-host-aborted", copied, notify: false);
                             return;
                         }
+                        if (copied.Stage == (int)RealTimeNativeCheckpointStage.Load)
+                        {
+                            var requested = RealTimeNativeCheckpointLimits.AsManifest(copied);
+                            if (!_nativeReceivePrepared || _nativeReceiveFailed || _nativeReceivedSource == null
+                                || requested == null || _nativeReceiver?.MatchesManifest(requested) != true) return;
+                            if (_nativeLoadOperation != null)
+                            {
+                                if (_nativeLoadOperation.IsLoaded)
+                                    SendNativeCheckpointAck(requested, RealTimeNativeCheckpointAckStage.Loaded);
+                                return; // Pending or failed: never schedule a second native world load.
+                            }
+                            var receivedManifest = _nativeReceiveManifest;
+                            bool Authorized()
+                            {
+                                lock (ActionLock)
+                                    return IsCurrentNativeReceive() && !_nativeReceiveFailed
+                                        && ReferenceEquals(_nativeReceiveManifest, receivedManifest)
+                                        && _nativeReceiver?.MatchesManifest(requested) == true;
+                            }
+                            var operation = new RealTimeNativeLoadOperation(Authorized);
+                            _nativeLoadOperation = operation;
+                            _nativeReceiveDeadline = DateTime.MaxValue;
+                            RunNativeCheckpointLoad(operation, requested, Authorized);
+                            return;
+                        }
                         if (!_nativeReceivePrepared) return;
                         if (_nativeReceiveFailed) { SendNativeCheckpointAck(copied, RealTimeNativeCheckpointAckStage.Failed); return; }
                         if (_nativeReceiveManifest != null)
@@ -124,6 +150,34 @@ namespace WOTRMultiplayer.Services
                 {
                     lock (ActionLock)
                         if (ReferenceEquals(_nativeReceivePrepare, prepare)) FailNativeCheckpointReceive("native-transfer-pause-failed");
+                });
+            }
+        }
+
+        private async void RunNativeCheckpointLoad(RealTimeNativeLoadOperation operation,
+            NotifyRealTimeNativeCheckpoint manifest, Func<bool> authorized)
+        {
+            try
+            {
+                await operation.RunAsync(() => LoadTransferredNativeCheckpointAsync(manifest, authorized));
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                    {
+                        if (!ReferenceEquals(_nativeLoadOperation, operation) || !operation.IsLoaded) return;
+                        SendNativeCheckpointAck(manifest, RealTimeNativeCheckpointAckStage.Loaded);
+                        Logger.LogInformation("Native client world loaded. Checkpoint={Checkpoint}; verification and Commit still required.", manifest.CheckpointId);
+                    }
+                });
+            }
+            catch (Exception error)
+            {
+                Logger.LogError(error, "Native checkpoint reconstruction failed; no resume or save authorization.");
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                        if (ReferenceEquals(_nativeLoadOperation, operation) && IsCurrentNativeReceive())
+                            FailNativeCheckpointReceive("native-load-reconstruction-failed");
                 });
             }
         }
@@ -219,6 +273,7 @@ namespace WOTRMultiplayer.Services
                 _nativeReceiver = null; _nativeReceivedSource = null; _nativeReceivePrepare = null; _nativeReceiveManifest = null;
                 _nativeReceiveSession = null; _nativeReceiveCombat = null; _nativeReceiveState = null;
                 _nativeReceivePrepared = false; _nativeReceiveFailed = false;
+                _nativeLoadOperation = null;
             }
         }
     }

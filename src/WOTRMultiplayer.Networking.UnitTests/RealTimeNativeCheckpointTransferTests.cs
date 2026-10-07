@@ -32,6 +32,39 @@ namespace WOTRMultiplayer.Networking.UnitTests
         };
 
         [Test]
+        public void LoadRequestRoundTripsAndCannotBeMistakenForTransferManifest()
+        {
+            var manifest = Manifest(Bytes());
+            var load = RealTimeNativeCheckpointLimits.Copy(manifest);
+            load.Stage = (int)RealTimeNativeCheckpointStage.Load;
+            load = Serializer.DeepClone(load);
+            Assert.That(RealTimeNativeCheckpointLimits.IsManifest(load), Is.False);
+            var restored = RealTimeNativeCheckpointLimits.AsManifest(load);
+            Assert.That(RealTimeNativeCheckpointLimits.SameIdentity(manifest, restored), Is.True);
+            Assert.That(restored.ArchiveHash, Is.EqualTo(manifest.ArchiveHash));
+            Assert.That(load.Stage, Is.EqualTo((int)RealTimeNativeCheckpointStage.Load));
+            Assert.That(Serializer.DeepClone(Ack(manifest, RealTimeNativeCheckpointAckStage.Loaded)).Stage,
+                Is.EqualTo((int)RealTimeNativeCheckpointAckStage.Loaded));
+        }
+
+        [TestCase("hash")]
+        [TestCase("size")]
+        [TestCase("stage")]
+        [TestCase("epoch")]
+        public void InvalidLoadRequestCannotBecomeManifest(string mutation)
+        {
+            var load = Manifest(Bytes()); load.Stage = (int)RealTimeNativeCheckpointStage.Load;
+            switch (mutation)
+            {
+                case "hash": load.ArchiveHash = "bad"; break;
+                case "size": load.ArchiveBytes = 0; break;
+                case "stage": load.Stage = (int)RealTimeNativeCheckpointStage.Prepare; break;
+                case "epoch": load.Epoch = 0; break;
+            }
+            Assert.That(RealTimeNativeCheckpointLimits.AsManifest(load), Is.Null);
+        }
+
+        [Test]
         public void ReorderedDuplicatedAndCallerMutatedChunksProduceExactArchiveOnce()
         {
             var bytes = Bytes(); var manifest = Manifest(bytes);

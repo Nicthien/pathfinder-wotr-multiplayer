@@ -3,9 +3,10 @@ using WOTRMultiplayer.Networking.Messages.Contracts;
 
 namespace WOTRMultiplayer.Networking.Messages.Game
 {
-    public enum RealTimeNativeCheckpointStage { Prepare = 1, Manifest = 2, Abort = 3 }
+    public enum RealTimeNativeCheckpointStage { Prepare = 1, Manifest = 2, Abort = 3, Load = 4 }
     // Received means verified bytes, NEVER reconstructed mechanics or permission to resume/save.
-    public enum RealTimeNativeCheckpointAckStage { Prepared = 1, Chunk = 2, Received = 3, Failed = 4 }
+    // Loaded is a reconstruction receipt, still NOT a verified Commit.
+    public enum RealTimeNativeCheckpointAckStage { Prepared = 1, Chunk = 2, Received = 3, Failed = 4, Loaded = 5 }
 
     [ProtoContract, MessageType((int)MessageTypes.Game.NotifyRealTimeNativeCheckpoint)]
     public class NotifyRealTimeNativeCheckpoint
