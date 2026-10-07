@@ -352,6 +352,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         RealTimeBuffReplicaStore.RequireMechanicalState(Game.Instance.State.Units);
                         RealTimeAreaReplicaFactory.RequireMechanicalState(Game.Instance.State.AreaEffects);
+                        RealTimeNativeGraphRepair.RequireMechanicalState(Game.Instance.State);
                     }
                     SettingsRoot.Game.TurnBased.EnableTurnBasedMode.SetValueAndConfirm(enabled);
                     if (SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue() != enabled)

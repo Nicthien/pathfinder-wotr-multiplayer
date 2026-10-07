@@ -389,6 +389,43 @@ internal static class Program
             bindingSafe &= ReferenceEquals(detached.View, null);
             var discoverySafe = RealTimeAreaDiscovery.Collect(
                 Array.Empty<Kingmaker.EntitySystem.Entities.AreaEffectEntityData>(), new[] { detached }).Count == 1;
+            var ordinary = new Kingmaker.EntitySystem.Entities.AreaEffectEntityData(
+                default(Kingmaker.EntitySystem.Persistence.JsonUtility.JsonConstructorMark));
+            var baseType = typeof(Kingmaker.EntitySystem.EntityDataBase);
+            baseType.GetField("Facts", fields).SetValue(ordinary, new Kingmaker.EntitySystem.EntityFactsManager(ordinary));
+            baseType.GetField("Parts", fields).SetValue(ordinary, new Kingmaker.EntitySystem.EntityPartsManager(ordinary));
+            var ordinaryWorld = new object();
+            var nativeRetirementSafe = true;
+            Kingmaker.PubSubSystem.EventBus.Subscribe(ordinary);
+            baseType.GetField("<IsSubscribedOnEventBus>k__BackingField", fields).SetValue(ordinary, true);
+            try
+            {
+                using (new RealTimeNativeAreaRetirement(ordinary, ordinaryWorld))
+                    nativeRetirementSafe &= !Kingmaker.PubSubSystem.EventBus.IsGloballySubscribed(ordinary)
+                        && RealTimeAreaReplicaFactory.IsReplica(ordinary)
+                        && RealTimeNativeGraphRepair.RequiresRebuild(ordinaryWorld);
+                nativeRetirementSafe &= Kingmaker.PubSubSystem.EventBus.IsGloballySubscribed(ordinary)
+                    && !RealTimeAreaReplicaFactory.IsReplica(ordinary)
+                    && !RealTimeNativeGraphRepair.RequiresRebuild(ordinaryWorld);
+            }
+            finally
+            {
+                Kingmaker.PubSubSystem.EventBus.Unsubscribe(ordinary);
+                baseType.GetField("<IsSubscribedOnEventBus>k__BackingField", fields).SetValue(ordinary, false);
+            }
+            using (var retirement = new RealTimeBuffRestoreTransaction())
+            {
+                retirement.SuspendNativeArea(ordinary, ordinaryWorld);
+                var checkpoint = new WOTRMultiplayer.Entities.Combat.NetworkCombatState();
+                retirement.VerifyAndCommit(checkpoint, checkpoint);
+            }
+            nativeRetirementSafe &= RealTimeNativeGraphRepair.RequiresRebuild(ordinaryWorld);
+            var damageGuards = harmony.CreateClassProcessor(typeof(RealTimeRetiredAreaDamagePatches)).Patch();
+            var adapterType = areaType.GetNestedType("DamageTriggerAdapter", BindingFlags.NonPublic);
+            var inertAdapter = Activator.CreateInstance(adapterType, fields, null, new object[] { null, ordinary }, null);
+            nativeRetirementSafe &= damageGuards?.Count == 3;
+            foreach (var callback in RealTimeRetiredAreaDamagePatches.Targets().Cast<MethodInfo>())
+                callback.Invoke(inertAdapter, new object[] { null }); // Original would dereference its null trigger.
             // Do not execute host originals on synthetic worldless objects.
             var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
                 && RealTimeAreaCallbackPatches.Targets().All(target =>
@@ -399,9 +436,10 @@ internal static class Program
                 + "; detached-factory-and-store=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count
                 + "; visual-lifecycle-without-unity=" + visualSafe + "; native-pool-enumeration=" + poolSafe
                 + "; owned-state-setters=" + stateSafe + "; raw-presence=" + presenceSafe
-                + "; view-rebinding-without-unity=" + bindingSafe + "; hidden-discovery=" + discoverySafe);
+                + "; view-rebinding-without-unity=" + bindingSafe + "; hidden-discovery=" + discoverySafe
+                + "; native-area-retirement-without-world=" + nativeRetirementSafe);
             return blocked && hostAllowed && rawApplied && detachedSafe && visualSafe && poolSafe
-                && stateSafe && presenceSafe && bindingSafe && discoverySafe;
+                && stateSafe && presenceSafe && bindingSafe && discoverySafe && nativeRetirementSafe;
         }
         catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
         finally

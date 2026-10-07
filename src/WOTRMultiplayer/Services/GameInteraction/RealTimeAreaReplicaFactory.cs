@@ -26,6 +26,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
             ?? throw new MissingFieldException(type.FullName, name);
 
         public static bool IsReplica(AreaEffectEntityData area) => area != null && Replicas.TryGetValue(area, out _);
+        internal static void MarkNativeInert(AreaEffectEntityData area, object owner) => Replicas.Add(area, owner);
+        internal static bool IsNativeInertOwner(AreaEffectEntityData area, object owner) =>
+            Replicas.TryGetValue(area, out var current) && ReferenceEquals(current, owner);
+        internal static void ReleaseNativeInert(AreaEffectEntityData area, object owner)
+        {
+            if (!Replicas.TryGetValue(area, out var current) || !ReferenceEquals(current, owner))
+                throw new InvalidOperationException("native-area-retirement-marker-ownership-changed");
+            Replicas.Remove(area);
+        }
         public static bool RequiresMechanicalRebuild(IEnumerable<AreaEffectEntityData> areas) =>
             // Pool enumeration hides suppressed/out-of-game replicas. They
             // still exist in the save graph and must block mechanical reuse.

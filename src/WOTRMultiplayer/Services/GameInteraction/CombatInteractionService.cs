@@ -116,6 +116,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         RealTimeBuffReplicaStore.RequireMechanicalState(Game.Instance.State.Units);
                         RealTimeAreaReplicaFactory.RequireMechanicalState(Game.Instance.State.AreaEffects);
+                        RealTimeNativeGraphRepair.RequireMechanicalState(Game.Instance.State);
                     }
                     RealTimeUnitResultReplication.ApplyPartyCombatEnd(Game.Instance.Player);
                     finalize();
@@ -655,7 +656,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 localAreaIds: localCombatState.AreaEffects.Select(area => area.Id),
                 canRecreateArea: RealTimePresentationRuntime.Enabled ? _ => true : null,
                 canRemoveArea: RealTimePresentationRuntime.Enabled
-                    ? id => RealTimeAreaReplicaFactory.IsReplica(_gameStateLookupService.GetAreaEffect(
+                    ? id => CanRemovePresentationArea(_gameStateLookupService.GetAreaEffect(
                         new NetworkAreaEffect { Id = id })) : null);
             if (extra != null)
                 throw new InvalidOperationException(extra);
@@ -738,13 +739,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
+        private static bool CanRemovePresentationArea(AreaEffectEntityData area) =>
+            RealTimeAreaReplicaFactory.IsReplica(area) || RealTimeNativeAreaRetirement.CanRetire(area);
+
         private void StageAreaPresentation(List<NetworkAreaEffect> confirmed, RealTimeBuffRestoreTransaction transaction)
         {
             if (TacticalCombatHelper.IsActive || Game.Instance.CurrentlyLoadedArea is BlueprintTacticalCombatArea)
                 throw new InvalidOperationException("area-presentation-not-supported-in-crusade");
             var expected = new HashSet<string>(confirmed.Select(area => area.Id), StringComparer.OrdinalIgnoreCase);
             var removed = _gameStateLookupService.GetAreaEffects()
-                .Where(area => !expected.Contains(area.UniqueId) && RealTimeAreaReplicaFactory.IsReplica(area)).ToList();
+                .Where(area => !expected.Contains(area.UniqueId) && CanRemovePresentationArea(area)).ToList();
             var prepared = new List<(AreaEffectEntityData Area, SceneEntitiesState Scene,
                 NetworkAreaEffect State, RealTimeAreaVisual Visual, bool IsNew)>();
             var retained = new List<AreaEffectEntityData>();
@@ -795,9 +799,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             // The transaction owns new views even if a later asset is rejected.
             foreach (var area in removed)
             {
-                if (!ReferenceEquals(area.View, null) && !RealTimeAreaVisual.IsOwned(area.View))
-                    throw new InvalidOperationException("area-reconstruction-unowned-view:" + area.UniqueId);
-                foreach (var visual in RealTimeAreaVisual.ForArea(area)) transaction.TrackAreaVisual(visual, removed: true);
+                if (!RealTimeAreaReplicaFactory.IsReplica(area))
+                    transaction.SuspendNativeArea(area, Game.Instance.State);
+                else
+                {
+                    if (!ReferenceEquals(area.View, null) && !RealTimeAreaVisual.IsOwned(area.View))
+                        throw new InvalidOperationException("area-reconstruction-unowned-view:" + area.UniqueId);
+                    foreach (var visual in RealTimeAreaVisual.ForArea(area)) transaction.TrackAreaVisual(visual, removed: true);
+                }
                 transaction.RemoveArea(EntityService.Instance, area.HoldingState, area);
                 TrackAreaPools(transaction, area, removed: true);
             }

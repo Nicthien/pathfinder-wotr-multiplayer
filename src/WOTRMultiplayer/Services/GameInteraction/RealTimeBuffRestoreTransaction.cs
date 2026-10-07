@@ -26,12 +26,24 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly List<RealTimeAreaPoolMembership> _areaPoolChanges = new();
         private readonly List<RealTimeAreaViewBinding> _areaViewBindings = new();
         private readonly List<RealTimeAreaPresence> _areaPresence = new();
+        private readonly List<RealTimeNativeAreaRetirement> _nativeAreas = new();
+        private readonly List<RealTimeNativeAreaVisualRetirement> _nativeAreaVisuals = new();
         private bool _disposed;
         private bool _committed;
         public bool HasChanges => _registrations.Count != 0 || _removals.Count != 0
             || _areaRegistrations.Count != 0 || _areaRemovals.Count != 0
             || _createdAreaVisuals.Count != 0 || _removedAreaVisuals.Count != 0 || _areaPoolChanges.Count != 0
-            || _areaViewBindings.Count != 0 || _areaPresence.Count != 0;
+            || _areaViewBindings.Count != 0 || _areaPresence.Count != 0 || _nativeAreas.Count != 0;
+
+        public void SuspendNativeArea(AreaEffectEntityData area, object world)
+        {
+            EnsureOpen();
+            var visual = new RealTimeNativeAreaVisualRetirement(area);
+            var retirement = new RealTimeNativeAreaRetirement(area, world);
+            _nativeAreas.Add(retirement);
+            _nativeAreaVisuals.Add(visual);
+            _removedAreaVisuals.Add(visual);
+        }
 
         public void BindAreaView(AreaEffectEntityData area, AreaEffectView view)
         {
@@ -112,6 +124,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             foreach (var change in _areaPoolChanges) change.ValidateForCommit();
             foreach (var binding in _areaViewBindings) binding.ValidateForCommit();
             foreach (var presence in _areaPresence) presence.ValidateForCommit();
+            foreach (var retirement in _nativeAreas) retirement.ValidateForCommit();
+            foreach (var visual in _nativeAreaVisuals) visual.ValidateForCommit();
             foreach (var registration in _registrations) registration.Commit();
             foreach (var removal in _removals) removal.Commit();
             foreach (var registration in _areaRegistrations) registration.Commit();
@@ -119,6 +133,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             foreach (var change in _areaPoolChanges) change.Commit();
             foreach (var binding in _areaViewBindings) binding.Commit();
             foreach (var presence in _areaPresence) presence.Commit();
+            foreach (var retirement in _nativeAreas) retirement.Commit();
             _committed = true;
         }
 
@@ -166,6 +181,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
             for (var i = _removals.Count - 1; i >= 0; i--)
             {
                 try { _removals[i].Dispose(); }
+                catch (Exception failure) { (failures ??= new()).Add(failure); }
+            }
+            // Restore entity registration/pools before re-enabling subscribers.
+            for (var i = _nativeAreas.Count - 1; i >= 0; i--)
+            {
+                if (!_committed && failures != null) _nativeAreas[i].KeepSuspendedAfterRollbackFailure();
+                try { _nativeAreas[i].Dispose(); }
                 catch (Exception failure) { (failures ??= new()).Add(failure); }
             }
             var visuals = _committed ? _removedAreaVisuals : _createdAreaVisuals;
