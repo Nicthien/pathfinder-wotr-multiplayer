@@ -111,6 +111,10 @@ namespace WOTRMultiplayer.Services
                     if (hasAreaView != null && !hasAreaView(area))
                         missing.Add($"invalid-area:{area.Id}:view");
                     if (!IsFinite(area.Position)) missing.Add($"invalid-area:{area.Id}:position");
+                    if (float.IsNaN(area.Orientation) || float.IsInfinity(area.Orientation))
+                        missing.Add($"invalid-area:{area.Id}:orientation");
+                    var contextError = RealTimeBuffContextChain.Validate(area.ContextChain);
+                    if (contextError != null) missing.Add($"invalid-area:{area.Id}:{contextError}");
                     if (area.TargetPoint != null && !IsFinite(area.TargetPoint))
                         missing.Add($"invalid-area:{area.Id}:target-point");
                     if (area.TargetOrientation.HasValue &&

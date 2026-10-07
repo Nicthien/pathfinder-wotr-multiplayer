@@ -116,6 +116,10 @@ namespace WOTRMultiplayer.Services
                 || expected.IsAttachedToUnit != actual.IsAttachedToUnit)
                 causes.Add("target");
             if (!SameVector(expected.Position, actual.Position)) causes.Add("position");
+            if (!SameFloat(expected.Orientation, actual.Orientation)) causes.Add("orientation");
+            if (!SameHash(new NetworkCombatState { AreaEffects = [new NetworkAreaEffect { ContextChain = expected.ContextChain }] },
+                new NetworkCombatState { AreaEffects = [new NetworkAreaEffect { ContextChain = actual.ContextChain }] }))
+                causes.Add("calculated-context");
             if (expected.Type != actual.Type) causes.Add("type");
             if (!(expected.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal)
                 .SequenceEqual((actual.UnitsInside ?? []).OrderBy(x => x, StringComparer.Ordinal)))

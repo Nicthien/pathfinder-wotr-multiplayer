@@ -2,6 +2,7 @@
 
 namespace WOTRMultiplayer.Entities.AreaEffects
 {
+    using WOTRMultiplayer.Entities.Units;
     public class NetworkAreaEffect
     {
         public string Id { get; set; }
@@ -31,6 +32,10 @@ namespace WOTRMultiplayer.Entities.AreaEffects
         public string Name { get; set; }
 
         public NetworkVector3 Position { get; set; }
+
+        public float Orientation { get; set; }
+
+        public List<NetworkBuffContextState> ContextChain { get; set; }
 
         public List<string> UnitsInside { get; set; } = [];
 

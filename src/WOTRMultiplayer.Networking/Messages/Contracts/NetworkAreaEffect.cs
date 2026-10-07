@@ -54,6 +54,12 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(16)]
         public bool IsAttachedToUnit { get; set; }
 
+        [ProtoMember(17)]
+        public float Orientation { get; set; }
+
+        [ProtoMember(18)]
+        public List<NetworkBuffContextState> ContextChain { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

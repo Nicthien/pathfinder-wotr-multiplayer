@@ -33,6 +33,7 @@ using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Entities.Units.Parts;
 using WOTRMultiplayer.Extensions;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.Config.Mapping
 {
@@ -63,7 +64,7 @@ namespace WOTRMultiplayer.Config.Mapping
             CreateMap<UnitPartNegativeLevels.Data, NetworkUnitNegativeLevelsData>().ConstructUsing(Create)
                 .ForAllMembers(x => x.Ignore());
 
-            CreateMap<AreaEffectEntityData, NetworkAreaEffect>().ConstructUsing(x => Create(x))
+            CreateMap<AreaEffectEntityData, NetworkAreaEffect>().ConstructUsing((x, context) => Create(x, context))
                 .ForAllMembers(x => x.Ignore());
 
             CreateMap<SettlementState, NetworkKingdomSettlement>().ConstructUsing(x => Create(x))
@@ -355,7 +356,7 @@ namespace WOTRMultiplayer.Config.Mapping
             return kingdomSettlement;
         }
 
-        private NetworkAreaEffect Create(AreaEffectEntityData areaEffectEntityData)
+        private NetworkAreaEffect Create(AreaEffectEntityData areaEffectEntityData, ResolutionContext context)
         {
             if (areaEffectEntityData == null)
             {
@@ -379,6 +380,11 @@ namespace WOTRMultiplayer.Config.Mapping
                 CreationGameTimeTicks = areaEffectEntityData.m_CreationTime.Ticks,
                 DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
                 Name = areaEffectEntityData.Blueprint.name,
+                Orientation = RealTimePresentationRuntime.Enabled
+                    && Main.Multiplayer?.IsRealTimeCombatActive == true && areaEffectEntityData.View != null
+                        ? areaEffectEntityData.View.transform.eulerAngles.y : areaEffectEntityData.m_Rotation,
+                ContextChain = RealTimePresentationRuntime.Enabled
+                        ? RealTimeBuffContextCapture.Capture(areaEffectEntityData.Context, context.Mapper) : null,
                 // Attached zones move their view without refreshing m_Position.
                 // Capture the confirmed visible host location for RTwP only.
                 Position = (RealTimePresentationRuntime.Enabled

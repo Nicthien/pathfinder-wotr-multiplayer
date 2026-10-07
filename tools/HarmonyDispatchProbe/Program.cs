@@ -261,6 +261,23 @@ internal static class Program
                 target.Invoke(blueprint, arguments);
             }
             var blocked = _reports == 6;
+            var replica = new Kingmaker.EntitySystem.Entities.AreaEffectEntityData(
+                default(Kingmaker.EntitySystem.Persistence.JsonUtility.JsonConstructorMark));
+            var state = new WOTRMultiplayer.Entities.AreaEffects.NetworkAreaEffect
+            {
+                Position = new WOTRMultiplayer.Entities.NetworkVector3(2, 3, 4), Orientation = 120,
+                CreationGameTimeTicks = 100, DurationTicks = 200
+            };
+            RealTimeAreaReplication.Apply(replica, state, _ => null, _ => null);
+            var areaType = replica.GetType();
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var rawApplied = (float)areaType.GetField("m_Rotation", fields).GetValue(replica) == 120
+                && ((TimeSpan)areaType.GetField("m_CreationTime", fields).GetValue(replica)).Ticks == 100
+                && ((TimeSpan?)areaType.GetField("m_Duration", fields).GetValue(replica)).Value.Ticks == 200
+                && _reports == 6;
+            state.DurationTicks = null;
+            RealTimeAreaReplication.Apply(replica, state, _ => null, _ => null);
+            rawApplied &= areaType.GetField("m_Duration", fields).GetValue(replica) == null;
             _suppress = false;
             // Do not execute host originals on synthetic worldless objects.
             var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
@@ -268,8 +285,8 @@ internal static class Program
                     RealTimeAreaCallbackPatches.BeforeCallback(target, null));
             Console.WriteLine("installed-area-authority: scheduler-targets=" + scheduler.Count
                 + "; callback-targets=" + callbacks.Count + "; blocked-without-world=" + blocked
-                + "; host-prefix-allows=" + hostAllowed);
-            return blocked && hostAllowed;
+                + "; host-prefix-allows=" + hostAllowed + "; raw-state-without-world=" + rawApplied);
+            return blocked && hostAllowed && rawApplied;
         }
         catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
         finally

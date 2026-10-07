@@ -645,6 +645,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 throw new InvalidOperationException(extra);
 
             if (RealTimePresentationRuntime.Enabled)
+                foreach (var area in networkCombatState.AreaEffects)
+                {
+                    var areaError = RealTimeAreaReplication.Validate(_gameStateLookupService.GetAreaEffect(area), area);
+                    if (areaError != null) throw new InvalidOperationException($"area:{area.Id}:{areaError}");
+                }
+
+            if (RealTimePresentationRuntime.Enabled)
                 foreach (var networkUnit in networkCombatState.Units)
                     _buffInteractionService.StageMissingUnitBuffsPresentation(
                         _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection, restoration);
@@ -1629,6 +1636,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 if (localAreaEffect.View == null)
                 {
                     _logger.LogWarning("Skipping update for an area effect without view. Id={Id}", areaEffect.Id, areaEffect.Name);
+                    continue;
+                }
+
+                if (presentationOnly)
+                {
+                    RealTimeAreaReplication.Apply(localAreaEffect, areaEffect,
+                        id => _gameStateLookupService.GetUnitEntity(id),
+                        parameters => _mapper.Map<AbilityParams>(parameters));
+                    localAreaEffect.View.transform.position = areaEffect.Position.ToUnityVector3();
+                    localAreaEffect.View.transform.rotation = UnityEngine.Quaternion.Euler(0, areaEffect.Orientation, 0);
                     continue;
                 }
 
