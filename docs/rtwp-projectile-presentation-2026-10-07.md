@@ -2,6 +2,8 @@
 
 Variante locale **0.4.16.6**, protocole **44**, schéma d'empreinte **12**. Suite du [bilan des animations](rtwp-action-presentation-2026-10-07.md).
 
+Suite de cet incrément : le [bilan des callbacks sous Mono](rtwp-rule-dispatch-2026-10-07.md) documente la variante 0.4.16.7 et le nouveau point d'interception. L'échec Harmony décrit plus bas est un résultat historique sous .NET Framework, pas une impossibilité générale sous le Mono du jeu.
+
 ## Ce qui est implémenté
 
 - L'hôte attribue une identité stable à chaque projectile vivant et publie son apparition, ses positions confirmées (au maximum dix mises à jour par seconde par projectile) et son impact visuel. Le préfixe d'impact capture également les projectiles courts avant la disparition de leur vue.

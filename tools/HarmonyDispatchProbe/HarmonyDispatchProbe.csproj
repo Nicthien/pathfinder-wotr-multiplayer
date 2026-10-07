@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net481</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RtwpProbeModPath Condition="'$(RtwpProbeModPath)' == ''">$(MSBuildThisFileDirectory)..\..\src\WOTRMultiplayer\bin\Release\net481\WOTRMultiplayer.dll</RtwpProbeModPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityModManager\0Harmony.dll</HintPath>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(WOTR_PATH)\Wrath_Data\Managed\Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="WOTRMultiplayer">
+      <HintPath>$(RtwpProbeModPath)</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
