@@ -115,12 +115,66 @@ internal static class Program
             success &= ProbeAreas();
             success &= ProbeBuffReplica();
             success &= ProbeNativeCheckpoint();
+            success &= ProbeNativeLoadLease();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;
     }
 
     private static int _statCallbacks;
+
+    private static bool ProbeNativeLoadLease()
+    {
+        var harmony = new Harmony("WOTRMultiplayer.OfflineProbe.native-load-lease");
+        var multiplayer = typeof(WOTRMultiplayer.Main).GetField("<Multiplayer>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        var previous = multiplayer.GetValue(null);
+        IDisposable lease = null;
+        try
+        {
+            multiplayer.SetValue(null, new MultiplayerStub().GetTransparentProxy());
+            _suppress = true; _statCallbacks = 0;
+            harmony.CreateClassProcessor(typeof(RealTimeUnitResultPatches)).Patch();
+            var loadGuards = harmony.CreateClassProcessor(typeof(WOTRMultiplayer.HarmonyPatches.GameInstance.RealTimeNativeThreadedLoadPatches)).Patch();
+            if (loadGuards == null || loadGuards.Count != 1) throw new InvalidOperationException("Native threaded load guard not installed.");
+            var leaseType = typeof(RealTimeMemorySaver).Assembly.GetType("WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease", true);
+            const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+            using var source = new RealTimeMemorySaver();
+            source.SaveJson("header", "{\"GameId\":\"synthetic-native-load\"}");
+            source.SaveJson("player", "{}"); source.SaveJson("party", "{}"); source.SaveBytes("history", new byte[] { 1 }); source.Seal();
+            var info = RealTimeNativeCheckpointLoadSource.Prepare(source, "synthetic-native-load", "11111111111111111111111111111111");
+            var writes = 0;
+            lease = (IDisposable)leaseType.GetMethod("Begin", flags).Invoke(null, new object[]
+            {
+                new object(), info, (Func<bool>)(() => true), (Action<string, byte[]>)((_, __) => writes++)
+            });
+            var safe = !(bool)leaseType.GetMethod("AdmitAreaLoad", flags).Invoke(null, new object[] { null })
+                && (bool)leaseType.GetMethod("AdmitAreaLoad", flags).Invoke(null, new object[] { info });
+            var descriptor = (UnitDescriptor)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(UnitDescriptor));
+            var stat = new ModifiableValue(null, StatType.AdditionalAttackBonus);
+            var changed = typeof(ModifiableValue).GetField("OnChanged", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            changed.SetValue(stat, Delegate.CreateDelegate(changed.FieldType,
+                typeof(Program).GetMethod(nameof(StatChanged), BindingFlags.Static | BindingFlags.NonPublic)));
+            using ((IDisposable)leaseType.GetMethod("EnterHydration", flags).Invoke(null, new object[] { info }))
+            {
+                typeof(UnitDescriptor).GetProperty("Damage").GetSetMethod().Invoke(descriptor, new object[] { 17 });
+                typeof(ModifiableValue).GetProperty("BaseValue").GetSetMethod().Invoke(stat, new object[] { 19 });
+                safe &= descriptor.Damage == 17 && stat.BaseValue == 19 && _statCallbacks == 0;
+                safe &= System.Threading.Tasks.Task.Run(() => (bool)leaseType.GetProperty("IsHydrating", flags).GetValue(null)).GetAwaiter().GetResult();
+            }
+            var reportsBefore = _reports;
+            typeof(UnitDescriptor).GetProperty("Damage").GetSetMethod().Invoke(descriptor, new object[] { 99 });
+            safe &= descriptor.Damage == 17 && _reports == reportsBefore + 1;
+            using var clone = info.Saver.Clone(); clone.CopyToStash("history"); safe &= writes == 1;
+            lease.Dispose(); lease = null;
+            try { clone.CopyToStash("history"); safe = false; } catch (InvalidOperationException) { }
+            safe &= !(bool)leaseType.GetProperty("IsActive", flags).GetValue(null);
+            Console.WriteLine("native-client-load-lease: field-hydration-without-recalculation=" + safe
+                + "; worker-context-and-revocation=True; native-load-not-invoked=True");
+            return safe;
+        }
+        catch (Exception error) { Console.WriteLine("native-client-load-lease: FAILED: " + error); return false; }
+        finally { lease?.Dispose(); harmony.UnpatchAll(harmony.Id); multiplayer.SetValue(null, previous); _suppress = false; }
+    }
 
     private static bool ProbeNativeCheckpoint()
     {

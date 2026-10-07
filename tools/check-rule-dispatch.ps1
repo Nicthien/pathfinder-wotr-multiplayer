@@ -59,7 +59,7 @@ $exitCode = $LASTEXITCODE
 $passed = $exitCode -eq 0 -and (Select-String -LiteralPath $logPath -SimpleMatch 'Mono=True' -Quiet)
 $proof = [ordered]@{
     createdUtc = (Get-Date).ToUniversalTime().ToString('o')
-    scope = 'Offline rule/vital/calculated-stat/buff/area guards, replica rollback, native memory source and synthetic fragmented checkpoint transfer; no native world capture/load, rendering or game/combat validation'
+    scope = 'Offline rule/vital/calculated-stat/buff/area guards, native memory/fragment transfer and client load lease with synthetic field hydration; no native world capture/load, rendering or game/combat validation'
     success = [bool]$passed
     exitCode = $exitCode
     candidateFingerprint = if ($CandidateFingerprint) { $CandidateFingerprint } else { $null }

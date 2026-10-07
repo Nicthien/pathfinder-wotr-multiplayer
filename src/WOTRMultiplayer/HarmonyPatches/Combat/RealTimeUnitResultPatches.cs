@@ -28,7 +28,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPatch(typeof(UnitDescriptor), "set_Damage")]
         [HarmonyPrefix]
-        public static bool UnitDescriptor_set_Damage_Prefix(UnitDescriptor __instance) => RejectClient(__instance.Unit, "damage");
+        public static bool UnitDescriptor_set_Damage_Prefix(UnitDescriptor __instance) => RealTimeNativeLoadLease.IsHydrating || RejectClient(__instance.Unit, "damage");
 
         [HarmonyPatch(typeof(UnitDescriptor), "set_Damage")]
         [HarmonyPostfix]
@@ -36,12 +36,14 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPatch(typeof(ModifiableValue), "set_BaseValue")]
         [HarmonyPrefix]
-        public static bool ModifiableValue_set_BaseValue_Prefix(ModifiableValue __instance) => ModifiableValue_UpdateValue_Prefix(__instance);
+        public static bool ModifiableValue_set_BaseValue_Prefix(ModifiableValue __instance) => RealTimeNativeLoadLease.IsHydrating || ModifiableValue_UpdateValue_Prefix(__instance);
 
         [HarmonyPatch(typeof(ModifiableValue), "UpdateValue")]
         [HarmonyPrefix]
         public static bool ModifiableValue_UpdateValue_Prefix(ModifiableValue __instance) => __instance == null
-            || RejectClient(__instance.Owner?.Unit, "stat:" + __instance.Type);
+            // Hydration restores the serialized field, never its calculated
+            // consequences. A later reference snapshot must restore caches.
+            || !RealTimeNativeLoadLease.IsHydrating && RejectClient(__instance.Owner?.Unit, "stat:" + __instance.Type);
 
         [HarmonyPatch(typeof(ModifiableValue), "UpdateValue")]
         [HarmonyPostfix]

@@ -1528,6 +1528,7 @@ namespace WOTRMultiplayer.Services
         public void TickRealTimePresentation()
         {
             TickNativeCheckpointReceive();
+            if (WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease.SuppressesLifecycle(this)) return;
             var active = RealTimePresentationRuntime.Enabled && IsRealTimeCombatActive
                 && !Game.RealTimeCombat.CombatEndPending && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
             CombatInteraction.TickRealTimePresentation(active);

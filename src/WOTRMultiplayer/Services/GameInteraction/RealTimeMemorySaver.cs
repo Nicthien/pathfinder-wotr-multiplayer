@@ -21,6 +21,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly Action<string, byte[]> _writeStash;
         private long _bytes;
         private bool _disposed;
+        private object _nativeLoadOwner;
         public bool IsSealed { get; private set; }
         public long TotalBytes { get { EnsureAlive(); return _bytes; } }
 
@@ -121,11 +122,26 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             EnsureAlive();
             var clone = new RealTimeMemorySaver(_readStash, _writeStash);
+            clone._nativeLoadOwner = _nativeLoadOwner;
             foreach (var file in _files)
                 if (IsSealed) clone._files.Add(file.Key, file.Value); // Immutable, never exposed without copying.
                 else clone.SaveBytes(file.Key, file.Value);
             if (IsSealed) { clone._bytes = _bytes; clone.IsSealed = true; }
             return clone;
+        }
+
+        internal bool IsNativeLoadSource(object owner) => !_disposed && IsSealed
+            && owner != null && ReferenceEquals(_nativeLoadOwner, owner);
+
+        internal RealTimeMemorySaver WithNativeStashWriter(object owner, Action<string, byte[]> write)
+        {
+            EnsureAlive();
+            if (!IsSealed || owner == null || write == null)
+                throw new InvalidOperationException("native-checkpoint-stash-capability-invalid");
+            var result = new RealTimeMemorySaver(writeStash: write) { _nativeLoadOwner = owner };
+            foreach (var file in _files) result._files.Add(file.Key, file.Value);
+            result._bytes = _bytes; result.IsSealed = true;
+            return result;
         }
         public void Dispose()
         {

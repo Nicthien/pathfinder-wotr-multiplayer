@@ -16,6 +16,7 @@ using Kingmaker.UI.MVVM;
 using Kingmaker.Utility;
 using Microsoft.Extensions.Logging;
 using Owlcat.Runtime.UI.Controls.Button;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.HarmonyPatches.GameInstance
 {
@@ -26,7 +27,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPostfix]
         public static void Game_LoadArea_Postfix()
         {
-            if (!Main.Multiplayer.IsActive)
+            if (RealTimeNativeLoadLease.IsActive || !Main.Multiplayer.IsActive)
             {
                 return;
             }
@@ -36,20 +37,27 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
 
         [HarmonyPatch(typeof(Game), nameof(Game.LoadGame))]
         [HarmonyPrefix]
-        public static void Game_LoadGame_Prefix(SaveInfo saveInfo)
+        public static bool Game_LoadGame_Prefix(SaveInfo saveInfo)
         {
+            if (RealTimeNativeLoadLease.IsActive) return false;
             if (!Main.Multiplayer.IsActive || !Game.Instance.Player.IsInGame || RootUIContext.Instance.InGameVM?.StaticPartVM?.CharGenContextVM?.CharGenVM?.Value != null || !saveInfo.CheckDlcAvailable())
             {
-                return;
+                return true;
             }
 
             Main.Multiplayer.ForceLoadGame(saveInfo.GameId, saveInfo.FolderName);
+            return true;
         }
+
+        [HarmonyPatch(typeof(Game), nameof(Game.LoadArea), [typeof(BlueprintArea), typeof(BlueprintAreaEnterPoint), typeof(AutoSaveMode), typeof(bool), typeof(SaveInfo), typeof(Action)])]
+        [HarmonyPrefix]
+        public static bool Game_LoadArea_Prefix(SaveInfo saveInfo) => RealTimeNativeLoadLease.AdmitAreaLoad(saveInfo);
 
         [HarmonyPatch(typeof(Game), nameof(Game.StartMode))]
         [HarmonyPrefix]
         public static bool Game_StartMode_Prefix(GameModeType type)
         {
+            if (RealTimeNativeLoadLease.IsActive) return true;
             if (!Main.Multiplayer.IsActive)
             {
                 return true;
@@ -73,6 +81,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPrefix]
         public static bool Game_StopMode_Prefix(GameModeType type)
         {
+            if (RealTimeNativeLoadLease.IsActive) return true;
             if (!Main.Multiplayer.IsActive)
             {
                 return true;
@@ -96,6 +105,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPostfix]
         public static void Game_DoStopMode_Postfix(GameModeType type)
         {
+            if (RealTimeNativeLoadLease.IsActive) return;
             if (!Main.Multiplayer.IsActive)
             {
                 return;

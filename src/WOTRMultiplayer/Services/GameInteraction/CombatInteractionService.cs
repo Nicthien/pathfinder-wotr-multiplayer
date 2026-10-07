@@ -101,6 +101,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
+        public void ClearRealTimePresentationForNativeLoad()
+        {
+            // Called on the main thread BEFORE the old native world is
+            // disposed. None of these objects is a gameplay projectile/order.
+            foreach (var pair in _presentedAttacks.ToArray()) pair.Value.Handle.Release(0f);
+            _presentedAttacks.Clear(); _visualMoves.Clear(); _projectileReplica.Clear();
+        }
+
         public Task<bool> TryFinalizeRealTimeCombatAsync(Func<bool> canFinalize, Action finalize)
         {
             if (canFinalize == null || finalize == null) throw new ArgumentNullException();

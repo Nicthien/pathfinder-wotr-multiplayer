@@ -32,6 +32,7 @@ using WOTRMultiplayer.Entities.SpellbookManagement;
 using WOTRMultiplayer.Entities.Spells;
 using WOTRMultiplayer.Entities.Vendor;
 using WOTRMultiplayer.Services.GameInteraction.Contexts;
+using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services.Random;
 
 namespace WOTRMultiplayer.Services
@@ -4153,6 +4154,11 @@ namespace WOTRMultiplayer.Services
 
         public void ReportRealTimeAIActionFault(string unitId, string actionId, string reason)
         {
+            if (RealTimeNativeLoadLease.RecordFault(reason))
+            {
+                _logger.LogError("Native reconstruction rejected a client mutation. Unit={Unit}, Action={Action}, Reason={Reason}", unitId, actionId, reason);
+                return;
+            }
             _multiplayerActorAccessor.Client.ReportRealTimeAIActionFault(unitId, actionId, reason);
         }
 

@@ -214,5 +214,28 @@ namespace WOTRMultiplayer.UnitTests.Services
                 A.CallTo(() => NativeInteraction(host).SetPauseAsync(false)).MustNotHaveHappened();
             }
         }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void NativeLoad_RevokedBarrierOrOldManifestCannotReachNativeWorld(bool oldManifest)
+        {
+            var (_, client, _, network, queued, _) = CreatePair();
+            var prepare = NativePrepare(client); NativeHeader(network, prepare);
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
+            var (manifest, bytes) = NativeArchive(prepare); NativeHeader(network, manifest);
+            using var sender = new RealTimeNativeCheckpointSender(42, manifest, bytes);
+            foreach (var chunk in sender.GetDueChunks(DateTime.UtcNow))
+                FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeNativeCheckpointChunk>(network)(NetworkConstants.HostPlayerId, chunk);
+            var requested = RealTimeNativeCheckpointLimits.Copy(manifest);
+            if (oldManifest) requested.Epoch--;
+            var failure = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await client.LoadTransferredNativeCheckpointAsync(requested, () => false));
+            Assert.That(failure.Message, Is.EqualTo(oldManifest
+                ? "native-transfer-source-not-ready-for-protected-load" : "native-load-client-barrier-not-authorized"));
+            Assert.That(RealTimeNativeLoadLease.IsActive, Is.False);
+            using var intact = client.CloneTransferredNativeCheckpoint(manifest);
+            Assert.That(intact.IsSealed, Is.True);
+            Assert.That(client.Game.RealTimeCombat.BlocksSaving, Is.True);
+        }
     }
 }

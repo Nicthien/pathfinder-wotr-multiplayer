@@ -10,6 +10,10 @@ namespace WOTRMultiplayer.Services
         public static bool Enabled { get; } = false;
 #endif
         public static bool IsClientActive => Enabled
-            && Main.Multiplayer?.IsRealTimeClientCombatActive == true;
+            // Native workers can outlive the network session. Disconnect must
+            // revoke hydration/stash writes, not re-enable rules or AI while
+            // the protected client world is still being reconstructed.
+            && (GameInteraction.RealTimeNativeLoadLease.IsActive
+                || Main.Multiplayer?.IsRealTimeClientCombatActive == true);
     }
 }

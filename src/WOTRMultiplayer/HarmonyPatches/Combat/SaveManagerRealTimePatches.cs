@@ -11,7 +11,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
     [HarmonyPatch]
     public static class SaveManagerRealTimePatches
     {
-        private static bool SavingBlocked => Main.Multiplayer?.IsSavingBlockedByCombatSync == true
+        private static bool SavingBlocked => RealTimeNativeLoadLease.IsActive || Main.Multiplayer?.IsSavingBlockedByCombatSync == true
             || RealTimePresentationRuntime.Enabled
                 && (RealTimeBuffReplicaStore.RequiresMechanicalRebuild(Game.Instance?.State?.Units)
                     || RealTimeAreaReplicaFactory.RequiresMechanicalRebuild(Game.Instance?.State?.AreaEffects)

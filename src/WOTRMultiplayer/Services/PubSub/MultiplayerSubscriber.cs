@@ -12,6 +12,7 @@ using WOTRMultiplayer.Abstractions;
 using WOTRMultiplayer.Abstractions.PubSub;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.MapObjects;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.Services.PubSub
 {
@@ -117,6 +118,7 @@ namespace WOTRMultiplayer.Services.PubSub
 
         public void HandleWarning(WarningNotificationType warningType, bool addToLog = true)
         {
+            if (RealTimeNativeLoadLease.SuppressesLifecycle(ActorAccessor.Current)) return;
             try
             {
                 if (ActorAccessor.Current == null || warningType != WarningNotificationType.GameLoaded)
@@ -139,6 +141,7 @@ namespace WOTRMultiplayer.Services.PubSub
 
         public void OnAreaLoadingComplete()
         {
+            if (RealTimeNativeLoadLease.SuppressesLifecycle(ActorAccessor.Current)) return;
             try
             {
                 if (ActorAccessor.Current == null)
@@ -181,6 +184,7 @@ namespace WOTRMultiplayer.Services.PubSub
 
         private void OnPartyChanged()
         {
+            if (RealTimeNativeLoadLease.SuppressesLifecycle(ActorAccessor.Current)) return;
             try
             {
                 if (ActorAccessor.Current == null)

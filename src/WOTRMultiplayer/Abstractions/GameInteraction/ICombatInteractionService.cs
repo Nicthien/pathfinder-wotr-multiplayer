@@ -79,6 +79,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         void TickRealTimePresentation(bool active);
 
+        void ClearRealTimePresentationForNativeLoad();
+
         Task<bool> ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability);
 
         Task<bool?> TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind,
