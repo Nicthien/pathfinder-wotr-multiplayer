@@ -60,7 +60,7 @@ $exitCode = $LASTEXITCODE
 $passed = $exitCode -eq 0 -and (Select-String -LiteralPath $logPath -SimpleMatch 'Mono=True' -Quiet)
 $proof = [ordered]@{
     createdUtc = (Get-Date).ToUniversalTime().ToString('o')
-    scope = 'Offline guards, memory transfer, native load lease, detached graph and accepted-order evidence; standalone binding redirects; no game loader dependency validation, native world capture/load, rendering or combat validation'
+    scope = 'Offline guards, memory transfer, native load lease, detached graph, accepted-order evidence and snapshot/event barrier; standalone binding redirects; no game loader dependency validation, native world capture/load, rendering or combat validation'
     success = [bool]$passed
     exitCode = $exitCode
     candidateFingerprint = if ($CandidateFingerprint) { $CandidateFingerprint } else { $null }

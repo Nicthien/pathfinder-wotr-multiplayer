@@ -118,6 +118,7 @@ internal static partial class Program
             success &= ProbeNativeLoadLease();
             success &= ProbeNativeGraphInspection();
             success &= ProbeAcceptedOrderReference();
+            success &= ProbePresentationSnapshotBarrier();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;

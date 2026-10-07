@@ -258,6 +258,10 @@ namespace WOTRMultiplayer.Services
         public void Reset()
         {
             ResetNativeCheckpointReceive();
+            _presentationSnapshotBarrier = null;
+            _presentationInbox = new RealTimePresentationInbox();
+            _presentationSession = null; _presentationCombat = null;
+            _presentationEpoch = 0; _presentationSaveSeed = 0;
             Logger.LogInformation("Resetting");
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
@@ -1335,6 +1339,7 @@ namespace WOTRMultiplayer.Services
             try
             {
                 if (Game?.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause || message.State == null
+                    || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable || Game.RealTimeCombat.CombatEndPending
                     || !string.Equals(message.SessionId, Game.Id, StringComparison.Ordinal)
                     || message.LoadedSaveSeed != Game.LoadedSaveSeed)
                 {
@@ -1350,37 +1355,25 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
+                if (RealTimePresentationRuntime.Enabled)
+                {
+                    EnsureClientPresentationLane(session, combat);
+                    message = _presentationSnapshotBarrier.Offer(message, _presentationInbox.AppliedSequence, DateTime.UtcNow);
+                    if (message == null) return;
+                }
+
                 combat.ResponseTimeMs = Math.Max(0, message.ResponseTimeMs);
                 combat.MissingSnapshotReplies = Math.Max(0, message.MissingReplies);
 
                 var state = Mapper.Map<NetworkCombatState>(message.State);
+                bool CanApply() => IsCurrentRealTimeMessage(session, combat, message.Epoch)
+                    && combat.Mode == CombatMode.RealTimeWithPause && combat.Phase == CombatSynchronizationPhase.Stable
+                    && !combat.CombatEndPending && coordinator.IsCurrent(message.Epoch, message.Sequence);
                 // Apply and sample inside one main-thread dispatch. A game tick between two
                 // separate dispatches makes a moving unit appear divergent even after correction.
-                var actual = await CombatInteraction.TryApplyAndReadRealTimeCombatStateAsync(state,
-                    () => IsCurrentRealTimeMessage(session, combat, message.Epoch)
-                        && coordinator.IsCurrent(message.Epoch, message.Sequence));
-                if (actual == null || !IsCurrentRealTimeMessage(session, combat, message.Epoch)
-                    || !coordinator.IsCurrent(message.Epoch, message.Sequence))
+                var actual = await CombatInteraction.TryApplyAndReadRealTimeCombatStateAsync(state, CanApply);
+                if (actual == null || !CanApply())
                     return;
-                if (RealTimePresentationRuntime.Enabled)
-                {
-                    if (!ReferenceEquals(_presentationSession, session)
-                        || !ReferenceEquals(_presentationCombat, combat)
-                        || _presentationEpoch != combat.Epoch
-                        || _presentationSaveSeed != session.LoadedSaveSeed)
-                    {
-                        _presentationSession = session;
-                        _presentationCombat = combat;
-                        _presentationEpoch = combat.Epoch;
-                        _presentationSaveSeed = session.LoadedSaveSeed;
-                        _presentationInbox = new RealTimePresentationInbox();
-                    }
-                    if (message.IncludedEventSequence > _presentationInbox.AppliedSequence)
-                    {
-                        CombatInteraction.TickRealTimePresentation(false);
-                        _presentationInbox.RestoreBaseline(message.IncludedEventSequence);
-                    }
-                }
                 var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot
                 {
                     Combat = actual,
@@ -1403,7 +1396,9 @@ namespace WOTRMultiplayer.Services
             {
                 Logger.LogError(ex, "Real-time combat snapshot could not be applied. Epoch={Epoch}, Sequence={Sequence}", message.Epoch, message.Sequence);
                 if (session == null || combat == null
-                    || !IsCurrentRealTimeMessage(session, combat, message.Epoch))
+                    || !IsCurrentRealTimeMessage(session, combat, message.Epoch)
+                    || combat.Mode != CombatMode.RealTimeWithPause || combat.Phase != CombatSynchronizationPhase.Stable
+                    || combat.CombatEndPending)
                     return;
                 var reason = $"{ex.GetType().Name}:{ex.Message}";
                 Send(new ClientRealTimeStateHash
@@ -1524,6 +1519,17 @@ namespace WOTRMultiplayer.Services
         private long _presentationEpoch;
         private int _presentationSaveSeed;
         private RealTimePresentationInbox _presentationInbox = new();
+        private RealTimePresentationSnapshotBarrier _presentationSnapshotBarrier;
+
+        private void EnsureClientPresentationLane(NetworkGame session, NetworkRealTimeCombatState combat)
+        {
+            if (ReferenceEquals(_presentationSession, session) && ReferenceEquals(_presentationCombat, combat)
+                && _presentationEpoch == combat.Epoch && _presentationSaveSeed == session.LoadedSaveSeed) return;
+            _presentationSession = session; _presentationCombat = combat;
+            _presentationEpoch = combat.Epoch; _presentationSaveSeed = session.LoadedSaveSeed;
+            _presentationInbox = new RealTimePresentationInbox();
+            _presentationSnapshotBarrier = new RealTimePresentationSnapshotBarrier(session.Id, session.LoadedSaveSeed, combat.Epoch);
+        }
 
         public void TickRealTimePresentation()
         {
@@ -1536,7 +1542,8 @@ namespace WOTRMultiplayer.Services
                 && ReferenceEquals(Game.RealTimeCombat, _presentationCombat)
                 && _presentationEpoch == Game.RealTimeCombat.Epoch
                 && _presentationSaveSeed == Game.LoadedSaveSeed
-                && _presentationInbox.HasExpiredGap(DateTime.UtcNow))
+                && (_presentationInbox.HasExpiredGap(DateTime.UtcNow)
+                    || _presentationSnapshotBarrier?.HasExpiredWait(DateTime.UtcNow) == true))
                 ReportRealTimeCommandFault(_presentationEpoch, _presentationInbox.AppliedSequence + 1,
                     "presentation-sequence-gap");
         }
@@ -1562,16 +1569,7 @@ namespace WOTRMultiplayer.Services
                         "malformed-authoritative-event");
                     return;
                 }
-                if (!ReferenceEquals(_presentationSession, session)
-                    || !ReferenceEquals(_presentationCombat, combat) || _presentationEpoch != combat.Epoch
-                    || _presentationSaveSeed != session.LoadedSaveSeed)
-                {
-                    _presentationSession = session;
-                    _presentationCombat = combat;
-                    _presentationEpoch = combat.Epoch;
-                    _presentationSaveSeed = session.LoadedSaveSeed;
-                    _presentationInbox = new RealTimePresentationInbox();
-                }
+                EnsureClientPresentationLane(session, combat);
                 var inbox = _presentationInbox;
                 if (!inbox.Enqueue(message))
                 {
@@ -1600,7 +1598,14 @@ namespace WOTRMultiplayer.Services
                 if (ReferenceEquals(Game, _presentationSession))
                     ReportRealTimeCommandFault(message.Epoch, Math.Max(1, message.Sequence), "action-presentation-exception");
             }
-            finally { _realTimeSnapshotGate.Release(); }
+            finally
+            {
+                // Re-enter the ordinary guarded snapshot path after releasing the event gate.
+                // It checks the boundary again if another event wins the dispatch race.
+                var ready = _presentationSnapshotBarrier?.TakeReady(_presentationInbox.AppliedSequence);
+                _realTimeSnapshotGate.Release();
+                if (ready != null) OnNotifyRealTimeCombatSnapshot(NetworkConstants.HostPlayerId, ready);
+            }
         }
 
         private async void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)
