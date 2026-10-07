@@ -7,6 +7,8 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.EntitySystem.Persistence.JsonUtility;
 using Kingmaker.UnitLogic.Buffs;
 using WOTRMultiplayer.Services.GameInteraction;
+using WOTRMultiplayer.Networking;
+using WOTRMultiplayer.Networking.Messages.Contracts;
 
 internal static partial class Program
 {
@@ -28,6 +30,10 @@ internal static partial class Program
             GraphField(fact, "<UniqueId>k__BackingField", "synthetic-graph-fact");
             GraphField(fact, "<IsPostLoadExecuted>k__BackingField", true);
             GraphField(fact, "Components", new System.Collections.Generic.List<EntityFactComponent>());
+            var blueprint = (Kingmaker.UnitLogic.Buffs.Blueprints.BlueprintBuff)FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.UnitLogic.Buffs.Blueprints.BlueprintBuff));
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("11111111111111111111111111111111");
+            GraphField(fact, "<Blueprint>k__BackingField", blueprint);
             GraphField(fact, "<Manager>k__BackingField", area.Facts); area.Facts.List.Add(fact);
             var component = (GraphProbeComponent)FormatterServices.GetUninitializedObject(typeof(GraphProbeComponent));
             GraphField(component, "<Fact>k__BackingField", fact); fact.Components.Add(component);
@@ -53,8 +59,13 @@ internal static partial class Program
             GraphField(area, "<IsDisposed>k__BackingField", true);
             safe &= Rejects("entity-lifecycle");
             GraphField(area, "<IsDisposed>k__BackingField", false); Inspect();
+            var capture = inspect.DeclaringType.GetMethod("CaptureState", BindingFlags.NonPublic | BindingFlags.Static);
+            NetworkNativeTopology Capture() => (NetworkNativeTopology)capture.Invoke(null,
+                new object[] { Array.Empty<UnitEntityData>(), new[] { area }, (Func<bool>)(() => true) });
+            var expected = Capture(); fact.Components.Clear();
+            safe &= RealTimeNativeTopologyComparison.Difference(expected, Capture())?.Contains("components-count") == true;
             Console.WriteLine("native-graph-inspection: detached-graph=" + safe
-                + "; corrupt-component-part-and-entity-rejected=True; native-callbacks-not-invoked=True");
+                + "; corrupt-component-part-and-entity-rejected=True; missing-component-inventory-rejected=True; native-callbacks-not-invoked=True");
             return safe;
         }
         catch (Exception error) { Console.WriteLine("native-graph-inspection: FAILED: " + error); return false; }

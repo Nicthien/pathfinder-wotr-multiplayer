@@ -25,5 +25,7 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
 
         [ProtoMember(5)] public List<NetworkProjectileState> Projectiles { get; set; } = [];
         [ProtoMember(6)] public bool ProjectilesCaptured { get; set; }
+        // Only populated for the native reconstruction reference, not frequent snapshots.
+        [ProtoMember(7)] public NetworkNativeTopology NativeTopology { get; set; }
     }
 }

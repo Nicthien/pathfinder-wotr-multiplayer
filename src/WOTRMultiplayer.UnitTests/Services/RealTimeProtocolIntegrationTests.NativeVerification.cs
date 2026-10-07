@@ -26,7 +26,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             var type = typeof(MultiplayerHost).GetNestedType("NativeTransfer", BindingFlags.NonPublic);
             var owner = Activator.CreateInstance(type, nonPublic: true);
             void Set(string name, object value) => type.GetField(name).SetValue(owner, value);
-            var bytes = RealTimeNativeReferenceCodec.Encode(new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState());
+            reference.NativeTopology ??= new Networking.Messages.Contracts.NetworkNativeTopology();
+            var bytes = RealTimeNativeReferenceCodec.Encode(new WOTRMultiplayer.Networking.Messages.Contracts.NetworkCombatState
+            { NativeTopology = reference.NativeTopology });
             Set("Session", host.Game); Set("Combat", host.Game.Combat); Set("State", host.Game.RealTimeCombat);
             Set("Phase", CombatSynchronizationPhase.Repairing); Set("BarrierOwned", (Func<bool>)(() => true));
             Set("Peer", 42L); Set("Prepare", prepare); Set("Manifest", manifest); Set("LoadRequested", true);
@@ -43,11 +45,13 @@ namespace WOTRMultiplayer.UnitTests.Services
         [TestCase("payload-mismatch")]
         [TestCase("restore-mismatch")]
         [TestCase("invalid-format")]
+        [TestCase("topology-mismatch")]
+        [TestCase("missing-topology")]
         public async Task NativeVerification_TwoActorsBindReferenceReceiptWithoutCommittingMechanics(string scenario)
         {
             var (host, client, hostNetwork, clientNetwork, queued, combat) = CreatePair();
             var prepare = NativePrepare(client);
-            var reference = new NetworkCombatState();
+            var reference = new NetworkCombatState { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology() };
             prepare.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
             NativeHeader(clientNetwork, prepare);
             if (!RealTimePresentationRuntime.Enabled) { Assert.That(queued, Is.Empty); return; }
@@ -62,7 +66,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             typeof(MultiplayerClient).GetField("_nativeLoadOperation", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(client, operation);
             A.CallTo(() => combat.TryRestoreNativeReferenceStateAsync(world, obligation, A<NetworkCombatState>._, A<Func<bool>>._))
                 .Returns(Task.FromResult(scenario == "restore-mismatch" ? new NetworkCombatState
-                { AreaEffects = new() { new() { Id = "unexpected-area" } } } : reference));
+                { AreaEffects = new() { new() { Id = "unexpected-area" } } } : scenario == "topology-mismatch"
+                    ? new NetworkCombatState { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology
+                    { Entities = new() { new() { Id = "unexpected-native-unit", Kind = "unit" } } } } : reference));
             SeedNativeVerificationHost(host, prepare, manifest, reference);
             queued.Clear();
             A.CallTo(() => hostNetwork.Send(42, A<object>._)).Invokes(call => queued.Enqueue(call.Arguments[1]));
@@ -74,10 +80,17 @@ namespace WOTRMultiplayer.UnitTests.Services
                 verify.ReferenceStateBytes[0] ^= 1;
                 verify.ReferenceStateHash = RealTimeNativeCheckpointLimits.Hash(verify.ReferenceStateBytes);
             }
+            if (scenario == "missing-topology")
+            {
+                var state = RealTimeNativeReferenceCodec.Decode(verify.ReferenceStateBytes);
+                state.NativeTopology = null;
+                verify.ReferenceStateBytes = RealTimeNativeReferenceCodec.Encode(state);
+                verify.ReferenceStateHash = RealTimeNativeCheckpointLimits.Hash(verify.ReferenceStateBytes);
+            }
             NativeHeader(clientNetwork, ProtoBuf.Serializer.DeepClone(verify));
             var first = (ClientRealTimeNativeCheckpointAck)queued.Dequeue();
             var handler = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeNativeCheckpointAck>(hostNetwork);
-            if (scenario == "restore-mismatch" || scenario == "invalid-format")
+            if (scenario == "restore-mismatch" || scenario == "invalid-format" || scenario == "topology-mismatch" || scenario == "missing-topology")
             {
                 Assert.That(first.Stage, Is.EqualTo((int)RealTimeNativeCheckpointAckStage.Failed));
                 handler(42, first);
@@ -146,6 +159,25 @@ namespace WOTRMultiplayer.UnitTests.Services
             { Epoch = prepare.Epoch, Stage = (int)RealTimeRepairStage.Apply, PlayerId = 42, Applied = true });
             Assert.That(host.Game.RealTimeCombat.ReadyPlayers.Contains(42), Is.False);
             Assert.That(queued, Is.Empty);
+            host.Reset();
+        }
+
+        [Test]
+        public async Task NativeVerification_HostTopologyChangedBeforeVerificationAbortsWithoutResume()
+        {
+            var (host, client, _, _, queued, _) = CreatePair();
+            var prepare = NativePrepare(client);
+            if (!RealTimePresentationRuntime.Enabled) return;
+            var reference = new NetworkCombatState
+            { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology
+            { Entities = new() { new() { Id = "host-entity-no-longer-present", Kind = "unit" } } } };
+            prepare.CanonicalStateHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
+            var (manifest, _) = NativeArchive(prepare);
+            SeedNativeVerificationHost(host, prepare, manifest, reference);
+            Assert.That(await host.VerifyCurrentNativeReferenceAsync(manifest, () => true), Is.False);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.Game.RealTimeCombat.BlocksSaving, Is.True);
+            A.CallTo(() => NativeInteraction(host).SetPauseAsync(false)).MustNotHaveHappened();
             host.Reset();
         }
     }

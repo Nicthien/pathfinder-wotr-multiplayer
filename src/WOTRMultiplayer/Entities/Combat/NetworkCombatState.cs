@@ -15,6 +15,7 @@ namespace WOTRMultiplayer.Entities.Combat
         public List<NetworkAreaEffect> AreaEffects { get; set; } = [];
 
         public bool ProjectilesCaptured { get; set; }
+        public Networking.Messages.Contracts.NetworkNativeTopology NativeTopology { get; set; }
 
         public List<RealTime.NetworkProjectileState> Projectiles { get; set; } = [];
     }

@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Commands;
+using WOTRMultiplayer.Networking;
+using WOTRMultiplayer.Networking.Messages.Contracts;
 
 namespace WOTRMultiplayer.Services.GameInteraction
 {
@@ -18,6 +21,37 @@ namespace WOTRMultiplayer.Services.GameInteraction
             ?? throw new MissingFieldException(typeof(EntityPartsManager).FullName, "m_Parts");
         private static readonly FieldInfo CommandsOwner = AccessTools.Field(typeof(UnitCommands), "m_Owner")
             ?? throw new MissingFieldException(typeof(UnitCommands).FullName, "m_Owner");
+
+        internal static NetworkNativeTopology CaptureState(IEnumerable<UnitEntityData> units,
+            IEnumerable<AreaEffectEntityData> areas, Func<bool> authorized)
+        {
+            if (units == null || areas == null) throw new InvalidOperationException("native-graph-pools-missing");
+            var unitArray = units.ToArray(); var areaArray = areas.ToArray();
+            RequireState(unitArray, areaArray, authorized);
+            var result = new NetworkNativeTopology();
+            void Capture(EntityDataBase entity, string kind)
+            {
+                if (!authorized()) throw new InvalidOperationException("native-graph-authority-revoked");
+                var entry = new NetworkNativeEntityTopology { Id = entity.UniqueId, Kind = kind };
+                foreach (var part in (IList<EntityPart>)Parts.GetValue(entity.Parts)) entry.Parts.Add(part.GetType().FullName);
+                foreach (var fact in entity.Facts.List)
+                {
+                    if (fact.Blueprint == null) throw Invalid(entity.UniqueId, "fact-blueprint-missing");
+                    var item = new NetworkNativeFactTopology
+                    { Id = fact.UniqueId, RuntimeType = fact.GetType().FullName, BlueprintId = fact.Blueprint.AssetGuid.ToString() };
+                    foreach (var component in fact.Components)
+                        item.Components.Add(new NetworkNativeComponentTopology
+                        { RuntimeType = component.GetType().FullName, SourceName = component.SourceBlueprintComponentName ?? "" });
+                    entry.Facts.Add(item);
+                }
+                result.Entities.Add(entry);
+            }
+            foreach (var unit in unitArray) Capture(unit, "unit");
+            foreach (var area in areaArray) Capture(area, "area");
+            if (!authorized()) throw new InvalidOperationException("native-graph-authority-revoked");
+            RealTimeNativeTopologyComparison.RequireValid(result);
+            return result;
+        }
 
         internal static void RequireState(IEnumerable<UnitEntityData> units, IEnumerable<AreaEffectEntityData> areas,
             Func<bool> authorized)

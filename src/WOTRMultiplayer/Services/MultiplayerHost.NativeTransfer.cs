@@ -93,9 +93,10 @@ namespace WOTRMultiplayer.Services
                         if (transfer.ReferenceBytes == null || transfer.Reference == null
                             || RealTimeNativeCheckpointLimits.Hash(transfer.ReferenceBytes) != transfer.ReferenceHash)
                             throw new InvalidOperationException("native-reference-host-source-invalid");
-                        var current = CombatInteraction.GetRealTimeCombatState();
+                        var current = CombatInteraction.GetRealTimeNativeReferenceState();
                         if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current }) != manifest.CanonicalStateHash
-                            || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null)
+                            || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null
+                            || RealTimeNativeTopologyComparison.Difference(transfer.Reference.NativeTopology, current.NativeTopology) != null)
                             throw new InvalidOperationException("native-reference-host-changed-before-verification");
                         transfer.VerificationOwned = barrierOwned;
                         transfer.VerificationRequested = true;
@@ -154,7 +155,8 @@ namespace WOTRMultiplayer.Services
                         if (!RealTimeNativeCheckpointLimits.IsHash(fingerprint)
                             || peers[0].ContentState?.RealTimeBuildFingerprint != fingerprint)
                             throw new InvalidOperationException("native-transfer-build-fingerprint-mismatch");
-                        var reference = CombatInteraction.GetRealTimeCombatState();
+                        var reference = CombatInteraction.GetRealTimeNativeReferenceState();
+                        RealTimeNativeTopologyComparison.RequireValid(reference.NativeTopology);
                         var referenceBytes = RealTimeNativeReferenceCodec.Encode(Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(reference));
                         var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
                         var owner = new NativeTransfer
@@ -204,9 +206,10 @@ namespace WOTRMultiplayer.Services
                         try
                         {
                             if (!IsCurrentNativeTransfer(transfer)) { installed.TrySetResult(false); return; }
-                            var current = CombatInteraction.GetRealTimeCombatState();
+                            var current = CombatInteraction.GetRealTimeNativeReferenceState();
                             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current });
-                            if (hash != transfer.Prepare.CanonicalStateHash || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null)
+                            if (hash != transfer.Prepare.CanonicalStateHash || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null
+                                || RealTimeNativeTopologyComparison.Difference(transfer.Reference.NativeTopology, current.NativeTopology) != null)
                                 throw new InvalidOperationException("native-transfer-host-changed-after-prepare");
                             var manifest = RealTimeNativeCheckpointLimits.Copy(transfer.Prepare);
                             manifest.Stage = (int)RealTimeNativeCheckpointStage.Manifest;

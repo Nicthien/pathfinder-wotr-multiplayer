@@ -12,6 +12,7 @@ using Kingmaker.UnitLogic.Buffs;
 using Kingmaker.UnitLogic.Commands;
 using NUnit.Framework;
 using WOTRMultiplayer.Services.GameInteraction;
+using WOTRMultiplayer.Networking;
 
 namespace WOTRMultiplayer.UnitTests.Services
 {
@@ -55,6 +56,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Field(fact, "<Manager>k__BackingField", owner.Facts);
             Field(fact, "<IsPostLoadExecuted>k__BackingField", true);
             Field(fact, "Components", new List<EntityFactComponent>());
+            var blueprint = Bare<Kingmaker.UnitLogic.Buffs.Blueprints.BlueprintBuff>();
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("11111111111111111111111111111111");
+            Field(fact, "<Blueprint>k__BackingField", blueprint);
             owner.Facts.List.Add(fact);
             return fact;
         }
@@ -75,6 +79,19 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
         private static void Require(UnitEntityData unit, AreaEffectEntityData area)
             => RealTimeNativeGraphInspection.RequireState(new[] { unit }, new[] { area }, () => true);
+
+        [Test]
+        public void CapturePreservesNativeOrderAndDetectsACompletelyMissingComponent()
+        {
+            var unit = Unit(); var area = Area(); var fact = Fact(unit); var component = Component(fact); Part(area);
+            var reference = RealTimeNativeGraphInspection.CaptureState(new[] { unit }, new[] { area }, () => true);
+            Assert.That(reference.Entities[0].Facts[0].Components[0].RuntimeType, Is.EqualTo(component.GetType().FullName));
+            Assert.That(reference.Entities[0].Facts[0].BlueprintId, Is.EqualTo(fact.Blueprint.AssetGuid.ToString()));
+            fact.Components.Clear();
+            var restored = RealTimeNativeGraphInspection.CaptureState(new[] { unit }, new[] { area }, () => true);
+            Assert.That(RealTimeNativeTopologyComparison.Difference(reference, restored), Does.Contain("components-count"));
+            Assert.That(unit.IsTurnedOn, Is.False);
+        }
 
         [Test]
         public void ConsistentSyntheticGraphIsInspectedWithoutActivationOrOwnerChanges()

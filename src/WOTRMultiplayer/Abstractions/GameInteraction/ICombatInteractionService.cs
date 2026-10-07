@@ -23,6 +23,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         NetworkCombatState GetCombatState();
 
         NetworkCombatState GetRealTimeCombatState();
+        NetworkCombatState GetRealTimeNativeReferenceState();
 
         Task<NetworkCombatState> GetRealTimeCombatStateAsync();
 

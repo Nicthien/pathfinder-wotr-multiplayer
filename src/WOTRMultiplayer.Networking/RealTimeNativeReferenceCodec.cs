@@ -38,6 +38,7 @@ namespace WOTRMultiplayer.Networking
             if (state?.Units == null || state.AreaEffects == null || state.Projectiles == null
                 || state.Units.Count > 4096 || state.AreaEffects.Count > 16384 || state.Projectiles.Count > 4096)
                 throw new InvalidDataException("native-reference-entity-count-invalid");
+            if (state.NativeTopology != null) RealTimeNativeTopologyComparison.RequireValid(state.NativeTopology);
         }
 
         private sealed class BoundedStream : MemoryStream

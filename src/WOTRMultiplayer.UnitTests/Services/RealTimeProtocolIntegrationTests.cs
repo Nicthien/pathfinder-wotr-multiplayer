@@ -995,6 +995,8 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
+            A.CallTo(() => hostCombat.GetRealTimeNativeReferenceState()).Returns(new NetworkCombatState
+            { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology() });
             A.CallTo(() => hostCombat.GetRealTimeCombatStateAsync())
                 .ReturnsLazily(() => Task.FromResult(endState ?? new NetworkCombatState()));
             A.CallTo(() => hostCombat.ExecuteRealTimeCombatCommand(A<RealTimeCommandKind>._,

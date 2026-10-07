@@ -4,7 +4,7 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 55;
+        public const int ProtocolVersion = 56;
 
         public bool CombatEndPending { get; set; }
 
