@@ -141,6 +141,27 @@ internal static class Program
                 safe &= clone.ReadHeader().Contains("offline-native-checkpoint");
                 try { clone.Save(); safe = false; } catch (InvalidOperationException) { }
             }
+            var stage = 0;
+            using var captured = RealTimeNativeCaptureTransaction.Capture(transaction =>
+            {
+                transaction.Apply(() => stage = 1, () => stage = 0);
+            }, memory =>
+            {
+                if (stage != 1) throw new InvalidOperationException("synthetic-host-not-prepared");
+                memory.SaveJson("header", "{\"GameId\":\"offline-native-checkpoint\"}");
+                memory.SaveJson("player", "{}"); memory.SaveJson("party", "{}");
+            }, () => stage == 0);
+            safe &= captured.IsSealed && stage == 0;
+            var restoredAfterFailure = false;
+            try
+            {
+                RealTimeNativeCaptureTransaction.Capture(transaction => transaction.Apply(
+                    () => { throw new InvalidOperationException("synthetic-partial-preparation"); },
+                    () => restoredAfterFailure = true), _ => { }, () => true);
+                safe = false;
+            }
+            catch (InvalidOperationException) { safe &= restoredAfterFailure; }
+            Console.WriteLine("native-host-capture-transaction: synthetic-restoration=" + safe + "; native-world-not-invoked=True");
             Console.WriteLine("native-memory-checkpoint: actual-header-decoder=" + safe + "; game-load-not-invoked=True");
             return safe;
         }

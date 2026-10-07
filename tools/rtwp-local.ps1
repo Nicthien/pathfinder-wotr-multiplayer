@@ -16,6 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'rtwp-package-protocol.ps1')
 if ($HostPresentationPrototype -and $Action -notin @('Build', 'PrepareA0Candidate')) {
     throw 'Le prototype de présentation est limité à Build ou PrepareA0Candidate : aucune activation ni installation automatique.'
 }
@@ -276,6 +277,7 @@ function Build-Experimental {
     $presentationProperty = "-p:HostPresentationPrototype=$($HostPresentationPrototype.IsPresent.ToString().ToLowerInvariant())"
     & dotnet test (Join-Path $repoPath 'src\WOTRMultiplayer.sln') --configuration Release $presentationProperty --verbosity minimal
     if ($LASTEXITCODE -ne 0) { throw 'La compilation ou les tests ont échoué.' }
+    & (Join-Path $PSScriptRoot 'check-package-protocol.ps1')
 }
 
 function Prepare-A0Candidate {
@@ -304,11 +306,15 @@ function Prepare-A0Candidate {
         Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $packagePath 'localization') -Force
         Assert-ExperimentalFingerprintParity $packagePath
     }
+    $actualCandidate = Get-ExperimentalFingerprint $packagePath
+    if (-not [string]::Equals($actualCandidate, $fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Contenu du candidat incohérent : manifeste non publié.'
+    }
     $gameAssembly = Join-Path $GamePath 'Wrath_Data\Managed\Assembly-CSharp.dll'
     $manifest = [ordered]@{
         createdUtc = (Get-Date).ToUniversalTime().ToString('o')
         purpose = 'A0 presentation-only engine test; not validated for normal play'
-        protocolVersion = 48
+        protocolVersion = Get-RtwpPackageProtocolVersion (Join-Path $packagePath 'WOTRMultiplayer.dll')
         experimentalBuildFingerprint = $fingerprint
         mainAssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $packagePath 'WOTRMultiplayer.dll') -Algorithm SHA256).Hash
         gameAssemblySha256 = (Get-FileHash -LiteralPath $gameAssembly -Algorithm SHA256).Hash
@@ -357,6 +363,7 @@ function Stage-A0Candidate {
         throw "Candidat A0 introuvable : $candidateRoot"
     }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    Assert-RtwpPackageManifestProtocol (Join-Path $source 'WOTRMultiplayer.dll') $manifest
     $actual = Get-ExperimentalFingerprint $source
     $manifestFingerprintMatches = [string]::Equals(
         $manifest.experimentalBuildFingerprint,
@@ -366,7 +373,7 @@ function Stage-A0Candidate {
         $actual,
         $fingerprint,
         [StringComparison]::OrdinalIgnoreCase)
-    if ($manifest.protocolVersion -ne 48 -or $manifest.runtimeValidated -ne $false `
+    if ($manifest.runtimeValidated -ne $false `
         -or -not $manifestFingerprintMatches -or -not $contentFingerprintMatches) {
         throw "Le manifeste ou le contenu du candidat A0 ne correspond pas a l'empreinte demandee."
     }
