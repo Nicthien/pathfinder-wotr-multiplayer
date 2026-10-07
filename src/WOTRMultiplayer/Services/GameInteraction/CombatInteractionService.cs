@@ -1614,7 +1614,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             unit.JoinCombat(notSurprised);
         }
 
-        private void UpdateAreaEffects(List<NetworkAreaEffect> areaEffects)
+        private void UpdateAreaEffects(List<NetworkAreaEffect> areaEffects, bool presentationOnly)
         {
             _logger.LogInformation("Updating area effects. AreaEffects={AreaEffects}", areaEffects);
             foreach (var areaEffect in areaEffects)
@@ -1645,7 +1645,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 localAreaEffect.View.transform.position = position;
                 localAreaEffect.m_Position = position;
 
-                localAreaEffect.UpdateViewAndUnits();
+                // UpdateViewAndUnits is not a presentation API: it queries
+                // occupants and invokes native enter/move/exit gameplay.
+                // On a presentation client, keep the host-confirmed list
+                // and transform instead of replaying those consequences.
+                if (!presentationOnly)
+                    localAreaEffect.UpdateViewAndUnits();
                 _logger.LogDebug("Area effect has been updated. Id={Id}, Name={Name}, Position={Position}, UnitsInside={UnitsInside}", localAreaEffect.UniqueId, localAreaEffect.Blueprint.name, localAreaEffect.Position, localAreaEffect.m_UnitsInside.Select(x => x.Reference.UniqueId));
             }
         }
@@ -1837,7 +1842,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
                 UpdateEngagements(unitsToUpdate);
 
-                UpdateAreaEffects(networkCombatState.AreaEffects);
+                UpdateAreaEffects(networkCombatState.AreaEffects, presentationOnly);
 
                 _logger.LogInformation("Combat state has been updated. RoundNumber={RoundNumber}, UnitsCount={UnitsCount}, IsFullUpdate={IsFullUpdate}", networkCombatState.RoundNumber, networkCombatState.Units.Count, requiresFullUpdate);
             }

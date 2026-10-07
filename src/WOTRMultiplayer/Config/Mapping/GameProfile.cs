@@ -32,6 +32,7 @@ using WOTRMultiplayer.Entities.Spells;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Entities.Units.Parts;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.Config.Mapping
 {
@@ -378,7 +379,13 @@ namespace WOTRMultiplayer.Config.Mapping
                 CreationGameTimeTicks = areaEffectEntityData.m_CreationTime.Ticks,
                 DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
                 Name = areaEffectEntityData.Blueprint.name,
-                Position = areaEffectEntityData.m_Position.ToNetworkVector3(),
+                // Attached zones move their view without refreshing m_Position.
+                // Capture the confirmed visible host location for RTwP only.
+                Position = (RealTimePresentationRuntime.Enabled
+                    && Main.Multiplayer?.IsRealTimeCombatActive == true
+                    && areaEffectEntityData.View != null
+                        ? areaEffectEntityData.View.transform.position
+                        : areaEffectEntityData.m_Position).ToNetworkVector3(),
                 UnitsInside = [.. areaEffectEntityData.m_UnitsInside.Select(x => x.Reference.UniqueId)],
                 Type = NetworkAreaEffectType.Common
             };

@@ -110,6 +110,7 @@ internal static class Program
             success &= ProbeDelegate();
             success &= ProbeRulebook();
             success &= ProbeVitals();
+            success &= ProbeAreas();
             success &= ProbeBuffReplica();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
@@ -227,6 +228,58 @@ internal static class Program
         catch (Exception failure) { Console.WriteLine("installed-buff-replica: FAILED: " + failure); return false; }
     }
     private static void StatChanged(ModifiableValue stat, int previous) { _statCallbacks++; }
+
+    private static bool ProbeAreas()
+    {
+        var harmony = new Harmony("WOTRMultiplayer.OfflineProbe.installed-areas");
+        var multiplayer = typeof(WOTRMultiplayer.Main).GetField("<Multiplayer>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        var previous = multiplayer.GetValue(null);
+        try
+        {
+            multiplayer.SetValue(null, new MultiplayerStub().GetTransparentProxy());
+            _suppress = true; _reports = 0;
+            var scheduler = harmony.CreateClassProcessor(typeof(RealTimeAreaAuthorityPatches)).Patch();
+            var callbacks = harmony.CreateClassProcessor(typeof(RealTimeAreaCallbackPatches)).Patch();
+            if (scheduler?.Count != 6 || callbacks?.Count != 6)
+                throw new InvalidOperationException("Area guards were not installed.");
+            // All originals would touch the world or component graph. Invoke
+            // patched native methods on inert objects: no Game.Instance/view.
+            var area = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.EntitySystem.Entities.AreaEffectEntityData));
+            foreach (var target in RealTimeAreaAuthorityPatches.Targets().Cast<MethodInfo>())
+            {
+                var arguments = target.GetParameters().Select(p => p.ParameterType.IsValueType
+                    ? Activator.CreateInstance(p.ParameterType) : null).ToArray();
+                target.Invoke(area, arguments);
+            }
+            var blueprint = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbilityAreaEffect));
+            foreach (var target in RealTimeAreaCallbackPatches.Targets().Cast<MethodInfo>())
+            {
+                var arguments = new object[target.GetParameters().Length];
+                arguments[1] = area;
+                target.Invoke(blueprint, arguments);
+            }
+            var blocked = _reports == 6;
+            _suppress = false;
+            // Do not execute host originals on synthetic worldless objects.
+            var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
+                && RealTimeAreaCallbackPatches.Targets().All(target =>
+                    RealTimeAreaCallbackPatches.BeforeCallback(target, null));
+            Console.WriteLine("installed-area-authority: scheduler-targets=" + scheduler.Count
+                + "; callback-targets=" + callbacks.Count + "; blocked-without-world=" + blocked
+                + "; host-prefix-allows=" + hostAllowed);
+            return blocked && hostAllowed;
+        }
+        catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
+        finally
+        {
+            multiplayer.SetValue(null, previous);
+            foreach (var method in Harmony.GetAllPatchedMethods().ToArray())
+                if (Harmony.GetPatchInfo(method)?.Owners.Contains(harmony.Id) == true)
+                    harmony.Unpatch(method, HarmonyPatchType.All, harmony.Id);
+        }
+    }
 
     private static bool ProbeVitals()
     {
