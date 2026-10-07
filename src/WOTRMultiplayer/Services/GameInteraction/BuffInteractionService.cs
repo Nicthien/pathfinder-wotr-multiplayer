@@ -67,6 +67,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
             && !string.IsNullOrEmpty(buff.BlueprintId)
             && _recreatableBuffs.ContainsKey(buff.BlueprintId);
 
+        public void UpdateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection)
+        {
+            var buffBaseTime = BuffBaseTime;
+            var error = RealTimeBuffState.ValidateCollection(unitBuffCollection, GetUnitBuffs(unit));
+            if (error != null) throw new InvalidOperationException($"unit:{unit.UniqueId}:{error}");
+            var existing = GetSyncableUnitBuffs(unit).ToDictionary(buff => buff.UniqueId, StringComparer.OrdinalIgnoreCase);
+            foreach (var confirmed in unitBuffCollection.Buffs)
+                RealTimeBuffReplication.ApplyValues(existing[confirmed.Id], confirmed, buffBaseTime);
+            UpdateNegativeLevels(unit, unitBuffCollection.NegativeLevels, presentationOnly: true);
+            unit.Buffs.UpdateNextEvent();
+        }
+
         public void UpdateUnitBuffs(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection)
         {
             var buffBaseTime = BuffBaseTime;
@@ -99,10 +111,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             _logger.LogDebug("Unit buffs have been updated. UnitId={UnitId}", unit.UniqueId);
         }
 
-        private void UpdateNegativeLevels(UnitEntityData unit, List<NetworkUnitNegativeLevelsData> negativeLevels)
+        private void UpdateNegativeLevels(UnitEntityData unit, List<NetworkUnitNegativeLevelsData> negativeLevels, bool presentationOnly = false)
         {
             if (negativeLevels.Count == 0)
             {
+                if (presentationOnly) return; // No UnitPart lifecycle on a presentation client.
                 unit.Remove<UnitPartNegativeLevels>();
                 return;
             }
@@ -168,7 +181,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (Math.Abs((decimal)hostDuration.Value.Ticks - localDuration.Ticks)
                         <= TimeSpan.FromSeconds(1).Ticks)
                         continue;
-                    local.RelatedBuff.SetDuration(hostDuration.Value);
+                    if (presentationOnly) local.RelatedBuff.EndTime = baseTime.SafeAdd(hostDuration.Value);
+                    else local.RelatedBuff.SetDuration(hostDuration.Value);
                     local.EndTime = baseTime.SafeAdd(hostDuration.Value);
                     _logger.LogInformation("Temporary negative level timer repaired. UnitId={UnitId}, Count={Count}, DrainType={DrainType}, PreviousDuration={PreviousDuration}, HostDuration={HostDuration}",
                         unit.UniqueId, local.Count, local.Type, localDuration, hostDuration.Value);

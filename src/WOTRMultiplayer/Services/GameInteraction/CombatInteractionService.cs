@@ -638,6 +638,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 if (RealTimePresentationRuntime.Enabled)
                 {
+                    var buffError = RealTimeBuffState.ValidateCollection(networkUnit.BuffCollection,
+                        _buffInteractionService.GetUnitBuffs(_gameStateLookupService.GetUnitEntity(networkUnit.Id)));
+                    if (buffError != null) throw new InvalidOperationException($"unit:{networkUnit.Id}:{buffError}");
+                }
+                if (RealTimePresentationRuntime.Enabled)
+                {
                     var resultError = RealTimeUnitResultState.Validate(networkUnit.Descriptor,
                         RealTimeUnitResultReplication.Capture(_gameStateLookupService.GetUnitEntity(networkUnit.Id)));
                     if (resultError != null) throw new InvalidOperationException($"unit:{networkUnit.Id}:{resultError}");
@@ -659,7 +665,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             // Unsupported visual assets must fail before health/buffs are changed.
             if (projectileStates != null) _projectileReplica.Restore(projectileStates);
-            UpdateCombatState(networkCombatState, requiresFullUpdate: false);
+            UpdateCombatState(networkCombatState, requiresFullUpdate: false, presentationOnly: RealTimePresentationRuntime.Enabled);
             foreach (var networkUnit in networkCombatState.Units)
             {
                 if (RealTimePresentationRuntime.Enabled)
@@ -1784,7 +1790,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return unitEngagement;
         }
 
-        private void UpdateCombatState(NetworkCombatState networkCombatState, bool requiresFullUpdate)
+        private void UpdateCombatState(NetworkCombatState networkCombatState, bool requiresFullUpdate, bool presentationOnly = false)
         {
             try
             {
@@ -1802,7 +1808,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
                     if (!requiresFullUpdate)
                     {
-                        _buffInteractionService.UpdateUnitBuffs(unit, networkUnit.BuffCollection);
+                        if (presentationOnly) _buffInteractionService.UpdateUnitBuffsPresentation(unit, networkUnit.BuffCollection);
+                        else _buffInteractionService.UpdateUnitBuffs(unit, networkUnit.BuffCollection);
                     }
 
                     if (requiresFullUpdate)

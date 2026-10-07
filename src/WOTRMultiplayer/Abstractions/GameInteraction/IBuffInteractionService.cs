@@ -10,5 +10,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         bool CanRecreateBuff(NetworkBuff buff);
 
         void UpdateUnitBuffs(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
+
+        void UpdateUnitBuffsPresentation(UnitEntityData unit, NetworkUnitBuffCollection unitBuffCollection);
     }
 }

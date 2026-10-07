@@ -160,6 +160,13 @@ internal static class Program
             RealTimeUnitResultReplication.ApplyValues(descriptor, values);
             var applied = descriptor.Damage == 40 && descriptor.State.IsDead && descriptor.State.IsFinallyDead
                 && stat.BaseValue == 2 && stat.ModifiedValue == 2 && _reports == 2 && _statCallbacks == 0;
+            var buffGuards = harmony.CreateClassProcessor(typeof(RealTimeBuffAuthorityPatches)).Patch();
+            if (buffGuards == null || buffGuards.Count != 3) throw new InvalidOperationException("Buff collection guards were not installed.");
+            var collection = (Kingmaker.UnitLogic.Buffs.BuffCollection)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.UnitLogic.Buffs.BuffCollection));
+            foreach (var target in RealTimeBuffAuthorityPatches.Targets())
+                ((MethodInfo)target).Invoke(collection, target.GetParameters().Length == 0 ? null : new object[] { null });
+            Console.WriteLine("installed-buff-scheduling: guarded-targets=" + buffGuards.Count + "; no-world-access=True");
             _suppress = false;
             damageSetter.Invoke(descriptor, new object[] { 3 });
             var hostPreserved = descriptor.Damage == 3 && _reports == 2;
@@ -167,10 +174,20 @@ internal static class Program
             typeof(Kingmaker.Player).GetProperty("IsInCombat").GetSetMethod(true).Invoke(player, new object[] { true });
             RealTimeUnitResultReplication.ApplyPartyCombatEnd(player);
             var partyEnded = !player.IsInCombat;
+            var buff = (Kingmaker.UnitLogic.Buffs.Buff)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            RealTimeBuffReplication.ApplyValues(buff, new NetworkBuff
+            {
+                Rank = 4, TimeLeft = TimeSpan.FromSeconds(12), NextTickTime = TimeSpan.FromSeconds(-1),
+                NextResourceSpendingTime = TimeSpan.MaxValue
+            }, TimeSpan.FromSeconds(100));
+            var buffApplied = buff.Rank == 4 && buff.EndTime == TimeSpan.FromSeconds(112)
+                && buff.NextResourceSpendingTime == TimeSpan.MaxValue;
+            Console.WriteLine("installed-buff-values: applied-without-world-owner-blueprint=" + buffApplied);
             Console.WriteLine("installed-vitals: patched-targets=" + patched.Count + "; blocked-client-setters=" + blocked
                 + "; applied-confirmed-death=" + applied + "; stat-callbacks=" + _statCallbacks + "; host-setter=" + hostPreserved
                 + "; party-combat-cleared=" + partyEnded);
-            return blocked && applied && hostPreserved && partyEnded;
+            return blocked && applied && hostPreserved && partyEnded && buffApplied;
         }
         catch (Exception failure) { Console.WriteLine("installed-vitals: FAILED: " + failure); return false; }
         finally
