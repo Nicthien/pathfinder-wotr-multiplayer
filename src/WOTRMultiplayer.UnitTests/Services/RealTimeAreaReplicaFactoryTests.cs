@@ -21,7 +21,7 @@ namespace WOTRMultiplayer.UnitTests.Services
     {
         private const BindingFlags Fields = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         private static T Bare<T>() => (T)FormatterServices.GetUninitializedObject(typeof(T));
-        private static (BlueprintAbilityAreaEffect Blueprint, MechanicsContext Context, NetworkAreaEffect State) Source()
+        internal static (BlueprintAbilityAreaEffect Blueprint, MechanicsContext Context, NetworkAreaEffect State) Source()
         {
             var blueprint = Bare<BlueprintAbilityAreaEffect>();
             blueprint.AssetGuid = BlueprintGuid.Parse("11111111111111111111111111111111");

@@ -322,6 +322,28 @@ internal static class Program
             var targetData = (Kingmaker.Utility.TargetWrapper)typeof(Kingmaker.EntitySystem.Entities.AreaEffectEntityData)
                 .GetField("m_Target", fields).GetValue(attached);
             detachedSafe &= targetData.UnitRef.Id == "target" && attached.HoldingState == null && _reports == 6;
+            var entities = new Kingmaker.EntitySystem.EntityService();
+            var scene = new Kingmaker.EntitySystem.SceneEntitiesState("probe-room");
+            var areaCache = entities.GetListUnsafe<Kingmaker.EntitySystem.Entities.AreaEffectEntityData>();
+            var unresolvedProxy = entities.GetProxy("replica");
+            using (RealTimeAreaReplicaStore.Register(entities, scene, detached, "probe-room"))
+                detachedSafe &= ReferenceEquals(entities.GetEntity("replica"), detached) && areaCache.Count == 1;
+            detachedSafe &= unresolvedProxy.Entity == null && detached.HoldingState == null && areaCache.Count == 0;
+            using (var registration = RealTimeAreaReplicaStore.Register(entities, scene, detached, "probe-room")) registration.Commit();
+            using (RealTimeAreaReplicaStore.RemoveReplica(entities, scene, detached))
+                detachedSafe &= areaCache.Count == 0 && detached.Proxy == null;
+            detachedSafe &= ReferenceEquals(detached.Proxy, unresolvedProxy) && areaCache.Count == 1;
+            using (var restoration = new RealTimeBuffRestoreTransaction())
+            {
+                restoration.RemoveArea(entities, scene, detached);
+                restoration.RegisterArea(entities, scene, attached, "probe-room");
+                var checkpoint = new WOTRMultiplayer.Entities.Combat.NetworkCombatState();
+                restoration.VerifyAndCommit(checkpoint, checkpoint);
+            }
+            detachedSafe &= ReferenceEquals(unresolvedProxy.Entity, attached) && ReferenceEquals(attached.Proxy, unresolvedProxy)
+                && !unresolvedProxy.IsDisposed && detached.Proxy == null && areaCache.Count == 1;
+            using (var removal = RealTimeAreaReplicaStore.RemoveReplica(entities, scene, attached)) removal.Commit();
+            detachedSafe &= unresolvedProxy.IsDisposed && areaCache.Count == 0 && scene.AllEntityData.Count == 0;
             // Do not execute host originals on synthetic worldless objects.
             var hostAllowed = RealTimeAreaAuthorityPatches.BeforeSimulation()
                 && RealTimeAreaCallbackPatches.Targets().All(target =>
@@ -329,7 +351,7 @@ internal static class Program
             Console.WriteLine("installed-area-authority: scheduler-targets=" + scheduler.Count
                 + "; callback-targets=" + callbacks.Count + "; blocked-without-world=" + blocked
                 + "; host-prefix-allows=" + hostAllowed + "; raw-state-without-world=" + rawApplied
-                + "; detached-factory=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count);
+                + "; detached-factory-and-store=" + detachedSafe + "; disconnected-lifecycle-targets=" + lifecycle.Count);
             return blocked && hostAllowed && rawApplied && detachedSafe;
         }
         catch (Exception failure) { Console.WriteLine("installed-area-authority: FAILED: " + failure); return false; }
