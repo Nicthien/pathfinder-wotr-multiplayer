@@ -785,6 +785,7 @@ namespace WOTRMultiplayer.UI
             // let's call it a possibility
             //CreateAdvancedControlItem(WellKnownKeys.LobbyWindow.AdvancedControls.Items.GlobalMap.Title.Key, NetworkPlayerControlledFeature.GlobalMap, titleWidth, dropdownWidth, itemsContainerObject.transform);
             CreateAdvancedControlItem(WellKnownKeys.LobbyWindow.AdvancedControls.Items.Dialogs.Title.Key, NetworkPlayerControlledFeature.Dialogs, titleWidth, dropdownWidth, itemsContainerObject.transform);
+            CreateAdvancedControlItem(WellKnownKeys.LobbyWindow.AdvancedControls.Items.VendorDeal.Title.Key, NetworkPlayerControlledFeature.VendorDeal, titleWidth, dropdownWidth, itemsContainerObject.transform);
             CreateAdvancedControlItem(WellKnownKeys.LobbyWindow.AdvancedControls.Items.CrusadeArmyCombat.Title.Key, NetworkPlayerControlledFeature.CrusadeArmyCombat, titleWidth, dropdownWidth, itemsContainerObject.transform);
         }
 

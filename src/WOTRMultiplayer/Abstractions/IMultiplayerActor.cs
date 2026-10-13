@@ -408,5 +408,9 @@ namespace WOTRMultiplayer.Abstractions
         void MakeCueAnswerSuggestion(string cueName, string answerName);
 
         bool OnBeforeChooseBookCharacter(string cueName, string answerName);
+
+        void OnMakeVendorDeal();
+
+        void OnCloseVendorWindow();
     }
 }

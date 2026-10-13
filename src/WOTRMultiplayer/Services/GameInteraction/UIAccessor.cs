@@ -36,6 +36,7 @@ using Kingmaker.UI.MVVM._PCView.ServiceWindows.Spellbook.Metamagic;
 using Kingmaker.UI.MVVM._PCView.TacticalCombat;
 using Kingmaker.UI.MVVM._PCView.TacticalCombat.Result;
 using Kingmaker.UI.MVVM._PCView.Transition;
+using Kingmaker.UI.MVVM._PCView.Vendor;
 using Kingmaker.UI.MVVM._VM.ServiceWindows;
 using Kingmaker.UI.MVVM._VM.ServiceWindows.Inventory;
 using Kingmaker.UI.MVVM._VM.Vendor;
@@ -79,7 +80,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public GroupChangerPCView GroupChangerView => (InGamePCView?.m_StaticPartPCView?.m_GroupChangerContextPCView ?? GlobalMapPCView?.m_GroupChangerContextPCView)?.m_GroupChangerPCView;
 
-        public VendorVM VendorVM => InGamePCView?.m_StaticPartPCView?.m_VendorPCView?.ViewModel;
+        public VendorPCView VendorPCView => InGamePCView?.m_StaticPartPCView?.m_VendorPCView;
 
         public SpellbookPCView SpellbookPCView => (InGamePCView?.m_StaticPartPCView?.m_ServiceWindowsPCView ?? GlobalMapPCView.m_ServiceWindowsPCView)?.m_SpellbookPCView;
 

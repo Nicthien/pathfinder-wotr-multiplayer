@@ -34,9 +34,9 @@ using Kingmaker.UI.MVVM._PCView.ServiceWindows.Spellbook.Metamagic;
 using Kingmaker.UI.MVVM._PCView.TacticalCombat;
 using Kingmaker.UI.MVVM._PCView.TacticalCombat.Result;
 using Kingmaker.UI.MVVM._PCView.Transition;
+using Kingmaker.UI.MVVM._PCView.Vendor;
 using Kingmaker.UI.MVVM._VM.ServiceWindows;
 using Kingmaker.UI.MVVM._VM.ServiceWindows.Inventory;
-using Kingmaker.UI.MVVM._VM.Vendor;
 
 namespace WOTRMultiplayer.Abstractions.GameInteraction
 {
@@ -72,7 +72,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         GroupChangerPCView GroupChangerView { get; }
 
-        VendorVM VendorVM { get; }
+        VendorPCView VendorPCView { get; }
 
         SpellbookPCView SpellbookPCView { get; }
 

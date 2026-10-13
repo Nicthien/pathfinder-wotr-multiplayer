@@ -79,18 +79,14 @@ namespace WOTRMultiplayer.HarmonyPatches.Vendor
                 return;
             }
 
-            var isFullControl = Main.Multiplayer.CanFullyControlVendorUI();
-            if (!isFullControl)
-            {
-                __instance.m_CloseButton.Interactable = false;
-            }
+            __instance.m_CloseButton.Interactable = Main.Multiplayer.CanControlVendorDeals();
         }
 
         private static IDisposable SubscribeToEscHotKey(VendorPCView view)
         {
             var subscription = Game.Instance.UI.EscManager.Subscribe(() =>
             {
-                if (!Main.Multiplayer.IsActive || Main.Multiplayer.CanFullyControlVendorUI())
+                if (!Main.Multiplayer.IsActive || Main.Multiplayer.CanControlVendorDeals())
                 {
                     view.ViewModel.Close();
                 }
@@ -103,7 +99,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Vendor
         {
             return view.ViewModel.IsPossibleDeal.Subscribe(value =>
             {
-                view.m_DealButton.Interactable = value && (!Main.Multiplayer.IsActive || Main.Multiplayer.CanFullyControlVendorUI());
+                view.m_DealButton.Interactable = value && (!Main.Multiplayer.IsActive || Main.Multiplayer.CanControlVendorDeals());
             });
         }
     }

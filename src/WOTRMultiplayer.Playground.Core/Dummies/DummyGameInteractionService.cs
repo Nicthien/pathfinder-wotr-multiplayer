@@ -519,5 +519,9 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
         public void CreateMagicHackSpell(NetworkMagicHackSpell magicHackSpell)
         {
         }
+
+        public void RefreshVendorDealButtonState()
+        {
+        }
     }
 }

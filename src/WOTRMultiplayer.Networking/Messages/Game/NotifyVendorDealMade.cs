@@ -4,7 +4,7 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 {
     [ProtoContract]
     [MessageType((int)MessageTypes.Game.NotifyVendorDealMade)]
-    public class NotifyVendorDealMade
+    public class NotifyVendorDealMade : IForwardableMessage
     {
     }
 }

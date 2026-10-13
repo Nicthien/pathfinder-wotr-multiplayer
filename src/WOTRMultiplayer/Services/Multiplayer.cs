@@ -987,12 +987,12 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
-                if (_multiplayerActorAccessor.Current == null || _multiplayerActorAccessor.Client.IsActive)
+                if (!CanControlVendorDeals())
                 {
                     return;
                 }
 
-                _multiplayerActorAccessor.Host.OnMakeVendorDeal();
+                _multiplayerActorAccessor.Current.OnMakeVendorDeal();
             }
             catch (Exception ex)
             {
@@ -1005,23 +1005,18 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
-                if (_multiplayerActorAccessor.Current == null || _multiplayerActorAccessor.Client.IsActive)
+                if (!CanControlVendorDeals())
                 {
                     return;
                 }
 
-                _multiplayerActorAccessor.Host.OnCloseVendorWindow();
+                _multiplayerActorAccessor.Current.OnCloseVendorWindow();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error while closing vendor window");
                 throw;
             }
-        }
-
-        public bool CanFullyControlVendorUI()
-        {
-            return _multiplayerActorAccessor.Current == null || _multiplayerActorAccessor.Host.IsActive;
         }
 
         public void OnMemorizeSpell(string unitId, NetworkSpellSlot networkSpellSlot, NetworkAbility networkAbility)
@@ -2428,6 +2423,11 @@ namespace WOTRMultiplayer.Services
         public bool CanControlDialog()
         {
             return _multiplayerActorAccessor.Current != null && _multiplayerActorAccessor.Current.HasControlOverFeature(NetworkPlayerControlledFeature.Dialogs);
+        }
+
+        public bool CanControlVendorDeals()
+        {
+            return _multiplayerActorAccessor.Current != null && _multiplayerActorAccessor.Current.HasControlOverFeature(NetworkPlayerControlledFeature.VendorDeal);
         }
 
         public void OnGlobalMapSkipDay()

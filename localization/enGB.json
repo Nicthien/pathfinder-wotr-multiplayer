@@ -127,6 +127,9 @@
                     },
                     "crusadeArmyCombat": {
                         "title": "Crusade Army Combat"
+                    },
+                    "vendorDeal":{
+                        "title": "Vendor Deal Maker"
                     }
                 }
             },

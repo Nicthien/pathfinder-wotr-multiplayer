@@ -2,7 +2,6 @@
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.Connectivity;
-using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.Dungeon;
 using WOTRMultiplayer.Entities.GlobalMap;
 using WOTRMultiplayer.Entities.GlobalMap.Kingdom;
@@ -42,10 +41,6 @@ namespace WOTRMultiplayer.Abstractions
         void OnCampingUnitsRoleChanged(List<NetworkCampingRole> roles);
 
         void OnAfterTryRollRestRandomEncounter(NetworkRandomEncounterContext encounterContext);
-
-        void OnMakeVendorDeal();
-
-        void OnCloseVendorWindow();
 
         void OnAcceptGroupChangerParty();
 

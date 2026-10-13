@@ -484,6 +484,16 @@ public static class WellKnownKeys
                         public static string Key { get; set; }
                     }
                 }
+
+                [Description("vendorDeal")]
+                public static class VendorDeal
+                {
+                    [Description("title")]
+                    public static class Title
+                    {
+                        public static string Key { get; set; }
+                    }
+                }
             }
         }
 

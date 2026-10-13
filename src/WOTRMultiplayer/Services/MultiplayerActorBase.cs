@@ -2091,6 +2091,18 @@ namespace WOTRMultiplayer.Services
             UpdateGlobalMapCrusadeArmyBuyLeaderUIState();
         }
 
+        public void OnMakeVendorDeal()
+        {
+            var message = new NotifyVendorDealMade();
+            Send(message);
+        }
+
+        public void OnCloseVendorWindow()
+        {
+            var message = new NotifyVendorWindowClosed();
+            Send(message);
+        }
+
         public bool OnBeforeChooseBookCharacter(string cueName, string answerName)
         {
             // no need to check for cue witnesses here as it's only a popup for character selection window
@@ -3268,6 +3280,9 @@ namespace WOTRMultiplayer.Services
                     var canContinue = (Game.DialogState?.IsCueWitnessedByAll ?? false) && HasControlOverFeature(NetworkPlayerControlledFeature.Dialogs);
                     DialogInteraction.SetDialogContinueButtonState(canContinue);
                     break;
+                case NetworkPlayerControlledFeature.VendorDeal:
+                    GameInteraction.RefreshVendorDealButtonState();
+                    break;
             }
         }
 
@@ -3718,6 +3733,8 @@ namespace WOTRMultiplayer.Services
 
                 // vendor interaction
                 .On<NotifyVendorItemTransferred>(OnNotifyVendorItemTransferred)
+                .On<NotifyVendorDealMade>(OnNotifyVendorDealMade)
+                .On<NotifyVendorWindowClosed>(OnNotifyVendorWindowClosed)
 
                 // rest
                 .On<NotifyRestBanterInterrupted>(OnNotifyRestBanterInterrupted)
@@ -4594,6 +4611,16 @@ namespace WOTRMultiplayer.Services
         {
             var banter = Mapper.Map<NetworkRestBanter>(message.Banter);
             GameInteraction.TryInterruptRestBanter(banter);
+        }
+
+        private void OnNotifyVendorWindowClosed(long receivedFrom, NotifyVendorWindowClosed message)
+        {
+            GameInteraction.CloseVendorWindow();
+        }
+
+        private void OnNotifyVendorDealMade(long receivedFrom, NotifyVendorDealMade message)
+        {
+            GameInteraction.MakeVendorDeal();
         }
 
         private void OnNotifyVendorItemTransferred(long receivedFrom, NotifyVendorItemTransferred message)

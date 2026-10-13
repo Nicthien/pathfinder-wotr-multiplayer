@@ -105,9 +105,10 @@ namespace WOTRMultiplayer.Services
                 SessionSeed = CreateRandomSeed()
             };
 
-            Game.FeatureControllers.TryAdd(NetworkPlayerControlledFeature.Dialogs, Game.LocalPlayerId);
-            Game.FeatureControllers.TryAdd(NetworkPlayerControlledFeature.GlobalMap, Game.LocalPlayerId);
-            Game.FeatureControllers.TryAdd(NetworkPlayerControlledFeature.CrusadeArmyCombat, Game.LocalPlayerId);
+            foreach (NetworkPlayerControlledFeature feature in Enum.GetValues(typeof(NetworkPlayerControlledFeature)))
+            {
+                Game.FeatureControllers.TryAdd(feature, Game.LocalPlayerId);
+            }
 
             Game.Characters.AddRange(gameStartUp.Characters);
 
@@ -662,18 +663,6 @@ namespace WOTRMultiplayer.Services
                 Logger.LogError(ex, "Unable to store rest random encounter context");
                 throw;
             }
-        }
-
-        public void OnMakeVendorDeal()
-        {
-            var message = new NotifyVendorDealMade();
-            Send(message);
-        }
-
-        public void OnCloseVendorWindow()
-        {
-            var message = new NotifyVendorWindowClosed();
-            Send(message);
         }
 
         public bool OnRequestLevelingUI(string unitId, NetworkLevelingType levelingType)

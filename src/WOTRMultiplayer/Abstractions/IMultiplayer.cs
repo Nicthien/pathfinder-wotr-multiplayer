@@ -128,8 +128,6 @@ namespace WOTRMultiplayer.Abstractions
 
         void OnTransferVendorItem(NetworkVendorItemTransfer networkVendorItemTransfer);
 
-        bool CanFullyControlVendorUI();
-
         void OnMakeVendorDeal();
 
         void OnCloseVendorWindow();
@@ -267,6 +265,8 @@ namespace WOTRMultiplayer.Abstractions
         void OnGlobalMapEncounterRolled(NetworkGlobalMapEncounter globalMapRandomEncounter);
 
         bool CanControlGlobalMap();
+
+        bool CanControlVendorDeals();
 
         bool CanControlAlushenyrraIsles();
 

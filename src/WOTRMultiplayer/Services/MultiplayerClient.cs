@@ -701,10 +701,6 @@ namespace WOTRMultiplayer.Services
                .On<NotifyDialogCueAnswerSelectionDenied>(OnNotifyDialogCueAnswerSelectionDenied)
                .On<NotifyDialogCueWitnessedByAll>(OnNotifyDialogCueWitnessedByAll)
 
-               // vendor interaction
-               .On<NotifyVendorDealMade>(OnNotifyVendorDealMade)
-               .On<NotifyVendorWindowClosed>(OnNotifyVendorWindowClosed)
-
                // inspection
                .On<NotifyPerceptionCheckRolled>(OnNotifyPerceptionCheckRolled)
                .On<NotifyInspectionKnowledgeCheckRolled>(OnNotifyInspectionKnowledgeCheckRolled)
@@ -1493,16 +1489,6 @@ namespace WOTRMultiplayer.Services
 
             InitiateLeveling(characterLevelingStarted.UnitId, levelingType);
             LevelingInteraction.StartLeveling(Game.Leveling.UnitId, Game.Leveling.Type);
-        }
-
-        private void OnNotifyVendorWindowClosed(long playerId, NotifyVendorWindowClosed closed)
-        {
-            GameInteraction.CloseVendorWindow();
-        }
-
-        private void OnNotifyVendorDealMade(long playerId, NotifyVendorDealMade made)
-        {
-            GameInteraction.MakeVendorDeal();
         }
 
         private void OnNotifyInvalidCombatTurnStarted(long playerId, NotifyInvalidCombatTurnStarted message)

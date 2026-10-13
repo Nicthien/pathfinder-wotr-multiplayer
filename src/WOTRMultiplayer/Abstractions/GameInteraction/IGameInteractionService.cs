@@ -250,5 +250,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         void ConfirmDungeonBoon();
 
         void DestroyUnits(List<string> units);
+
+        void RefreshVendorDealButtonState();
     }
 }

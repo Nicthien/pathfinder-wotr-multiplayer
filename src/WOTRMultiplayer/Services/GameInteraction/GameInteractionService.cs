@@ -872,14 +872,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 var previousIndex = unit.Body.CurrentHandEquipmentSetIndex;
                 unit.Body.CurrentHandEquipmentSetIndex = networkActiveHandEquipmentSet.Index;
                 RefreshInventoryWindow();
-                if (_uiAccessor.VendorVM != null && string.Equals(_uiAccessor.VendorVM.DollVM?.Unit?.Value.Unit?.UniqueId, unit.UniqueId, StringComparison.OrdinalIgnoreCase))
-                {
-                    var set = _uiAccessor.VendorVM.DollVM.WeaponSets.FirstOrDefault(s => s.Index == unit.Body.CurrentHandEquipmentSetIndex);
-                    if (set != null)
-                    {
-                        _uiAccessor.VendorVM.DollVM.CurrentSet.Value = set;
-                    }
-                }
+                RefreshVendorDoll(unit);
                 _logger.LogInformation("Changed active hand equipment slot. UnitId={UnitId}, PreviousIndex={PreviousIndex}, CurrentIndex={CurrentIndex}", networkActiveHandEquipmentSet.UnitId, previousIndex, unit.Body.CurrentHandEquipmentSetIndex);
             });
         }
@@ -1679,14 +1672,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
-                if (_uiAccessor.VendorVM == null)
+                var view = _uiAccessor.VendorPCView;
+                if (view?.ViewModel == null)
                 {
                     _logger.LogWarning("Unable to close vendor screen due to missing VendorViewVM");
                     return;
                 }
 
-                _uiAccessor.VendorVM.m_CloseAction?.Invoke();
-                SetPause(false);
+                view.ViewModel.m_CloseAction?.Invoke();
+                _logger.LogInformation("Vendor window has been closed");
             });
         }
 
@@ -1694,13 +1688,32 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
-                if (_uiAccessor.VendorVM == null)
+                var view = _uiAccessor.VendorPCView;
+                if (view?.ViewModel == null)
                 {
                     _logger.LogWarning("Unable to make vendor deal due to missing VendorViewVM");
                     return;
                 }
 
-                _uiAccessor.VendorVM.Deal();
+                view.ViewModel.Deal();
+                _logger.LogInformation("Vendor deal has been made");
+            });
+        }
+
+        public void RefreshVendorDealButtonState()
+        {
+            _mainThreadAccessor.Post(() =>
+            {
+                var view = _uiAccessor.VendorPCView;
+                if (view?.ViewModel == null)
+                {
+                    _logger.LogWarning("Unable to refresh vendor deal button due to missing VendorViewVM");
+                    return;
+                }
+
+                var currentValue = view.ViewModel.IsPossibleDeal.Value;
+                view.ViewModel.IsPossibleDeal.SetValueAndForceNotify(currentValue);
+                _logger.LogInformation("Vendor deal button has been refreshed");
             });
         }
 
@@ -3525,7 +3538,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void RefreshVendorScreen()
         {
-            if (_uiAccessor.VendorVM == null)
+            var view = _uiAccessor.VendorPCView;
+            if (view?.ViewModel == null)
             {
                 _logger.LogWarning("Unable to refresh vendor screen due to missing VendorViewVM");
                 return;
@@ -3533,8 +3547,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             try
             {
-                _uiAccessor.VendorVM.UpdateVendorSide();
-                _uiAccessor.VendorVM.UpdatePlayerSide();
+                view.ViewModel.UpdateVendorSide();
+                view.ViewModel.UpdatePlayerSide();
             }
             catch (Exception ex)
             {
@@ -3691,6 +3705,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (IsCapitalPartyMode && _uiAccessor.LootPCView?.ViewModel != null && _uiAccessor.LootPCView.ViewModel.Mode == LootContextVM.LootWindowMode.StandardChest)
             {
                 _uiAccessor.LootPCView.ViewModel.InventoryCollectionChanged();
+            }
+        }
+
+        private void RefreshVendorDoll(UnitEntityData unit)
+        {
+            var vendorView = _uiAccessor.VendorPCView;
+            if (vendorView?.ViewModel != null && string.Equals(vendorView.ViewModel.DollVM?.Unit?.Value.Unit?.UniqueId, unit.UniqueId, StringComparison.OrdinalIgnoreCase))
+            {
+                var set = vendorView.ViewModel.DollVM.WeaponSets.FirstOrDefault(s => s.Index == unit.Body.CurrentHandEquipmentSetIndex);
+                if (set != null)
+                {
+                    vendorView.ViewModel.DollVM.CurrentSet.Value = set;
+                }
             }
         }
 

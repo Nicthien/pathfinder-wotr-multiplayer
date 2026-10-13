@@ -3,6 +3,7 @@
     public enum NetworkPlayerControlledFeature
     {
         Dialogs,
+        VendorDeal,
         GlobalMap,
         CrusadeArmyCombat
     }
