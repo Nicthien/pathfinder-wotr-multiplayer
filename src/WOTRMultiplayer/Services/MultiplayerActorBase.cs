@@ -376,20 +376,24 @@ namespace WOTRMultiplayer.Services
             Send(message);
         }
 
-        public bool OnTacticalCombatTurnPostponed()
+        public bool OnTacticalCombatTotalDefenseUsed(string unitId)
         {
-            var message = new NotifyTacticalCombatTurnPostponed();
+            var message = new NotifyTacticalCombatTotalDefenseUsed
+            {
+                UnitId = unitId
+            };
             Send(message);
             return true;
         }
 
-        public void OnTacticalCombatUnitUseAbilityCommand(NetworkTacticalUnitUseAbilityCommand tacticalUnitUseAbilityCommand)
+        public bool OnTacticalCombatTurnPostponed(string unitId)
         {
-            var message = new NotifyTacticalUnitUseAbilityCommandExecuted
+            var message = new NotifyTacticalCombatTurnPostponed
             {
-                Command = Mapper.Map<Networking.Messages.Contracts.NetworkTacticalUnitUseAbilityCommand>(tacticalUnitUseAbilityCommand)
+                UnitId = unitId
             };
             Send(message);
+            return true;
         }
 
         public void OnTacticalCombatUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand)
@@ -408,13 +412,6 @@ namespace WOTRMultiplayer.Services
                 Command = Mapper.Map<Networking.Messages.Contracts.NetworkTacticalUnitMoveToCommand>(tacticalUnitMoveToCommand)
             };
             Send(message);
-        }
-
-        public bool OnTacticalCombatTotalDefenseUsed()
-        {
-            var message = new NotifyTacticalCombatTotalDefenseUsed();
-            Send(message);
-            return true;
         }
 
         public bool HasControlOverFeature(NetworkPlayerControlledFeature feature)
@@ -2476,6 +2473,11 @@ namespace WOTRMultiplayer.Services
                 return existing;
             });
 
+            if (isFirstAdd)
+            {
+                Logger.LogInformation("Crusade Army Turn initialization has been confirmed. PlayerId={PlayerId}, TurnNumber={TurnNumber}", playerId, turnNumber);
+            }
+
             return isFirstAdd;
         }
 
@@ -2999,7 +3001,8 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
-            PlayerNotification.ShowWarningNotification(WellKnownKeys.GameNotifications.Session.PlayerLeft.Key, warningDuration: 2f, args: new PlayerLogParameter(networkPlayer));
+            PlayerNotification.ShowWarningNotification(WellKnownKeys.GameNotifications.Session.PlayerLeft.Key, addToLog: false, warningDuration: 2f, args: networkPlayer.Name);
+            PlayerNotification.AddCombatText(WellKnownKeys.GameNotifications.Session.PlayerLeft.Key, CombatTextSeverity.Common, args: new PlayerLogParameter(networkPlayer));
         }
 
         protected NetworkPlayer CleanupPlayer(long playerId)
@@ -3340,7 +3343,7 @@ namespace WOTRMultiplayer.Services
         {
             if (Game.ArmyCombat?.Turn != null)
             {
-                return HasControlOverUI && !Game.ArmyCombat.Turn.IsAI;
+                return HasControlOverFeature(NetworkPlayerControlledFeature.CrusadeArmyCombat) && !Game.ArmyCombat.Turn.IsAI;
             }
 
             if (Game.Combat != null && Game.Combat.Turn == null)
@@ -3576,13 +3579,14 @@ namespace WOTRMultiplayer.Services
         {
             if (condition())
             {
-                Logger.LogWarning("{Message}. Timeout={Timeout}", warningMessage, awaiterTimeout);
-                using var timeout = new CancellationTokenSource(awaiterTimeout ?? TimeSpan.FromSeconds(20));
+                var timeout = awaiterTimeout ?? TimeSpan.FromSeconds(20);
+                Logger.LogWarning("{Message}. Timeout={Timeout}", warningMessage, timeout);
+                using var timeoutTokenSource = new CancellationTokenSource(timeout);
                 while (condition())
                 {
                     await Task.Delay(10);
 
-                    if (timeout.IsCancellationRequested)
+                    if (timeoutTokenSource.IsCancellationRequested)
                     {
                         Logger.LogWarning($"Awaiter failed due to timeout. WarningText={warningMessage}");
                         return false;
@@ -3770,7 +3774,6 @@ namespace WOTRMultiplayer.Services
                 .On<NotifyTacticalCombatTurnPostponed>(OnNotifyTacticalCombatTurnPostponed)
                 .On<NotifyTacticalCombatTotalDefenseUsed>(OnNotifyTacticalCombatTotalDefenseUsed)
                 .On<NotifyTacticalUnitAttackCommandExecuted>(OnNotifyTacticalUnitAttackCommandExecuted)
-                .On<NotifyTacticalUnitUseAbilityCommandExecuted>(OnNotifyTacticalUnitUseAbilityCommandExecuted)
                 .On<NotifyTacticalUnitMoveToCommandExecuted>(OnNotifyTacticalUnitMoveToCommandExecuted)
                 .On<NotifyCrusadeArmyBattleResultsClosed>(OnNotifyCrusadeArmyBattleResultsClosed)
 
@@ -3863,13 +3866,6 @@ namespace WOTRMultiplayer.Services
             var command = Mapper.Map<NetworkTacticalUnitMoveToCommand>(message.Command);
 
             CombatInteraction.RunTacticalUnitMoveToCommand(command);
-        }
-
-        private void OnNotifyTacticalUnitUseAbilityCommandExecuted(long receivedFrom, NotifyTacticalUnitUseAbilityCommandExecuted message)
-        {
-            var command = Mapper.Map<NetworkTacticalUnitUseAbilityCommand>(message.Command);
-
-            CombatInteraction.RunTacticalUnitUseAbilityCommand(command);
         }
 
         private async void OnNotifyTacticalUnitAttackCommandExecuted(long receivedFrom, NotifyTacticalUnitAttackCommandExecuted message)

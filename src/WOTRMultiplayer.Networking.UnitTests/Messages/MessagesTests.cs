@@ -149,7 +149,6 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         {
             // Arrange
             var rootLocation = Path.GetFullPath(@"..\..\..\..\WOTRMultiplayer\Services");
-
             var trees = new List<(CSharpCompilation, SemanticModel, ClassDeclarationSyntax)>
             {
                Create(Path.Combine(rootLocation, "MultiplayerClient.cs")),

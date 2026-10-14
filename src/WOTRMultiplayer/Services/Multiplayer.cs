@@ -3122,25 +3122,7 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        public void OnTacticalCombatUnitUseAbilityCommand(NetworkTacticalUnitUseAbilityCommand tacticalUnitUseAbilityCommand)
-        {
-            try
-            {
-                if (!CanControlTacticalCombat())
-                {
-                    return;
-                }
-
-                _multiplayerActorAccessor.Current.OnTacticalCombatUnitUseAbilityCommand(tacticalUnitUseAbilityCommand);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error while processing crusade tactical unitUseAbility command");
-                throw;
-            }
-        }
-
-        public bool OnTacticalCombatTotalDefenseUsed()
+        public bool OnTacticalCombatTotalDefenseUsed(string unitId)
         {
             try
             {
@@ -3149,17 +3131,17 @@ namespace WOTRMultiplayer.Services
                     return false;
                 }
 
-                var canContinue = _multiplayerActorAccessor.Current.OnTacticalCombatTotalDefenseUsed();
+                var canContinue = _multiplayerActorAccessor.Current.OnTacticalCombatTotalDefenseUsed(unitId);
                 return canContinue;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error while using crusade army combat total defense");
+                _logger.LogError(ex, "Error while using crusade army combat total defense. UnitId={UnitId}", unitId);
                 throw;
             }
         }
 
-        public bool OnTacticalCombatTurnPostponed()
+        public bool OnTacticalCombatTurnPostponed(string unitId)
         {
             try
             {
@@ -3168,12 +3150,12 @@ namespace WOTRMultiplayer.Services
                     return false;
                 }
 
-                var canContinue = _multiplayerActorAccessor.Current.OnTacticalCombatTurnPostponed();
+                var canContinue = _multiplayerActorAccessor.Current.OnTacticalCombatTurnPostponed(unitId);
                 return canContinue;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error while postponing crusade army combat turn");
+                _logger.LogError(ex, "Error while postponing crusade army combat turn. UnitId={UnitId}", unitId);
                 throw;
             }
         }

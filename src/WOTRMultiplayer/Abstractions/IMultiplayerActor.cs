@@ -393,11 +393,9 @@ namespace WOTRMultiplayer.Abstractions
 
         void OnTacticalCombatAccelerationChanged(bool isAccelerated);
 
-        bool OnTacticalCombatTurnPostponed();
+        bool OnTacticalCombatTurnPostponed(string unitId);
 
-        bool OnTacticalCombatTotalDefenseUsed();
-
-        void OnTacticalCombatUnitUseAbilityCommand(NetworkTacticalUnitUseAbilityCommand tacticalUnitUseAbilityCommand);
+        bool OnTacticalCombatTotalDefenseUsed(string unitId);
 
         void OnTacticalCombatUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand);
 

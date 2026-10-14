@@ -1,4 +1,5 @@
 ﻿using ProtoBuf;
+using WOTRMultiplayer.Logging.Attributes;
 
 namespace WOTRMultiplayer.Networking.Messages.Game
 {
@@ -6,5 +7,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
     [MessageType((int)MessageTypes.Game.NotifyTacticalCombatTurnPostponed)]
     public class NotifyTacticalCombatTurnPostponed : IForwardableMessage
     {
+        [ProtoMember(1)]
+        [LogMe]
+        public string UnitId { get; set; }
     }
 }

@@ -43,10 +43,6 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
         {
         }
 
-        public void RunTacticalUnitUseAbilityCommand(NetworkTacticalUnitUseAbilityCommand tacticalUnitUseAbilityCommand)
-        {
-        }
-
         public void RunTacticalUnitMoveToCommand(NetworkTacticalUnitMoveToCommand tacticalUnitMoveToCommand)
         {
         }

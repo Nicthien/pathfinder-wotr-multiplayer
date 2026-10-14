@@ -185,7 +185,6 @@
             NotifyGlobalMapCombatResultsClosed,
             NotifyTacticalUnitMoveToCommandExecuted,
             NotifyTacticalUnitAttackCommandExecuted,
-            NotifyTacticalUnitUseAbilityCommandExecuted,
             NotifyTacticalCombatTotalDefenseUsed,
             NotifyTacticalCombatTurnPostponed,
             NotifyTacticalCombatRetreated,

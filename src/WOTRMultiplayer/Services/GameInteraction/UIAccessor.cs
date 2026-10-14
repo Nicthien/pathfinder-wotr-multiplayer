@@ -39,7 +39,6 @@ using Kingmaker.UI.MVVM._PCView.Transition;
 using Kingmaker.UI.MVVM._PCView.Vendor;
 using Kingmaker.UI.MVVM._VM.ServiceWindows;
 using Kingmaker.UI.MVVM._VM.ServiceWindows.Inventory;
-using Kingmaker.UI.MVVM._VM.Vendor;
 using WOTRMultiplayer.Abstractions.GameInteraction;
 
 namespace WOTRMultiplayer.Services.GameInteraction

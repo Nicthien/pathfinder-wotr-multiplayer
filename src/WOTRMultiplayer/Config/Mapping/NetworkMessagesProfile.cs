@@ -257,9 +257,6 @@ namespace WOTRMultiplayer.Config.Mapping
             CreateMap<NetworkGlobalMapCommonPopup, Networking.Messages.Contracts.NetworkGlobalMapCommonPopup>()
                 .ReverseMap();
 
-            CreateMap<NetworkTacticalUnitUseAbilityCommand, Networking.Messages.Contracts.NetworkTacticalUnitUseAbilityCommand>()
-                .ReverseMap();
-
             CreateMap<NetworkTacticalUnitAttackCommand, Networking.Messages.Contracts.NetworkTacticalUnitAttackCommand>()
                 .ReverseMap();
 

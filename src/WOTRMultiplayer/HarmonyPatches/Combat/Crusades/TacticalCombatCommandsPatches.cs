@@ -11,7 +11,6 @@ using Kingmaker.UnitLogic.Commands.Base;
 using Microsoft.Extensions.Logging;
 using Pathfinding;
 using WOTRMultiplayer.Entities;
-using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
 using WOTRMultiplayer.Extensions;
 
@@ -63,18 +62,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
             {
                 switch (unitCommand)
                 {
-                    case TacticalCombatUnitUseAbility useAbility:
-                        // TotalDefense action is handled separately
-                        if (!string.Equals(useAbility.Ability.Blueprint.name, "ArmyTotalDefense", StringComparison.OrdinalIgnoreCase))
-                        {
-                            OnUseAbilityCommand(unit, useAbility);
-                        }
-                        break;
                     case TacticalCombatUnitAttack unitAttack:
                         OnUnitAttackCommand(unit, unitAttack);
                         break;
                     case UnitMoveTo unitMoveTo:
                         OnMoveToCommand(unit, unitMoveTo);
+                        break;
+                    case TacticalCombatUnitUseAbility useAbility: // everything is handled via regular NotifyAbilityUsed messages
                         break;
                     default:
                         Main.GetLogger<TacticalCombatCommandsPatches>().LogWarning("Unhandled unit command. UnitId={UnitId}, Type={Type}", unit, unitCommand?.GetType().Name);
@@ -86,19 +80,6 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
                 Main.GetLogger<TacticalCombatCommandsPatches>().LogError(ex, "Unable to handle tactical command. UnitId={UnitId}, Type={Type}", unit?.UniqueId, unitCommand?.GetType().Name);
                 throw;
             }
-        }
-
-        private static void OnUseAbilityCommand(UnitEntityData unit, TacticalCombatUnitUseAbility command)
-        {
-            var unitUseAbilityCommand = new NetworkTacticalUnitUseAbilityCommand
-            {
-                Ability = Main.Mapper.Map<NetworkAbility>(command.Ability),
-                InitiatorUnitId = unit.UniqueId,
-                Target = Main.Mapper.Map<NetworkTargetWrapper>(command.Target),
-                VectorPath = GetPath(command.ForcedPath)
-            };
-
-            Main.Multiplayer.OnTacticalCombatUnitUseAbilityCommand(unitUseAbilityCommand);
         }
 
         private static void OnUnitAttackCommand(UnitEntityData unit, TacticalCombatUnitAttack command)

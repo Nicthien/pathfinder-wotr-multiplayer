@@ -767,7 +767,10 @@ namespace WOTRMultiplayer.Services
             await CombatInteraction.UpdateArmyCombatUnitsAsync(units);
 
             Game.ArmyCombat.Turn.IsSyncRequired = false;
-            var confirmation = new ClientArmyCombatTurnSynchronized();
+            var confirmation = new ClientArmyCombatTurnSynchronized
+            {
+                TurnNumber = Game.ArmyCombat.Turn.Number
+            };
             Send(confirmation);
         }
 

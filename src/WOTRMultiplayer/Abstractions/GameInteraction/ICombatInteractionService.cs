@@ -43,8 +43,6 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         void RunTacticalUnitAttackCommand(NetworkTacticalUnitAttackCommand tacticalUnitAttackCommand);
 
-        void RunTacticalUnitUseAbilityCommand(NetworkTacticalUnitUseAbilityCommand tacticalUnitUseAbilityCommand);
-
         void RunTacticalUnitMoveToCommand(NetworkTacticalUnitMoveToCommand tacticalUnitMoveToCommand);
 
         void UseTacticalCombatTotalDefense();

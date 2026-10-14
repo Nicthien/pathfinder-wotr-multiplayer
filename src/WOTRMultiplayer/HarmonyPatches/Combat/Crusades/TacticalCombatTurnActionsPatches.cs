@@ -89,14 +89,14 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
         public static bool TacticalCombatController_HandleTotalDefensePressed_Prefix(TacticalCombatController __instance)
         {
             var turn = Game.Instance.TacticalCombat.Data.Turn;
-            var unit = turn.Unit;
+            var unit = turn?.Unit;
 
             if (!Main.Multiplayer.IsActive || unit == null || __instance.TurnController.TurnEnded || turn.StandardActionUsed)
             {
                 return true;
             }
 
-            var canContinue = Main.Multiplayer.OnTacticalCombatTotalDefenseUsed();
+            var canContinue = Main.Multiplayer.OnTacticalCombatTotalDefenseUsed(unit.UniqueId);
             return canContinue;
         }
 
@@ -110,7 +110,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
                 return true;
             }
 
-            var canContinue = Main.Multiplayer.OnTacticalCombatTurnPostponed();
+            var canContinue = Main.Multiplayer.OnTacticalCombatTurnPostponed(turn.Unit?.UniqueId);
             return canContinue;
         }
 
@@ -123,7 +123,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
                 return true;
             }
 
-            var canContinue = Main.Multiplayer.OnTacticalCombatTotalDefenseUsed();
+            var turn = Game.Instance.TacticalCombat.Data?.Turn;
+            var canContinue = Main.Multiplayer.OnTacticalCombatTotalDefenseUsed(turn?.Unit?.UniqueId);
             return canContinue;
         }
 
@@ -136,7 +137,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
                 return true;
             }
 
-            var canContinue = Main.Multiplayer.OnTacticalCombatTurnPostponed();
+            var turn = Game.Instance.TacticalCombat.Data?.Turn;
+            var canContinue = Main.Multiplayer.OnTacticalCombatTurnPostponed(turn.Unit?.UniqueId);
             return canContinue;
         }
 

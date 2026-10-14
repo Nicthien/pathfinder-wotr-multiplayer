@@ -346,45 +346,6 @@ namespace WOTRMultiplayer.Services.GameInteraction
             });
         }
 
-        public void RunTacticalUnitUseAbilityCommand(NetworkTacticalUnitUseAbilityCommand tacticalUnitUseAbilityCommand)
-        {
-            _mainThreadAccessor.Post(() =>
-            {
-                if (!TacticalCombatHelper.IsActive)
-                {
-                    _logger.LogWarning("Unable to run {command} due to inactive tactical combat. UnitId={UnitId}", nameof(NetworkTacticalUnitUseAbilityCommand), tacticalUnitUseAbilityCommand.InitiatorUnitId);
-                    return;
-                }
-
-                var unit = _gameStateLookupService.GetUnitEntity(tacticalUnitUseAbilityCommand.InitiatorUnitId);
-                if (unit == null)
-                {
-                    _logger.LogError("Unable to run {command} due to missing unit. UnitId={UnitId}", nameof(NetworkTacticalUnitUseAbilityCommand), tacticalUnitUseAbilityCommand.InitiatorUnitId);
-                    return;
-                }
-
-                var ability = _gameStateLookupService.FindAbility(unit, tacticalUnitUseAbilityCommand.Ability);
-                if (ability == null)
-                {
-                    _logger.LogError("Unable to run {command} due to missing ability. UnitId={UnitId}, AbilityId={AbilityId}", nameof(NetworkTacticalUnitUseAbilityCommand), tacticalUnitUseAbilityCommand.InitiatorUnitId, tacticalUnitUseAbilityCommand.Ability.Id);
-                    return;
-                }
-
-                var target = _gameStateLookupService.GetUnitEntity(tacticalUnitUseAbilityCommand.Target.UnitId);
-                var point = tacticalUnitUseAbilityCommand.Target.Point.ToUnityVector3();
-                var targetWrapper = new TargetWrapper(point, null, target);
-                var useAbilityCommand = new TacticalCombatUnitUseAbility(ability, targetWrapper)
-                {
-                    ForcedPath = CreateForcedPath(tacticalUnitUseAbilityCommand.VectorPath),
-                    ShouldSkipAnimation = Game.Instance.TacticalCombat.Data.Accelerated
-                };
-
-                EventBus.RaiseEvent<IClickActionHandler>(x => x.OnCastRequested(ability, target));
-                unit.Commands.Run(useAbilityCommand);
-                _logger.LogInformation("Command {command} has been executed. UnitId={UnitId}, AbilityId={AbilityId}, AbilityName={AbilityName}", nameof(NetworkTacticalUnitUseAbilityCommand), tacticalUnitUseAbilityCommand.InitiatorUnitId, tacticalUnitUseAbilityCommand.Ability.Id, tacticalUnitUseAbilityCommand.Ability.Name);
-            });
-        }
-
         public void RunTacticalUnitMoveToCommand(NetworkTacticalUnitMoveToCommand tacticalUnitMoveToCommand)
         {
             _mainThreadAccessor.Post(() =>
