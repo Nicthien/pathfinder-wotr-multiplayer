@@ -418,7 +418,6 @@ namespace WOTRMultiplayer.UI.Controllers
                     var featureRow = AdvancedControlsSectionItems.transform.Find(feature.Key.ToString());
                     if (featureRow == null)
                     {
-                        _logger.LogWarning("Unable to find UI row for specified feature. Feature={Feature}", feature.Key);
                         continue;
                     }
 
@@ -622,7 +621,7 @@ namespace WOTRMultiplayer.UI.Controllers
         {
             var options = networkPlayers
                 .Select(player => new PlayerDropdownOptionData(player))
-                .ToList<TMP_Dropdown.OptionData>();
+                .ToList();
 
             var indexes = networkPlayers
                 .Select((player, index) => new { player.Id, index })
@@ -630,27 +629,33 @@ namespace WOTRMultiplayer.UI.Controllers
 
             foreach (Transform item in container)
             {
-                var dropdown = dropdownResolver(item).Find(UIFactory.DropdownGameObjectName).GetComponent<TMP_Dropdown>();
-                var selectedPlayerId = GetSelectedPlayerId(item, dropdown);
-
-                RemoveAllDropdownListeners(dropdown);
-
-                dropdown.ClearOptions();
-                dropdown.AddOptions(options);
-
-                if (selectedPlayerId >= 0 && indexes.TryGetValue(selectedPlayerId, out var playerIndex))
-                {
-                    dropdown.SetValueWithoutNotify(playerIndex);
-                    dropdown.RefreshShownValue();
-                }
-
-                if (shouldBeDisabled)
-                {
-                    dropdown.interactable = false;
-                }
-
-                listener(dropdown);
+                var dropdown = dropdownResolver(item);
+                UpdatePlayerDropdown(dropdown, options, indexes, listener, shouldBeDisabled);
             }
+        }
+
+        private void UpdatePlayerDropdown(Transform characterContainer, List<PlayerDropdownOptionData> options, Dictionary<long, int> indexes, Action<TMP_Dropdown> listener, bool shouldBeDisabled)
+        {
+            var dropdown = characterContainer.Find(UIFactory.DropdownGameObjectName).GetComponent<TMP_Dropdown>();
+            var selectedPlayerId = GetSelectedPlayerId(characterContainer, dropdown);
+
+            RemoveAllDropdownListeners(dropdown);
+
+            dropdown.ClearOptions();
+            dropdown.AddOptions(options.Cast<TMP_Dropdown.OptionData>().ToList());
+
+            if (selectedPlayerId >= 0 && indexes.TryGetValue(selectedPlayerId, out var playerIndex))
+            {
+                dropdown.SetValueWithoutNotify(playerIndex);
+                dropdown.RefreshShownValue();
+            }
+
+            if (shouldBeDisabled)
+            {
+                dropdown.interactable = false;
+            }
+
+            listener(dropdown);
         }
 
         private long GetSelectedPlayerId(Transform item, TMP_Dropdown dropdown)
@@ -677,10 +682,28 @@ namespace WOTRMultiplayer.UI.Controllers
 
         private void UpdateCharacter(int characterIndex, NetworkCharacter character, Sprite portraitSprite, bool isDropdownInteractable)
         {
-            var characterContainer = CharactersInfoContainer.transform.GetChild(characterIndex);
+            var characterContainer = CharactersInfoContainer.transform.childCount > characterIndex ?
+                CharactersInfoContainer.transform.GetChild(characterIndex)
+                : null;
+
             if (characterContainer == null)
             {
+                // update runs in an ordered manner from 0 to n characters, so container for "previous" index has already been created if needed
                 characterContainer = _uiFactory.CreateAdditionalCharacterContainer(CharactersInfoContainer.transform).transform;
+                var firstContainerPlayers = CharactersInfoContainer.transform.GetChild(0).Find(CharacterOwnerObjectName).Find(UIFactory.DropdownGameObjectName).GetComponent<TMP_Dropdown>().options
+                    .Cast<PlayerDropdownOptionData>()
+                    .ToList();
+                var indexes = firstContainerPlayers
+                    .Select((option, index) => new { option.Player.Id, index })
+                    .ToDictionary(x => x.Id, x => x.index);
+
+                UpdatePlayerDropdown(
+                    characterContainer.Find(CharacterOwnerObjectName),
+                    firstContainerPlayers,
+                    indexes,
+                    ListenForOwnerDropdownChange,
+                    shouldBeDisabled: !isDropdownInteractable);
+
                 _logger.LogInformation("Extra character container has been created. Index={Index}", characterIndex);
             }
 
@@ -691,6 +714,7 @@ namespace WOTRMultiplayer.UI.Controllers
             var characterOwner = characterContainer.Find(CharacterOwnerObjectName);
             characterOwner.Find(UIFactory.DropdownGameObjectName).GetComponent<TMP_Dropdown>().interactable = isDropdownInteractable && portraitSprite != null;
             characterOwner.GetComponent<CharacterDataBehaviour>().Character = character;
+            characterContainer.gameObject.SetActive(true);
             _logger.LogInformation("Updated character portrait. Index={Index}, CharacterName={CharacterName}, CharacterId={CharacterId}, SpriteName={SpriteName}", characterIndex, character?.Name, character?.UnitId, portraitSprite?.name);
         }
 

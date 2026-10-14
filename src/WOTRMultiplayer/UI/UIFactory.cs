@@ -823,7 +823,7 @@ namespace WOTRMultiplayer.UI
         {
             var charactersSectionObject = CreateDefaultGameObject(parent);
             var charactersSectionRect = charactersSectionObject.GetComponent<RectTransform>();
-            charactersSectionRect.pivot = new Vector2(0.5f, 0f); // bottom (almost) center
+            charactersSectionRect.pivot = new Vector2(0.5f, 0f);
             charactersSectionObject.name = LobbyWindowController.CharactersSectionObjectName;
             charactersSectionObject.AddComponent<VerticalLayoutGroup>();
             var charactersSectionSizeFitter = charactersSectionObject.AddComponent<ContentSizeFitter>();
@@ -856,7 +856,6 @@ namespace WOTRMultiplayer.UI
             var scrollRect = charactersSectionContentObject.AddComponent<ScrollRect>();
             scrollRect.vertical = false;
             scrollRect.viewport = scrollRectTransform;
-            scrollRect.movementType = ScrollRect.MovementType.Clamped;
             charactersSectionContentObject.AddComponent<RectMask2D>();
 
             var charactersContentObject = CreateDefaultGameObject(charactersSectionContentObject.transform);
