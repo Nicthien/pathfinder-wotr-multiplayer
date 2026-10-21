@@ -1,8 +1,16 @@
 # WotR Multiplayer RTwP
 
+**Français** · [English](README.en.md)
+
 Mod multijoueur expérimental pour *Pathfinder: Wrath of the Righteous*, avec
 prise en charge du combat en temps réel avec pause (RTwP), du tour par tour et
 de leur synchronisation entre plusieurs joueurs.
+
+[![Soutenir sur Ko-fi](https://img.shields.io/badge/Soutenir-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/nthstudio)
+
+Cette variante est développée sur mon temps libre. Si elle vous est utile et
+que vous souhaitez soutenir son développement, vous pouvez m'offrir un
+[Ko-fi](https://ko-fi.com/nthstudio). Merci !
 
 ## Origine du projet et crédits
 
