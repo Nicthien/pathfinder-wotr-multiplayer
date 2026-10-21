@@ -17,6 +17,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
     public class CombatControllerPatches
     {
         [HarmonyPatch(typeof(CombatController), nameof(CombatController.HandleCombatStart))]
+        [HarmonyPrefix]
+        public static bool CombatController_HandleCombatStart_Prefix()
+            => !Services.CombatSaving.CombatSaveLoadState.Active;
+
+        [HarmonyPatch(typeof(CombatController), nameof(CombatController.HandleCombatStart))]
         [HarmonyTranspiler]
         public static IEnumerable<CodeInstruction> CombatController_HandleCombatStart_Transpiler(IEnumerable<CodeInstruction> instructions)
         {
@@ -43,20 +48,23 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPatch(typeof(CombatController), nameof(CombatController.HandleDelayTurn))]
         [HarmonyPrefix]
-        public static void CombatController_HandleDelayTurn_Prefix(UnitEntityData unit, UnitEntityData targetUnit)
+        public static bool CombatController_HandleDelayTurn_Prefix(UnitEntityData unit, UnitEntityData targetUnit)
         {
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return false;
             if (!Main.Multiplayer.IsActive)
             {
-                return;
+                return true;
             }
 
             Main.Multiplayer.OnHandleDelayCombatTurn(unit.UniqueId, targetUnit.UniqueId);
+            return true;
         }
 
         [HarmonyPatch(typeof(CombatController), nameof(CombatController.Tick))]
         [HarmonyPrefix]
         public static bool CombatController_Tick_Prefix()
         {
+            if (Services.CombatSaving.CombatSavePauseLease.HoldsWorld(Game.Instance)) return false;
             if (!Main.Multiplayer.IsActive)
             {
                 return true;
@@ -70,6 +78,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool CombatController_StartTurn_Prefix(CombatController __instance, UnitEntityData unit)
         {
+            // Do not replace the saved turn with the ordinary barrier's dummy turn.
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return false;
             if (!Main.Multiplayer.IsActive)
             {
                 return true;

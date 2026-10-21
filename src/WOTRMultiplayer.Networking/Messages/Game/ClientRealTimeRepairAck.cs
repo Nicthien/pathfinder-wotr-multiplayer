@@ -30,5 +30,7 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(6)]
         [LogMe]
         public bool TemporalMismatch { get; set; }
+        [ProtoMember(7)] public string SessionId { get; set; }
+        [ProtoMember(8)] public int LoadedSaveSeed { get; set; }
     }
 }

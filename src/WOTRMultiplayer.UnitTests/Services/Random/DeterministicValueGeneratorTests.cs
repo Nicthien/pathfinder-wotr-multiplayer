@@ -188,6 +188,45 @@ namespace WOTRMultiplayer.UnitTests.Services.Random
         }
 
         [Test]
+        public void ReuseLatestAbilityDataId_ReturnsLastIdWithoutAdvancingCheckpoint()
+        {
+            var gameId = Guid.NewGuid().ToString();
+            const string identifier = "ability";
+            A.CallTo(() => _hashService.Murmur3(IdType.AbilityData + identifier)).Returns(789);
+            A.CallTo(() => _gameInteractionService.GetEntity(A<string>.Ignored)).Returns(null);
+            _valueGenerator.GenerateUniqueId(IdType.AbilityData, gameId, identifier);
+            var expected = _valueGenerator.GenerateUniqueId(IdType.AbilityData, gameId, identifier);
+            var before = _valueGenerator.CaptureCheckpoint();
+
+            var first = _valueGenerator.ReuseLatestAbilityDataId(gameId, identifier);
+            var second = _valueGenerator.ReuseLatestAbilityDataId(gameId, identifier);
+
+            Assert.That(first, Is.EqualTo(expected));
+            Assert.That(second, Is.EqualTo(expected));
+            Assert.That(_valueGenerator.CaptureCheckpoint().EntityCounters,
+                Is.EqualTo(before.EntityCounters));
+            A.CallTo(() => _gameInteractionService.GetEntity(A<string>.Ignored))
+                .MustHaveHappened(2, Times.Exactly);
+        }
+
+        [Test]
+        public void ReuseLatestAbilityDataId_UnknownIdentifier_IsRejectedWithoutCreatingCounter()
+        {
+            var gameId = Guid.NewGuid().ToString();
+            const string identifier = "new-ability";
+            A.CallTo(() => _hashService.Murmur3(IdType.AbilityData + identifier)).Returns(456);
+            var before = _valueGenerator.CaptureCheckpoint();
+
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                _valueGenerator.ReuseLatestAbilityDataId(gameId, identifier));
+
+            Assert.That(error.Message, Is.EqualTo("combat-save-ability-id-not-established"));
+            Assert.That(_valueGenerator.CaptureCheckpoint().EntityCounters,
+                Is.EqualTo(before.EntityCounters));
+            A.CallTo(() => _gameInteractionService.GetEntity(A<string>.Ignored)).MustNotHaveHappened();
+        }
+
+        [Test]
         public void CreateGuid_SameSeed_GeneratesSameSequence()
         {
             // Arrange

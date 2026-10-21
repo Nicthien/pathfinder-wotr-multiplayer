@@ -12,7 +12,7 @@ using WOTRMultiplayer.Extensions;
 
 namespace WOTRMultiplayer.Services.Random
 {
-    public class DeterministicValueGenerator : IValueGenerator
+    public partial class DeterministicValueGenerator : IValueGenerator
     {
         private readonly ConcurrentDictionary<string, IdCounters> _entityCounters = new();
         private readonly ConcurrentDictionary<int, Seed> _seedGenerators = new();
@@ -152,6 +152,9 @@ namespace WOTRMultiplayer.Services.Random
                 while (_gameInteractionService.GetEntity(id) != null);
 
                 counter.NameIdentifiers.AddOrUpdate(hashed, nameCounter, (key, existing) => nameCounter);
+                if (CombatSaving.CombatSaveActivation.Enabled && CombatSaving.CombatSaveCaptureScope.Active)
+                    _logger.LogWarning("[CombatSave] Identifier generated while held. Type={Type}, Identifier={Identifier}, Id={Id}, Capture={Capture}, Stack={Stack}",
+                        idType, identifier, id, CombatSaving.CombatSaveCaptureScope.Active, Environment.StackTrace);
                 return id;
             }
             catch (System.Exception ex)
@@ -159,6 +162,26 @@ namespace WOTRMultiplayer.Services.Random
                 _logger.LogError(ex, "Unable to generate unique id. IdType={IdType}, Identifier={Identifier}", idType, identifier);
                 throw;
             }
+        }
+
+        // AbilityData is a transient value object. The action bar can rebuild
+        // the same logical ability several times per rendered frame even while
+        // the combat world is frozen for a save. Reuse is intentionally
+        // restricted to an identifier that was generated before the barrier:
+        // a genuinely new logical ability must fail the unchanged-world check
+        // instead of being silently admitted into the save.
+        internal string ReuseLatestAbilityDataId(string gameId, string identifier)
+        {
+            if (string.IsNullOrWhiteSpace(gameId) || string.IsNullOrWhiteSpace(identifier))
+                throw new InvalidOperationException("combat-save-ability-id-invalid");
+            var fullIdentifier = IdType.AbilityData + identifier;
+            var hashed = _hashService.Murmur3(fullIdentifier).ToString();
+            if (!_entityCounters.TryGetValue(gameId, out var counters)
+                || !counters.NameIdentifiers.TryGetValue(hashed, out var value) || value == 0)
+                throw new InvalidOperationException("combat-save-ability-id-not-established");
+            var prefix = IdType.AbilityData.GetAttributeOfType<DescriptionAttribute>()?.Description
+                ?? IdType.AbilityData.ToString();
+            return $"{prefix}_{hashed}_{value}";
         }
     }
 }

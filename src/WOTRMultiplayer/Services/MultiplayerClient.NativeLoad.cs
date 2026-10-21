@@ -10,6 +10,7 @@ namespace WOTRMultiplayer.Services
 {
     public partial class MultiplayerClient
     {
+        internal Func<RealTimeMemorySaver, string, string, Func<bool>, Task<RealTimeNativeWorldLoadResult>> NativeCheckpointLoad;
         private object _nativeReferenceRestorationOwner;
 
         // Data/hash verification only. A successful result is deliberately not
@@ -75,7 +76,7 @@ namespace WOTRMultiplayer.Services
         // Reconstruction coordinator owns the enclosing barrier. A returned
         // receipt is not a native graph verification, ACK/Commit or resume.
         internal async Task<RealTimeNativeWorldLoadResult> LoadTransferredNativeCheckpointAsync(
-            NotifyRealTimeNativeCheckpoint expected, Func<bool> barrierOwned)
+            NotifyRealTimeNativeCheckpoint expected, Func<bool> barrierOwned, RealTimeNativeLoadOperation operation = null)
         {
             if (barrierOwned == null) throw new ArgumentNullException(nameof(barrierOwned));
             if (!RealTimeNativeCheckpointLimits.IsManifest(expected))
@@ -88,8 +89,10 @@ namespace WOTRMultiplayer.Services
                     return barrierOwned() && IsCurrentNativeReceive() && !_nativeReceiveFailed
                         && _nativeReceivedSource != null && _nativeReceiver?.MatchesManifest(manifest) == true;
             }
+            if (NativeCheckpointLoad != null)
+                return await NativeCheckpointLoad(source, manifest.SessionId, manifest.CheckpointId, Authorized);
             return await RealTimeNativeClientLoad.LoadAsync(_mainThreadAccessor, this, CombatInteraction, source,
-                manifest.SessionId, manifest.CheckpointId, Authorized);
+                manifest.SessionId, manifest.CheckpointId, Authorized, operation == null ? null : operation.AttachLease);
         }
     }
 }

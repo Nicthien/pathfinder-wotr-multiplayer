@@ -28,6 +28,8 @@ namespace WOTRMultiplayer.Abstractions
         System.Threading.Tasks.Task<bool> RequestRealTimeCombatModeAsync(CombatMode mode);
 
         System.Threading.Tasks.Task BeginRealTimeRepairAsync();
+        System.Threading.Tasks.Task<bool> ForceCombatSynchronizationAsync();
+        System.Threading.Tasks.Task<string> SaveCombatAsync();
 
         bool RequestLocalRealTimePause(bool wantsPause);
 

@@ -50,6 +50,7 @@ namespace WOTRMultiplayer.Services
         private readonly IMainThreadAccessor _mainThreadAccessor;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
         private readonly SemaphoreSlim _turnEndSynchronizationGate = new(1, 1);
+        private List<string> _excludedCombatUnits = new();
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
         private readonly RealTimeEntityIdMailbox _realTimeEntityIds = new();
         private const int RealTimeRuleRollTimeoutMs = 2500;
@@ -257,6 +258,9 @@ namespace WOTRMultiplayer.Services
 
         public void Reset()
         {
+            ResetCombatSaveState();
+            _excludedCombatUnits.Clear();
+            ResetSessionRejoin();
             ResetNativeCheckpointReceive();
             _presentationSnapshotBarrier = null;
             _presentationInbox = new RealTimePresentationInbox();
@@ -394,9 +398,33 @@ namespace WOTRMultiplayer.Services
         public override void OnAreaLoaded()
         {
             base.OnAreaLoaded();
+            if (PendingCombatSave != null)
+            {
+                try { RestoreCombatSaveAfterAreaLoaded(); }
+                catch (Exception error) { _turnEndSynchronizationFailed = true; Logger.LogError(error, "[CombatSave] Client restore failed"); }
+                return;
+            }
+            if (CompleteSessionRejoinLoad()) return;
 
-            var message = new ClientAreaLoaded();
-            Send(message);
+            _loadedAreaSession = Game;
+            _loadedArea = new ClientAreaLoaded { SessionId = Game.Id,
+                LoadedSaveSeed = Game.LoadedSaveSeed, AreaId = Game.CurrentArea.Id };
+            _nextLoadedAreaAck = DateTime.MinValue;
+            RetryLoadedAreaAck();
+        }
+
+        private NetworkGame _loadedAreaSession;
+        private ClientAreaLoaded _loadedArea;
+        private DateTime _nextLoadedAreaAck;
+        private void RetryLoadedAreaAck()
+        {
+            if (!IsActive || _loadedArea == null || !ReferenceEquals(Game, _loadedAreaSession)
+                || Game.Stage != NetworkLobbyStage.Playing || _rejoinHeader != null && !_rejoinResumed
+                || Game.LoadedSaveSeed != _loadedArea.LoadedSaveSeed || Game.CurrentArea?.Id != _loadedArea.AreaId
+                || Game.ForcedPause?.Reason != NetworkForcedPauseReason.AreaLoading
+                || DateTime.UtcNow < _nextLoadedAreaAck) return;
+            _nextLoadedAreaAck = DateTime.UtcNow.AddSeconds(2);
+            Send(_loadedArea);
         }
 
         public void OnAfterCueShow(NetworkDialog networkDialog, string cueName, bool hasSystemAnswer)
@@ -409,6 +437,10 @@ namespace WOTRMultiplayer.Services
 
             Game.DialogState.CurrentCueName = cueName;
             Game.DialogState.Answer = null;
+            Game.DialogState.HasSystemAnswer = hasSystemAnswer;
+            Game.DialogState.VoteRoundId = null;
+            Game.DialogState.IsSelectingAnswer = false;
+            Game.DialogState.VoteCommitted = false;
 
             var message = new ClientDialogCueWitnessed
             {
@@ -418,7 +450,7 @@ namespace WOTRMultiplayer.Services
             Send(message);
         }
 
-        public bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId)
+        public bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId, bool isCharacterSelection = false)
         {
             if (Game.DialogState == null)
             {
@@ -426,22 +458,36 @@ namespace WOTRMultiplayer.Services
                 return false;
             }
 
-            if (Game.DialogState.Answer != null && string.Equals(answerName, Game.DialogState.Answer.AnswerName, StringComparison.OrdinalIgnoreCase))
+            if (Game.DialogState.Answer != null && networkDialog.Id == Game.DialogState.Dialog.Id
+                && cueName == Game.DialogState.Answer.CueName
+                && string.Equals(answerName, Game.DialogState.Answer.AnswerName, StringComparison.OrdinalIgnoreCase))
             {
                 Logger.LogInformation("Proceeding with dialog answer without extra steps. DialogId={DialogId}, DialogName={DialogName}, CueName={CueName}, AnswerName={AnswerName}", Game.DialogState.Dialog.Id, Game.DialogState.Dialog.Name, cueName, answerName);
                 Game.DialogState.IsSelectingAnswer = false;
+                Game.DialogState.Answer = null;
+                Game.DialogState.VoteCommitted = true;
                 return true;
             }
+
+            if (Game.DialogState.IsSelectingAnswer || Game.DialogState.VoteCommitted) return false;
 
             var message = new ClientDialogCueAnswerSuggested
             {
                 Dialog = Mapper.Map<Networking.Messages.Contracts.NetworkDialog>(networkDialog),
                 CueName = cueName,
-                AnswerName = answerName
+                AnswerName = answerName,
+                VoteRoundId = Game.DialogState.VoteRoundId
             };
+            if (!Game.DialogState.HasSystemAnswer && string.IsNullOrEmpty(message.VoteRoundId))
+            {
+                Logger.LogDebug("Dialog vote waiting for host round identity. Cue={Cue}", cueName);
+                return false;
+            }
             Send(message);
 
-            Game.DialogState.IsSelectingAnswer = true;
+            Logger.LogInformation("Dialog vote sent. Round={Round}, Cue={Cue}, Answer={Answer}", message.VoteRoundId, cueName, answerName);
+            if (!Game.DialogState.HasSystemAnswer && RegisterLocalDialogVote(Game.DialogState, cueName, answerName))
+                ShowRepeatedDialogVoteReminder(Game.DialogState);
             return false;
         }
 
@@ -592,9 +638,15 @@ namespace WOTRMultiplayer.Services
 
         public bool OnRequestLevelingUI(string unitId, NetworkLevelingType networkCharGenScreenType)
         {
+            if (!CanControlLeveling(Game.LocalPlayerId, unitId, networkCharGenScreenType))
+            {
+                Logger.LogInformation("[LevelingOwnerUI] Request ignored: character belongs to another connected player. UnitId={UnitId}", unitId);
+                return false;
+            }
             if (Game.Leveling != null)
             {
-                return true;
+                return string.Equals(Game.Leveling.UnitId, unitId, StringComparison.OrdinalIgnoreCase)
+                    && Game.Leveling.Type == networkCharGenScreenType;
             }
 
             var message = new ClientCharacterLevelingRequested
@@ -815,6 +867,9 @@ namespace WOTRMultiplayer.Services
 
             _networkClient
                // lobby
+               .On<NotifySessionRejoin>(OnSessionRejoin)
+               .On<NotifyCombatSave>(OnCombatSave)
+               .On<NotifySessionRejoinChunk>(OnSessionRejoinChunk)
                .On<GameServerConnectionSucceeded>(OnGameServerConnectionSucceeded)
                .On<NotifyLobbyPlayersChanged>(OnNotifyLobbyPlayersChanged)
                .On<NotifyLobbyCharactersChanged>(OnNotifyLobbyCharactersChanged)
@@ -1086,6 +1141,8 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyCombatUnitsExcluded(long receivedFrom, NotifyCombatUnitsExcluded message)
         {
+            if (receivedFrom != NetworkConstants.HostPlayerId || Game?.Combat == null) return;
+            _excludedCombatUnits = message.Units.ToList();
             await CombatInteraction.ExcludeUnitsFromCombatAsync(message.Units);
             var confirmation = new NotifyCombatUnitsExclusionConfirmed();
             Send(confirmation);
@@ -1556,6 +1613,8 @@ namespace WOTRMultiplayer.Services
 
         public void TickRealTimePresentation()
         {
+            RetryLoadedAreaAck();
+            TickSessionRejoin();
             TickNativeCheckpointReceive();
             if (WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease.SuppressesLifecycle(this)) return;
             var active = RealTimePresentationRuntime.Enabled && IsRealTimeCombatActive
@@ -1795,6 +1854,7 @@ namespace WOTRMultiplayer.Services
         private void OnNotifyRealTimeCombatPreference(long receivedFrom, NotifyRealTimeCombatPreference message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || Game?.RealTimeCombat == null || message == null
+                || message.SessionId != Game.Id || message.LoadedSaveSeed != Game.LoadedSaveSeed
                 || message.Sequence <= Game.RealTimeCombat.PreferenceSequence
                 || !Enum.IsDefined(typeof(CombatMode), message.PreferredMode)
                 || !Enum.IsDefined(typeof(PausePolicy), message.PausePolicy))
@@ -1805,6 +1865,7 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.PreferenceSequence = message.Sequence;
             Game.RealTimeCombat.PreferredMode = (CombatMode)message.PreferredMode;
             Game.RealTimeCombat.PausePolicy = (PausePolicy)message.PausePolicy;
+            _ = ApplyOutsideCombatPreferenceAsync(() => IsActive);
         }
 
         private async void OnNotifyRealTimeModeTransition(long receivedFrom, NotifyRealTimeModeTransition message)
@@ -1914,6 +1975,7 @@ namespace WOTRMultiplayer.Services
 
                 if (stage == RealTimeModeTransitionStage.Abort)
                 {
+                    if (state.RecoveryStatus == "stopped") return;
                     if (message.State == null)
                     {
                         return;
@@ -1994,7 +2056,8 @@ namespace WOTRMultiplayer.Services
         {
             var expected = Mapper.Map<NetworkCombatState>(snapshot);
             var appliedState = await CombatInteraction.TryApplyAndReadRealTimeCombatStateAsync(expected,
-                () => IsCurrentRealTimeMessage(session, state, epoch) && state.Phase == phase);
+                () => IsCurrentRealTimeMessage(session, state, epoch) && state.Phase == phase,
+                reconcileTurnBasedBuffs: state.PreviousMode == CombatMode.TurnBased);
             if (appliedState == null)
                 return null;
             var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(expected, appliedState);
@@ -2061,9 +2124,27 @@ namespace WOTRMultiplayer.Services
                 session = Game;
                 state = session.RealTimeCombat;
                 var stage = (RealTimeRepairStage)message.Stage;
+                if (RealTimePresentationRuntime.Enabled
+                    && (message.SessionId != session.Id || message.LoadedSaveSeed != session.LoadedSaveSeed)) return;
                 // The native barrier owns this epoch. A queued legacy Apply or
                 // Resume must not bypass reconstruction/verification/Commit.
-                if (_nativeReceivePrepare?.Epoch == message.Epoch && IsCurrentNativeReceive()) return;
+                if (stage == RealTimeRepairStage.Stopped && message.Epoch == state.Epoch)
+                {
+                    state.RecoveryStatus = "stopped";
+                    state.RecoveryFailure = message.Reason?.Length <= 160 ? message.Reason : "recovery-failed";
+                    state.Phase = CombatSynchronizationPhase.Repairing;
+                    await GameInteraction.SetPauseAsync(true);
+                    return;
+                }
+                if (state.RecoveryStatus == "stopped"
+                    && (stage != RealTimeRepairStage.Prepare || message.Epoch <= state.Epoch)) return;
+                if (_nativeReceivePrepare?.Epoch == message.Epoch && IsCurrentNativeReceive())
+                {
+                    if (stage != RealTimeRepairStage.Resume || !_nativeCommitted || _nativeReceiveFailed
+                        || message.Mode != (int)CombatMode.RealTimeWithPause
+                        || message.CanonicalStateHash != _nativeReferenceVerifiedHash) return;
+                    ResetNativeCheckpointReceive();
+                }
                 if (stage == RealTimeRepairStage.Prepare)
                 {
                     if (message.Epoch == state.Epoch
@@ -2080,6 +2161,7 @@ namespace WOTRMultiplayer.Services
                         return;
                     }
                     state.Epoch = message.Epoch;
+                    state.RecoveryStatus = "preparing"; state.RecoveryFailure = null;
                     state.LastAuthoritativeSequence = 0;
                     _localCriticalFaultState = null;
                     ResetRealTimeAIChoices(message.Epoch);
@@ -2172,6 +2254,14 @@ namespace WOTRMultiplayer.Services
                     state.Mode = (CombatMode)message.Mode;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     state.Phase = CombatSynchronizationPhase.Stable;
+                    state.RecoveryStatus = "resumed"; state.RecoveryFailure = null;
+                    _disconnectedDuringRealTimeCombat = false;
+                    if (_rejoinLoaded && !_rejoinFailed && !_rejoinResumed)
+                    {
+                        _rejoinResumed = true; SessionRejoinRuntime.ClientOwner = null;
+                        SessionRejoinRuntime.ClientLoadPath = null; Game.ForcedPause = null;
+                        SessionRejoinRuntime.ClientSaveInfo = null;
+                    }
                     if (state.Mode == CombatMode.TurnBased)
                     {
                         _disconnectedDuringRealTimeCombat = false;
@@ -2209,6 +2299,7 @@ namespace WOTRMultiplayer.Services
         {
             Send(new ClientRealTimeRepairAck
             {
+                SessionId = Game.Id, LoadedSaveSeed = Game.LoadedSaveSeed,
                 Epoch = message.Epoch,
                 Stage = message.Stage,
                 PlayerId = Game.LocalPlayerId,
@@ -2371,11 +2462,17 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyGlobalMapCommonPopupShown(long receivedFrom, NotifyGlobalMapCommonPopupShown message)
         {
+            if (!GlobalMapPresentationScope.Matches(message.Scope))
+            {
+                Logger.LogWarning("[MapEvent] Old popup ignored. Scope={Scope}", message.Scope);
+                return;
+            }
             AddPlayerToTracker(Game.PlayersInGlobalMapCommonPopup, message.PlayerId);
 
             var popup = Mapper.Map<NetworkGlobalMapCommonPopup>(message.Popup);
 
             var isShown = await GlobalMapInteraction.ShowCommonPopupAsync(popup);
+            if (!GlobalMapPresentationScope.Matches(message.Scope)) return;
             if (isShown)
             {
                 OnGlobalMapCommonPopupShown(popup);
@@ -2787,9 +2884,14 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyGlobalMapEncounterRolled(long receivedFrom, NotifyGlobalMapEncounterRolled message)
         {
+            if (!GlobalMapPresentationScope.Matches(message.Scope))
+            {
+                Logger.LogWarning("[MapEvent] Old encounter ignored. EventId={EventId}", message.EventId);
+                return;
+            }
             var encounter = Mapper.Map<NetworkGlobalMapEncounter>(message.Encounter);
 
-            GlobalMapInteraction.RollEncounter(encounter);
+            GlobalMapInteraction.RollEncounter(encounter, message.EventId);
         }
 
         private void OnNotifyGlobalMapEncounterAvoided(long receivedFrom, NotifyGlobalMapEncounterAvoided globalMapEncounterAvoided)
@@ -2808,6 +2910,7 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyGlobalMapIngredientCollectionAccepted(long receivedFrom, NotifyGlobalMapCommonPopupAccepted globalMapCommonPopupAccepted)
         {
+            if (!GlobalMapPresentationScope.Matches(globalMapCommonPopupAccepted.Scope)) return;
             var popup = Mapper.Map<NetworkGlobalMapCommonPopup>(globalMapCommonPopupAccepted.Popup);
             GlobalMapInteraction.AcceptCommonPopup(popup);
 
@@ -2912,15 +3015,31 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyInvalidCombatTurnStarted(long playerId, NotifyInvalidCombatTurnStarted message)
         {
-            PlayerNotification.AddCombatText(WellKnownKeys.GameNotifications.Combat.Turn.ClientOrderDesync.Key, CombatTextSeverity.Debug, new UnitLogParameter(message.UnitId));
-            ResetCombatTurn();
-            CombatInteraction.StartTurnBasedCombatTurn(message.UnitId, () =>
+            var session = Game; var combat = Game?.Combat;
+            bool Current() => playerId == NetworkConstants.HostPlayerId && IsActive
+                && ReferenceEquals(Game, session) && ReferenceEquals(Game?.Combat, combat)
+                && combat?.Stage == NetworkCombatStage.Running
+                && Game.Id == message.SessionId && Game.LoadedSaveSeed == message.LoadedSaveSeed
+                && combat.Seed == message.CombatSeed && combat.Round == message.Round
+                && Game.RealTimeCombat.Mode == CombatMode.TurnBased
+                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                && (combat.Turn == null || combat.Turn.Stage == NetworkCombatTurnStage.Starting);
+            if (!Current()) return;
+            _mainThreadAccessor.Post(() =>
             {
-                var invalidTurnMessage = new ClientInvalidUnitTurnStartRequested
+                if (!Current()) return;
+                if (combat.Turn?.UnitId == message.UnitId)
                 {
-                    UnitId = message.UnitId
-                };
-                Send(invalidTurnMessage);
+                    // The first acknowledgement may have raced the host barrier.
+                    OnLocalPlayerTurnStart();
+                    return;
+                }
+                Logger.LogWarning("[TurnRecovery] Initializing host-confirmed turn. Unit={Unit}, Round={Round}", message.UnitId, message.Round);
+                ResetCombatTurn();
+                CombatInteraction.StartTurnBasedCombatTurn(message.UnitId, () =>
+                {
+                    if (Current()) Send(new ClientInvalidUnitTurnStartRequested { UnitId = message.UnitId });
+                }, Current);
             });
         }
 
@@ -2970,18 +3089,35 @@ namespace WOTRMultiplayer.Services
             GameInteraction.ApplyStealthPerceptionCheck(check);
         }
 
+        private NetworkCombatTurn _startSyncAppliedTurn, _startSyncInFlightTurn, _startSyncFailedTurn;
         private async void OnNotifyCombatTurnStartSynchronizationRequired(long playerId, NotifyCombatTurnStartSynchronizationRequired message)
         {
+            var session = Game; var combat = Game?.Combat; var turn = combat?.Turn;
+            bool Current() => IsActive && ReferenceEquals(Game, session) && ReferenceEquals(Game?.Combat, combat)
+                && turn != null && ReferenceEquals(combat?.Turn, turn) && playerId == NetworkConstants.HostPlayerId
+                && message.SessionId == Game.Id && message.LoadedSaveSeed == Game.LoadedSaveSeed
+                && message.CombatSeed == combat.Seed && message.Round == combat.Round && message.UnitId == turn.UnitId;
+            if (!Current()) return;
+            if (ReferenceEquals(_startSyncAppliedTurn, turn))
+            {
+                Send(new ClientCombatTurnStartSynchronized { UnitId = turn.UnitId });
+                return;
+            }
+            // The client stays in Initialization after announcing its local turn;
+            // Starting is a host-side transition, not a message sent to the client.
+            if ((turn.Stage != NetworkCombatTurnStage.Initialization && turn.Stage != NetworkCombatTurnStage.Starting)
+                || ReferenceEquals(_startSyncInFlightTurn, turn)
+                || ReferenceEquals(_startSyncFailedTurn, turn)) return;
+            _startSyncInFlightTurn = turn;
             try
             {
-                await WaitWhileTrue(() => Game.Combat?.Turn == null, "Turn has not been initialized yet");
-
                 var combatState = Mapper.Map<NetworkCombatState>(message.CombatState);
                 var areaEffects = Mapper.Map<List<NetworkAreaEffect>>(message.TriggeredAreaEffects);
                 Game.Combat.TriggeredAreaEffects.AddRange(areaEffects);
 
                 await CombatInteraction.UpdateCombatStateAsync(combatState, areaEffects, false);
-
+                if (!Current()) return;
+                _startSyncAppliedTurn = turn;
                 ValueGenerator.ResetSeededGenerators(Random.IdentifierLifetime.CombatTurn);
 
                 var confirmationMessage = new ClientCombatTurnStartSynchronized { UnitId = Game.Combat.Turn.UnitId };
@@ -2989,9 +3125,10 @@ namespace WOTRMultiplayer.Services
             }
             catch (Exception ex)
             {
+                _startSyncFailedTurn = turn;
                 Logger.LogError(ex, "Unable to sync combat turn");
-                throw;
             }
+            finally { if (ReferenceEquals(_startSyncInFlightTurn, turn)) _startSyncInFlightTurn = null; }
         }
 
         private async void OnNotifyCombatTurnStarted(long playerId, NotifyCombatTurnStarted message)
@@ -3032,12 +3169,22 @@ namespace WOTRMultiplayer.Services
 
         private async void OnNotifyCombatInitializationRequired(long playerId, NotifyCombatInitializationRequired message)
         {
+            if (playerId != NetworkConstants.HostPlayerId) return;
             await WaitWhileTrue(() => Game.Combat == null || Game.CurrentArea == null || Game.CurrentArea.Seed == 0, "Combat has not been started on client yet. Waiting until start");
 
             Game.Combat.Seed = message.CombatSeed;
             Logger.LogInformation("Combat seed has been configured. Seed={Seed}", Game.Combat.Seed);
 
             var combatState = Mapper.Map<NetworkCombatState>(message.State);
+            var initializationSession = Game;
+            var initializationCombat = Game.Combat;
+            var initializationSave = Game.LoadedSaveSeed;
+            var excluded = _excludedCombatUnits.ToList();
+            _excludedCombatUnits.Clear();
+            bool StillInitializing() => IsActive && ReferenceEquals(Game, initializationSession)
+                && ReferenceEquals(Game.Combat, initializationCombat) && Game.LoadedSaveSeed == initializationSave;
+            await CombatInteraction.RetireExcludedDuplicatesAsync(excluded, combatState.Units, StillInitializing);
+            if (!StillInitializing()) return;
             var areaEffects = Mapper.Map<List<NetworkAreaEffect>>(message.TriggeredAreaEffects);
             Game.Combat.TriggeredAreaEffects.AddRange(areaEffects);
 
@@ -3082,6 +3229,15 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyDialogCueAnswerSelected(long playerId, NotifyDialogCueAnswerSelected message)
         {
+            if (Game.DialogState == null || message.Dialog?.Id != Game.DialogState.Dialog.Id
+                || message.CueName != Game.DialogState.CurrentCueName
+                || message.VoteRoundId != Game.DialogState.VoteRoundId || Game.DialogState.IsSelectingAnswer
+                || Game.DialogState.VoteCommitted)
+            {
+                Logger.LogWarning("Ignoring stale or duplicate selected dialog answer. Round={Round}", message.VoteRoundId);
+                return;
+            }
+            Game.DialogState.IsSelectingAnswer = true;
             Game.DialogState.Answer = new NetworkDialogAnswer
             {
                 AnswerName = message.AnswerName,
@@ -3096,6 +3252,9 @@ namespace WOTRMultiplayer.Services
         private async void OnNotifyDialogCueAnswerSuggested(long playerId, NotifyDialogCueAnswerSuggested message)
         {
             await WaitWhileTrue(() => Game.DialogState == null || !string.Equals(Game.DialogState.CurrentCueName, message.CueName, StringComparison.OrdinalIgnoreCase), "Waiting for dialog to initialize before suggesting cue answer");
+
+            if (message.Dialog?.Id != Game.DialogState.Dialog.Id || Game.DialogState.IsSelectingAnswer) return;
+            Game.DialogState.VoteRoundId = message.VoteRoundId;
 
             var suggestions = Mapper.Map<List<NetworkDialogAnswerSuggestion>>(message.Suggestions);
             var players = GetSyncedPlayers();
@@ -3279,6 +3438,7 @@ namespace WOTRMultiplayer.Services
         {
             Game.LocalPlayerId = connectionSucceeded.ClientPlayerId;
             Game.SessionSeed = connectionSucceeded.SessionSeed;
+            RestoreRejoinToken();
 
             var settings = Mapper.Map<NetworkGameSettings>(connectionSucceeded.GameSettings);
             GameInteraction.ApplyGameSettings(settings);
@@ -3287,8 +3447,11 @@ namespace WOTRMultiplayer.Services
             var message = new ClientGameServerConnectionConfirmed
             {
                 PlayerName = SettingsService.GetSettings().PlayerName,
-                ContentState = Mapper.Map<Networking.Messages.Contracts.NetworkContentState>(contentState)
+                ContentState = Mapper.Map<Networking.Messages.Contracts.NetworkContentState>(contentState),
+                RejoinToken = _rejoinToken
             };
+            _rejoinToken = connectionSucceeded.RejoinToken;
+            PersistRejoinToken();
             Send(message);
         }
 

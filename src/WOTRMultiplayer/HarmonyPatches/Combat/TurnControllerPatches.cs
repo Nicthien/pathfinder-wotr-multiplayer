@@ -14,6 +14,19 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
     {
         public static AsyncLocal<bool> IsSimulation { get; private set; } = new();
 
+        [HarmonyPatch(typeof(TurnController), nameof(TurnController.CanEndTurn))]
+        [HarmonyPrefix]
+        public static bool TurnController_CanEndTurn_Prefix(ref bool __result)
+        {
+            if (!Services.CombatSaving.CombatSavePauseLease.Active && !Services.CombatSaving.CombatSaveLoadState.Active) return true;
+            __result = false;
+            return false;
+        }
+
+        [HarmonyPatch(typeof(TurnController), nameof(TurnController.CanDelay))]
+        [HarmonyPrefix]
+        public static bool TurnController_CanDelay_Prefix(ref bool __result) => TurnController_CanEndTurn_Prefix(ref __result);
+
         [HarmonyPatch(typeof(TurnController), nameof(TurnController.UpdateActionPredictions))]
         [HarmonyPrefix]
         public static void TurnController_UpdateActionPredictions_Prefix()
@@ -85,6 +98,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool TurnController_Tick_Prefix(TurnController __instance)
         {
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return false;
             if (!Main.Multiplayer.IsActive)
             {
                 return true;
@@ -97,6 +111,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool TurnController_Start_Prefix(TurnController __instance)
         {
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return false;
             if (!Main.Multiplayer.IsActive)
             {
                 return true;

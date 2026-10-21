@@ -220,6 +220,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public SaveInfo LoadSave(string path)
         {
             var save = Game.Instance.SaveManager.LoadZipSave(path);
+            if (SessionRejoinRuntime.IsClientLoad(path)) SessionRejoinRuntime.ClientSaveInfo = save;
             return save;
         }
 
@@ -359,6 +360,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         throw new InvalidOperationException("The game did not accept the requested combat mode.");
                     }
+                    WOTRMultiplayer.HarmonyPatches.MenuPatches.IngameMenuPatches.RefreshCombatModeButton();
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)

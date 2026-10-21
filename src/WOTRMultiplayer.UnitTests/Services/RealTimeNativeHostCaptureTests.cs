@@ -2,13 +2,51 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using FakeItEasy;
 using NUnit.Framework;
+using WOTRMultiplayer.Abstractions.GameInteraction;
+using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Services;
 using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.UnitTests.Services
 {
     public class RealTimeNativeHostCaptureTests
     {
+        [Test]
+        public void FogCompletionIsConsumedInTheSameFrame()
+        {
+            var completed = false; var captured = false; Exception failure = null;
+            System.Collections.IEnumerator Request()
+            {
+                yield return null;
+                completed = true;
+            }
+            var routine = RealTimeNativeHostCapture.FinishAfterFog(Request(), () => true,
+                () => { Assert.That(completed, Is.True); captured = true; }, error => failure = error);
+            Assert.That(routine.MoveNext(), Is.True);
+            Assert.That(captured, Is.False);
+            Assert.That(routine.MoveNext(), Is.False, "No extra frame after the GPU result becomes available");
+            Assert.That(failure, Is.Null);
+            Assert.That(captured, Is.True);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void TurnBasedNativeVerificationUsesCombatSaveBuffProjection(bool turnBased)
+        {
+            var combat = A.Fake<ICombatInteractionService>();
+            A.CallTo(() => combat.GetRealTimeCombatState()).ReturnsLazily(() =>
+            {
+                Assert.That(CombatSaveDigestScope.Active, Is.EqualTo(turnBased));
+                return new NetworkCombatState();
+            });
+
+            Assert.That(RealTimeNativeHostCapture.CaptureMechanicalStateForVerification(combat, turnBased), Is.Not.Null);
+            Assert.That(CombatSaveDigestScope.Active, Is.False, "Projection scope must not leak after capture.");
+            A.CallTo(() => combat.GetRealTimeCombatState()).MustHaveHappenedOnceExactly();
+        }
+
         private const string Area = "11111111111111111111111111111111";
         private static void Serialize(RealTimeMemorySaver source)
         {

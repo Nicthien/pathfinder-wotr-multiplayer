@@ -19,6 +19,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         private static long _nextActionId;
         private static readonly ConcurrentDictionary<UnitCommand, string> Actions = new();
         private static readonly ConcurrentDictionary<string, string> UnitActions = new(StringComparer.Ordinal);
+        internal static bool IsCurrentAction(string unitId, string actionId) => unitId != null
+            && UnitActions.TryGetValue(unitId, out var current) && current == actionId;
         private static bool CanPublish => RealTimePresentationRuntime.Enabled
             && Main.Multiplayer?.IsRealTimeCombatActive == true
             && !Main.Multiplayer.IsRealTimeClientCombatActive

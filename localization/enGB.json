@@ -118,9 +118,39 @@
                 "preferRealTime": "Prefer real time for new combats",
                 "preferTurnBased": "Prefer turn based for new combats",
                 "changePausePolicy": "Change pause policy",
-                "repair": "Repair synchronization",
+                "repair": "Force synchronization",
+                "manualSyncRequested": "Synchronization requested. Waiting for the other player's confirmations.",
+                "manualSyncUnavailable": "Synchronization unavailable: outside combat, action in progress or no safe checkpoint.",
+                "manualSyncOutsideCombat": "Recovery available during a blocked combat.",
+                "saveCombat": "Save combat",
+                "saveCombatLoadFailed": "The combat could not be restored on both PCs. Resuming is blocked to avoid inconsistent state. Load another safe save from the game menu.",
+                "saveCombatReady": "Combat restored and verified on every connected PC. The game is resuming.",
+                "saveCombatWorking": "Saving combat: pausing and verifying both PCs…",
+        "saveCombatSaved": "Combat saved to a new slot.",
+        "saveCombatRecovering": "Save cancelled: rebuilding both peers from the host's unchanged turn. Wait for confirmation before resuming.",
+                "saveCombatBusy": "A combat save is already in progress.",
+                "saveCombatWaitAction": "Cannot save: wait until the action or movement ends.",
+                "saveCombatWaitTurn": "Cannot save: wait for a player turn in turn-based combat.",
+                "saveCombatSync": "Cannot save: both PCs must be synchronized.",
+                "saveCombatTimeout": "Save cancelled: no peer confirmation within 15 seconds.",
+                "saveCombatPeerRefused": "Save cancelled: the other PC is not ready.",
+                "saveCombatSessionChanged": "Save cancelled: a player disconnected or the session changed.",
+                "saveCombatNativeRefused": "Saving is not allowed by the game in the current situation.",
+                "saveCombatTransition": "Cannot save: loading or a transition is in progress.",
+                "saveCombatFailed": "Combat was not saved. Check that no action or synchronization is in progress.",
+                "saveCombatLocked": "Unavailable: multiplayer combat restoration is under development and has not been validated in game.",
                 "requestResume": "Request resume",
-                "requestPause": "Pause"
+                "requestPause": "Pause",
+                "recoveryPreparing": "Recovery: pausing and waiting for both PCs",
+                "recoveryRebuilding": "Recovery: rebuilding from the host",
+                "recoveryLoading": "Recovery: loading the host world",
+                "recoveryVerifying": "Recovery: checking units and effects",
+                "recoveryCommitted": "State restored and verified; waiting to resume",
+                "recoveryReconnecting": "Connection lost: combat paused until the other PC returns",
+                "modeUnavailable": "Combat mode cannot change yet: wait for the current action or synchronization and check the multiplayer menu.",
+                "modeQueued": "Combat mode change requested: it will apply after the current synchronization.",
+                "recoveryStopped": "Recovery failed: do not save. Leave the session and reload a safe copy.",
+                "recoveryFailureCode": "Diagnostic code: {0}"
             },
             "server": {
                 "title": "Server",
@@ -328,7 +358,13 @@
         },
         "gameNotifications": {
             "dialogs": {
-                "waitingForOtherPlayers": "Some players have not seen the cue yet"
+                "waitingForOtherPlayers": "Some players have not seen the cue yet",
+                "waitingForAgreement": "Waiting for the other player to choose the same answer.",
+                "soloAfterDisconnect": "The other player disconnected. Click an answer to confirm alone; no answer is chosen automatically.",
+                "rejoinSync": "Reconnecting: transferring and verifying the current state. The host stays in the game; please wait.",
+                "rejoinWaiting": "Reconnection pending: finish the host's turn-based combat, dialogue or loot screen and return to a local area. The host can stay in the game.",
+                "rejoinFailed": "Reconnection could not be verified. The game remains safely paused; check the logs and reconnect the client from a safe area.",
+                "agreementChooseCharacter": "Both players chose the same answer. The host can click it again to select the character performing the action."
             },
             "rolls": {
                 "missingDamageRoll": "Error retrieving damage roll for {0} unit.\nThis guarantees desync in the game",
@@ -434,7 +470,8 @@
             },
             "globalMap": {
                 "disabledActionBar": "Global map spells are restricted to the host",
-                "loading": "Waiting for everyone to finish loading"
+                "loading": "Waiting for everyone to finish loading",
+                "eventDisplayFailed": "A map event could not be displayed. Note the time of the problem; details are in the log."
             }
         }
     }

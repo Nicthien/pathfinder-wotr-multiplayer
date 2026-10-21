@@ -47,7 +47,7 @@ using WOTRMultiplayer.Services.Random;
 
 namespace WOTRMultiplayer.Services
 {
-    public abstract class MultiplayerActorBase
+    public abstract partial class MultiplayerActorBase
     {
         public const int SaveSizeLimit = 500 * 1024 * 1024;
 
@@ -459,6 +459,7 @@ namespace WOTRMultiplayer.Services
                     }
 
                     var owner = historicOwner
+                        ?? oldCharacters.FirstOrDefault(old => !string.IsNullOrEmpty(old.UnitId) && old.UnitId == character.UnitId)?.Owner
                         ?? oldCharacters.FirstOrDefault(old => old.Index.HasValue && old.Index.Value == character.Index)?.Owner // this one is possible only on initial multiplayer game load when we don't have history yet due to missing UnitIds
                         ?? defaultOwner;
 
@@ -480,18 +481,56 @@ namespace WOTRMultiplayer.Services
             // Tutorial settings are save-dependent, so they must be overridden if the save was created without the mod
             var settings = new NetworkGameSettings { Tutorial = new NetworkTutorialSettings() };
             GameInteraction.ApplyGameSettings(settings);
+            if (PendingCombatSave != null)
+            {
+                if (!CombatSaving.CombatSaveLoadState.HoldsWorld(Kingmaker.Game.Instance?.State))
+                    throw new InvalidOperationException("combat-save-game-loaded-world-mismatch");
+                _combatSaveGameLoaded = true;
+                Logger.LogInformation("[CombatSave] Native load lifecycle completed; awaiting final idle state.");
+            }
+        }
+
+        private DateTime _lastLocalPingAt;
+
+        protected bool RegisterLocalDialogVote(NetworkDialogState state, string cueName, string answerName)
+        {
+            var repeated = state.LastLocalVoteRound == state.VoteRoundId
+                && string.Equals(state.LastLocalVoteCue, cueName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(state.LastLocalVoteAnswer, answerName, StringComparison.OrdinalIgnoreCase);
+            state.LastLocalVoteRound = state.VoteRoundId;
+            state.LastLocalVoteCue = cueName;
+            state.LastLocalVoteAnswer = answerName;
+            return repeated;
+        }
+
+        protected void ShowRepeatedDialogVoteReminder(NetworkDialogState state)
+        {
+            var now = DateTime.UtcNow;
+            if ((now - state.LastVoteReminderAt).TotalSeconds < 2) return;
+            state.LastVoteReminderAt = now;
+            PlayerNotification.ShowWarningNotification(WellKnownKeys.GameNotifications.Dialogs.WaitingForAgreement.Key,
+                addToLog: false, warningDuration: 2f);
         }
 
         public void OnPing(NetworkPing ping)
         {
+            if (Game == null || ping == null) return;
+            var now = DateTime.UtcNow;
+            if ((now - _lastLocalPingAt).TotalMilliseconds < 400) return;
+            _lastLocalPingAt = now;
             var message = new NotifyPingedByPlayer
             {
                 PlayerId = Game.LocalPlayerId,
-                Ping = Mapper.Map<Networking.Messages.Contracts.NetworkPing>(ping)
+                Ping = Mapper.Map<Networking.Messages.Contracts.NetworkPing>(ping),
+                SessionId = Game.Id,
+                LoadedSaveSeed = Game.LoadedSaveSeed,
+                AreaSeed = AreaSeed
             };
             Send(message);
 
-            PingInteraction.Create(null, ping);
+            PingInteraction.Create(GetPlayer(Game.LocalPlayerId), ping);
+            Logger.LogInformation("Local map ping sent. PlayerId={PlayerId}, AreaSeed={AreaSeed}, Position={Position}",
+                Game.LocalPlayerId, AreaSeed, ping.WorldPosition);
         }
 
 
@@ -510,6 +549,8 @@ namespace WOTRMultiplayer.Services
             {
                 return;
             }
+
+            PrepareCombatSaveLoad(savePath);
 
             Game.StartUp = new NetworkGameStartUp
             {
@@ -535,6 +576,8 @@ namespace WOTRMultiplayer.Services
 
         public void CombatStarted()
         {
+            if (CombatSaving.CombatSaveLoadState.Active) return;
+            _combatSaveSemanticSeeds = null;
             if (TryRetainRealTimeCombatOnStart()) return;
             if (RealTimePresentationRuntime.Enabled && Game?.RealTimeCombat?.CombatEndPending == true)
             {
@@ -603,6 +646,39 @@ namespace WOTRMultiplayer.Services
 
         protected virtual void ResetRealTimeRuleRolls() { }
 
+        protected async Task ApplyOutsideCombatPreferenceAsync(Func<bool> isActive)
+        {
+            var session = Game;
+            var state = session?.RealTimeCombat;
+            if (!isActive() || state == null || session.Stage != NetworkLobbyStage.Playing
+                || session.Combat?.Stage == NetworkCombatStage.Running
+                || state.CombatEndPending || state.Phase != CombatSynchronizationPhase.Stable) return;
+            var sequence = state.PreferenceSequence;
+            var saveSeed = session.LoadedSaveSeed;
+            var mode = state.PreferredMode;
+            try
+            {
+                var applied = await GameInteraction.TrySetTurnBasedCombatModeAsync(mode == CombatMode.TurnBased,
+                    () => isActive() && ReferenceEquals(Game, session) && ReferenceEquals(session.RealTimeCombat, state)
+                        && session.LoadedSaveSeed == saveSeed && state.PreferenceSequence == sequence
+                        && session.Stage == NetworkLobbyStage.Playing
+                        && session.Combat?.Stage != NetworkCombatStage.Running
+                        && state.Phase == CombatSynchronizationPhase.Stable && !state.CombatEndPending
+                        && Kingmaker.Game.Instance?.Player?.IsInCombat == false);
+                if (applied && ReferenceEquals(Game, session) && state.PreferenceSequence == sequence
+                    && session.Combat?.Stage != NetworkCombatStage.Running)
+                {
+                    state.Mode = mode;
+                    Logger.LogInformation("[CombatMode] Outside-combat engine selection and button updated. Mode={Mode}, Sequence={Sequence}", mode, sequence);
+                }
+            }
+            catch (Exception failure)
+            {
+                Logger.LogError(failure, "[CombatMode] Outside-combat mode could not be applied.");
+                PlayerNotification.ShowWarningNotification(WellKnownKeys.LobbyWindow.RealTime.ModeUnavailable.Key);
+            }
+        }
+
         public void OnHandleDelayCombatTurn(string unitId, string targetUnitId)
         {
             if (!IsControlledByLocalPlayer(unitId))
@@ -622,6 +698,7 @@ namespace WOTRMultiplayer.Services
 
         public bool OnBeforeTurnStart(string unitId, bool actingInSurpriseRound)
         {
+            if (CombatSaving.CombatSavePauseLease.Active || CombatSaving.CombatSaveLoadState.Active) return false;
             try
             {
                 Logger.LogInformation("Trying to start turn. TurnInitialized={TurnInitialized}, UnitId={UnitId}, ActingInSurpriseRound={ActingInSurpriseRound}", Game.Combat.Turn != null, unitId, actingInSurpriseRound);
@@ -658,6 +735,7 @@ namespace WOTRMultiplayer.Services
 
         public bool OnBeforeTurnEnd(string unitId)
         {
+            if (CombatSaving.CombatSavePauseLease.Active || CombatSaving.CombatSaveLoadState.Active) return false;
             try
             {
                 // turn has been forcefully ended due to auto-kill
@@ -996,16 +1074,34 @@ namespace WOTRMultiplayer.Services
                 return false;
             }
 
-            var characterControl = Game.Leveling.Type switch
-            {
-                // we don't have character id yet, so we rely on 'fake' character
-                NetworkLevelingType.NewGameSequence => Game.Characters.FirstOrDefault()?.Owner?.Id == Game.LocalPlayerId,
-                NetworkLevelingType.Mercenary => HasControlOverUI,
-                // either this character has been controlled by someone previously (and that player is still in lobby) or fallback to default
-                _ => WasControlledByCurrentPlayer(Game.Leveling.UnitId),
-            };
+            return CanControlLeveling(Game.LocalPlayerId, Game.Leveling.UnitId, Game.Leveling.Type)
+                && Game.Leveling.PlayerReadiness.Count >= GetSyncedPlayersCount();
+        }
 
-            return characterControl && Game.Leveling.PlayerReadiness.Count >= GetSyncedPlayersCount();
+        // Visibility follows ownership, NOT phase readiness: waiting for an ACK
+        // must never make the owner's window disappear.
+        public bool ShouldShowLevelingUI() => Game.Leveling == null
+            || CanControlLeveling(Game.LocalPlayerId, Game.Leveling.UnitId, Game.Leveling.Type);
+
+        protected bool CanControlLeveling(long playerId, string unitId, NetworkLevelingType type)
+        {
+            var hostId = Game.Players.FirstOrDefault(p => p.IsHost)?.Id;
+            var ownerId = type switch
+            {
+                NetworkLevelingType.NewGameSequence => Game.Characters.FirstOrDefault()?.Owner?.Id,
+                NetworkLevelingType.Mercenary => hostId,
+                _ => GetPartyCharacter(unitId)?.Owner?.Id,
+            };
+            if (!ownerId.HasValue && type != NetworkLevelingType.NewGameSequence && type != NetworkLevelingType.Mercenary)
+            {
+                var realUnitId = GameInteraction.GetPetOwnerId(unitId) ?? unitId;
+                if (!string.IsNullOrEmpty(realUnitId) && Game.CharactersOwnershipHistory.TryGetValue(realUnitId, out var previousOwner))
+                    ownerId = previousOwner;
+            }
+            // A disconnected owner no longer blocks the host. Pets use their
+            // master's assignment via GetPartyCharacter/GetPetOwnerId.
+            if (!ownerId.HasValue || GetPlayer(ownerId.Value) == null) ownerId = hostId;
+            return ownerId.HasValue && ownerId.Value == playerId;
         }
 
         public bool CanMakeNewGameSequenceDecisions()
@@ -1668,10 +1764,17 @@ namespace WOTRMultiplayer.Services
         {
             AddPlayerToTracker(Game.PlayersInGlobalMapLocationMessage, Game.LocalPlayerId);
 
+            var viewModel = Main.UIAccessor.GlobalMapEnterMessagePCView?.ViewModel;
+            var arrivalPoint = viewModel?.IsCurrentLocation == true
+                && Kingmaker.Game.Instance.GlobalMapController.SelectedTraveler is Kingmaker.Globalmap.State.GlobalMapPlayerState
+                ? viewModel.Location?.Blueprint : null;
             var message = new NotifyGlobalMapLocationMessageShown
             {
                 PlayerId = Game.LocalPlayerId,
-                ShouldManuallyTriggerMessage = shouldManuallyTriggerMessage
+                ShouldManuallyTriggerMessage = shouldManuallyTriggerMessage,
+                Scope = GlobalMapPresentationScope.Current,
+                Location = arrivalPoint == null ? null : new Networking.Messages.Contracts.NetworkGlobalMapLocation
+                    { Id = arrivalPoint.AssetGuid.ToString(), Name = arrivalPoint.name }
             };
             Send(message);
 
@@ -1720,12 +1823,14 @@ namespace WOTRMultiplayer.Services
 
         public void OnGlobalMapCommonPopupShown(NetworkGlobalMapCommonPopup globalMapCommonPopup)
         {
+            GlobalMapInteraction.ObserveCommonPopup(globalMapCommonPopup);
             AddPlayerToTracker(Game.PlayersInGlobalMapCommonPopup, Game.LocalPlayerId);
 
             var message = new NotifyGlobalMapCommonPopupShown
             {
                 PlayerId = Game.LocalPlayerId,
-                Popup = Mapper.Map<Networking.Messages.Contracts.NetworkGlobalMapCommonPopup>(globalMapCommonPopup)
+                Popup = Mapper.Map<Networking.Messages.Contracts.NetworkGlobalMapCommonPopup>(globalMapCommonPopup),
+                Scope = GlobalMapPresentationScope.Current
             };
             Send(message);
 
@@ -1854,6 +1959,7 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
+            StampTurnMovement(unitMoveTo);
             var message = new NotifyUnitMovedTo
             {
                 Movement = Mapper.Map<Networking.Messages.Contracts.NetworkUnitMoveTo>(unitMoveTo)
@@ -3092,6 +3198,13 @@ namespace WOTRMultiplayer.Services
 
         protected void LoadSavedGame()
         {
+            try { PrepareCombatSaveLoad(Game.StartUp.SavePath); }
+            catch (Exception error)
+            {
+                Logger.LogError(error, "[CombatSave] Load preflight refused; existing world retained");
+                PlayerNotification.ShowModalMessage(WellKnownKeys.LobbyWindow.RealTime.SaveCombatLoadFailed.Key);
+                return;
+            }
             ResetRealTimeRuleRolls();
             ResetOnSaveLoad();
 
@@ -3690,6 +3803,7 @@ namespace WOTRMultiplayer.Services
 
                 // unit actions
                 .On<NotifyUnitMovedTo>(OnNotifyUnitMovedTo)
+                .On<NotifyTurnMovementState>(OnTurnMovementState)
                 .On<NotifyUnitInteractedWithUnit>(OnNotifyUnitInteractedWithUnit)
                 .On<NotifyUnitLootedUnit>(OnNotifyUnitLootedUnit)
 
@@ -3894,6 +4008,7 @@ namespace WOTRMultiplayer.Services
         private void OnNotifyUnitMovedTo(long receivedFrom, NotifyUnitMovedTo message)
         {
             var unitMoveTo = Mapper.Map<NetworkUnitMoveTo>(message.Movement);
+            ObserveTurnMovement(receivedFrom, unitMoveTo);
 
             CombatInteraction.MoveUnit(unitMoveTo);
         }
@@ -4076,10 +4191,16 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyPingedByPlayer(long receivedFrom, NotifyPingedByPlayer message)
         {
+            if (Game == null || message?.Ping == null || message.SessionId != Game.Id
+                || message.LoadedSaveSeed != Game.LoadedSaveSeed || message.AreaSeed != AreaSeed
+                || message.PlayerId == Game.LocalPlayerId) return;
             var ping = Mapper.Map<NetworkPing>(message.Ping);
 
             var player = GetPlayer(message.PlayerId);
+            if (player == null) return;
             PingInteraction.Create(player, ping);
+            Logger.LogInformation("Remote map ping received. PlayerId={PlayerId}, AreaSeed={AreaSeed}, Position={Position}",
+                player.Id, AreaSeed, ping.WorldPosition);
         }
 
         private void OnNotifyRestEnded(long receivedFrom, NotifyRestEnded message)
@@ -4273,8 +4394,13 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyGlobalMapLocationMessageShown(long receivedFrom, NotifyGlobalMapLocationMessageShown message)
         {
+            if (!GlobalMapPresentationScope.Matches(message.Scope)) return;
             AddPlayerToTracker(Game.PlayersInGlobalMapLocationMessage, message.PlayerId);
-            if (message.ShouldManuallyTriggerMessage)
+            if (message.Location != null && GetPlayer(message.PlayerId)?.IsHost == true)
+            {
+                GlobalMapInteraction.ShowReceivedLocation(Mapper.Map<NetworkGlobalMapLocation>(message.Location));
+            }
+            else if (message.ShouldManuallyTriggerMessage)
             {
                 GlobalMapInteraction.ShowCurrentEnterCurrentLocationMessage();
             }
@@ -4711,6 +4837,12 @@ namespace WOTRMultiplayer.Services
 
         private int? GetSeedValue(SeedKind seedKind)
         {
+            if (_combatSaveSemanticSeeds != null && Game.Combat != null)
+            {
+                var key = seedKind switch { SeedKind.Session => "session", SeedKind.LoadedSaveSeed => "load",
+                    SeedKind.AreaSeed => "area", _ => null };
+                if (key != null && _combatSaveSemanticSeeds.TryGetValue(key, out var saved)) return saved;
+            }
             return seedKind switch
             {
                 SeedKind.Session => SessionSeed,

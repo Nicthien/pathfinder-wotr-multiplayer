@@ -7,5 +7,7 @@
         public string CueName { get; set; }
 
         public string ManualUnitSelectionId { get; set; }
+
+        public string VoteRoundId { get; set; }
     }
 }

@@ -5,6 +5,8 @@
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 
+    <ItemGroup><Reference Include="System.IO.Compression" /></ItemGroup>
+
 	<PropertyGroup Condition="'$(HostPresentationPrototype)' == 'true'">
 		<DefineConstants>$(DefineConstants);RTWP_HOST_PRESENTATION_PROTOTYPE</DefineConstants>
 	</PropertyGroup>
@@ -146,6 +148,11 @@
 		<Reference Include="UnityEngine.IMGUIModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
 		</Reference>
+
+        <Reference Include="UnityEngine.InputLegacyModule">
+            <HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
 		<Reference Include="UnityEngine.PhysicsModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
 		</Reference>

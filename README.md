@@ -1,46 +1,126 @@
-# Multiplayer Mod for Pathfinder: Wrath of the Righteous
+# WotR Multiplayer RTwP
 
-Showcase: https://www.youtube.com/watch?v=_YZSPrPy9XI
+Mod multijoueur expérimental pour *Pathfinder: Wrath of the Righteous*, avec
+prise en charge du combat en temps réel avec pause (RTwP), du tour par tour et
+de leur synchronisation entre plusieurs joueurs.
 
-[NexusMods](https://www.nexusmods.com/pathfinderwrathoftherighteous/mods/1116)
+## Origine du projet et crédits
 
-## How to
-1. Download latest `wotr-multiplayer-x.x.x.zip` from releases
+Ce dépôt est un fork de
+[`fl01/pathfinder-wotr-multiplayer`](https://github.com/fl01/pathfinder-wotr-multiplayer),
+le projet multijoueur original créé par **fl01**.
 
-2. Install via [UnityModManager](https://www.nexusmods.com/site/mods/21) **0.32.4a or lower**. Newer UMM versions changed the way DLLs are loaded, making them unusable with this mod without additional configuration.
+Le code d'origine, son architecture réseau et ses fonctionnalités multijoueur
+restent le travail de fl01 et des contributeurs du projet amont. J'ai repris ce
+code pour poursuivre son développement, le modifier et expérimenter notamment
+la synchronisation du combat RTwP, la reprise de session et la sauvegarde en
+combat. Les droits sur le code d'origine restent à leurs auteurs respectifs.
 
-3. Go to in-game `Settings -> Multiplayer` to configure your name or other multiplayer settings.
+Cette variante n'est ni officielle ni affiliée à Owlcat Games.
 
-4. Use `Multiplayer` main menu to host or join an existing game.
-5. Enjoy
+## Principales évolutions de cette variante
 
-## Changes
+- combat en temps réel avec pause synchronisé, en complément du tour par tour ;
+- hôte autoritaire pour l'état du combat, les commandes et les résultats
+  aléatoires ;
+- barrières de changement de mode, vérification d'état, réparation et repli
+  sécurisé vers le tour par tour ;
+- synchronisation renforcée des unités, buffs, projectiles, zones d'effet,
+  invocations, dialogues, événements de carte et autres interactions ;
+- reprise de session et reconnexion avec contrôles d'époque et de séquence ;
+- sauvegarde et restauration synchronisées en plein combat au tour par tour ;
+- interface et localisation françaises complètes ;
+- outils de compilation, de diagnostic, de staging et de test local isolé.
 
-Look [here](/docs/about.md) for more details
+Les détails techniques et l'historique des validations se trouvent dans
+[`docs/`](docs/), notamment dans
+[`docs/rtwp-local-development.md`](docs/rtwp-local-development.md) et
+[`docs/sauvegarde-combat-tb-developpement-2026-10-17.md`](docs/sauvegarde-combat-tb-developpement-2026-10-17.md).
 
-### TL/DR:
-- Campaign is mostly playable, but there are a few heavily bugged encounters
-- There are no changes to content, balance or how mythic paths/companions work.
-- Game Version/DLC/Mods should match across players.
-- Gamepad is not supported because it uses a separate console-specific UI that has not yet been adapted for multiplayer.
+## État actuel
 
-## How to connect
-The mod adds a "Multiplayer" menu to the Main Menu. Use it to access multiplayer features.
+Le projet est une **version expérimentale** destinée aux essais et au
+développement. Il ne faut pas l'installer en même temps que la version stable
+du mod original.
 
-It works with a `Direct IP` connection by default. This means you either need a public IP or have to use network emulators (Hamachi, ZeroTier, Radmin VPN, or anything you like) to be able to connect. The default networking configuration covers the most common needs, but you are free to configure specific settings in **Settings -> Multiplayer**.
+Cette branche dérive de la série `0.4.16` du projet original. Les évolutions
+amont plus récentes, notamment la série `0.5.x`, ne sont pas intégrées
+automatiquement : elles doivent être adaptées volontairement pour ne pas
+casser le protocole RTwP déjà testé.
 
-Additionally, you can select the **Share Game Online** option when hosting a game. This uses the selected server to provide a `Game Code` connection. The host will receive a Game Code (visible on the lobby screen) that can be used by others to connect. A Game Code allows you to establish a `P2P connection` (direct connection) without the need to be on the same network. The downside is that this may not work for everyone due to network equipment or configuration.
+La sauvegarde et la reprise d'un combat ont été vérifiées avec une instance
+hôte et une instance cliente réellement connectées, dans deux installations et
+deux profils isolés sur une même machine. Cette preuve ne remplace pas encore
+une campagne complète ni une validation sur deux PC physiques.
 
-There is currently one public server, hosted in the EU. It is only used to help players connect, so its location doesn't affect actual in-game latency.
+Le mod conserve volontairement des protections strictes : une sauvegarde est
+refusée pendant une barrière de changement de mode, de synchronisation ou de
+réparation, et un état partiellement appliqué n'est jamais considéré comme une
+réussite.
 
-If you encounter issues with P2P itself or the public server (it could be bugged, overloaded, offline, etc.), your only option is to use **Direct IP** together with network emulators.
+## Compatibilité
 
-It is also possible to play in a mixed mode, where some players connect via Game Code and others via Direct IP
+- *Pathfinder: Wrath of the Righteous* `2.7.0x` ;
+- Windows ;
+- Unity Mod Manager `0.32.4a` ou antérieur ;
+- mêmes versions du jeu, des DLC et des mods de gameplay pour tous les joueurs ;
+- clavier et souris ; l'interface manette n'est pas prise en charge.
 
-More details regarding p2p server/hosting your own server are available [here](/docs/about.md#game-codes)
+La compatibilité peut évoluer avec les futures mises à jour du jeu ou du projet
+amont.
 
-## Troubleshooting
-Refer to [troubleshooting](/docs/troubleshooting.md) if you are having any problems launching the mod
+## Installation
 
-## Misc
-If you want to use [BubbleBuffs](https://github.com/factubsio/BubbleBuffs), a multiplayer compatibility mod is available [here](https://github.com/fl01/pathfinder-wotr-multiplayer-bubblebuffs)
+Les paquets binaires ne sont pas versionnés dans le dépôt. Lorsqu'une version
+précompilée est publiée dans la section **Releases** :
+
+1. télécharger l'archive de la version expérimentale ;
+2. fermer le jeu ;
+3. conserver une sauvegarde de l'ancien mod et de la campagne ;
+4. installer le paquet avec Unity Mod Manager ;
+5. vérifier qu'une seule variante multijoueur est active ;
+6. utiliser une copie de sauvegarde pour les premiers essais.
+
+Le slot stable est `00_WOTRMultiplayer` et le slot expérimental est
+`00_WOTRMultiplayerRTwP`. Un slot inactif doit rester hors du dossier `Mods` :
+Unity Mod Manager peut charger un dossier même si son nom se termine par
+`.disabled`.
+
+## Connexion
+
+Le menu **Multijoueur** permet d'héberger ou de rejoindre une partie. La
+connexion directe par IP reste la méthode de référence. Le jeu en dehors d'un
+réseau local peut nécessiter une adresse publique, une redirection de port ou
+un réseau virtuel tel que ZeroTier, Radmin VPN ou Hamachi.
+
+Tous les participants doivent utiliser la même version expérimentale.
+
+## Compilation et tests
+
+Le SDK est fixé par [`global.json`](global.json). Depuis la racine du dépôt :
+
+```powershell
+.\tools\rtwp-local.ps1 -Action Status
+.\tools\rtwp-local.ps1 -Action Build
+dotnet test .\src\WOTRMultiplayer.UnitTests\WOTRMultiplayer.UnitTests.csproj -c Release
+```
+
+La configuration **Release** est obligatoire pour les essais et les
+livraisons. La configuration Debug peut déployer automatiquement des fichiers
+dans le jeu.
+
+Les installations et profils de test locaux, journaux, sauvegardes, artefacts
+de compilation et marqueurs de validation restent privés et sont exclus par
+`.gitignore`.
+
+## Projet original
+
+- dépôt amont :
+  [`fl01/pathfinder-wotr-multiplayer`](https://github.com/fl01/pathfinder-wotr-multiplayer) ;
+- présentation vidéo originale :
+  [YouTube](https://www.youtube.com/watch?v=_YZSPrPy9XI) ;
+- page Nexus Mods originale :
+  [Pathfinder WotR Multiplayer](https://www.nexusmods.com/pathfinderwrathoftherighteous/mods/1116).
+
+Pour les fonctions héritées du mod original et ses explications détaillées,
+consulter également [`docs/about.md`](docs/about.md).

@@ -11,5 +11,11 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(1)]
         [LogMe]
         public NetworkGlobalMapEncounter Encounter { get; set; }
+
+        [ProtoMember(2), LogMe]
+        public string Scope { get; set; }
+
+        [ProtoMember(3), LogMe]
+        public string EventId { get; set; }
     }
 }

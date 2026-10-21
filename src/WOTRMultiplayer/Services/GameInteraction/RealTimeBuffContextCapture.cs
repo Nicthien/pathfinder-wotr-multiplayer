@@ -10,6 +10,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 {
     public static class RealTimeBuffContextCapture
     {
+        public static NetworkAbility CaptureAbility(AbilityExecutionContext context, IRuntimeMapper mapper)
+        {
+            if (context == null) return null;
+            if (!CombatSaveDigestScope.Active) return mapper.Map<NetworkAbility>(context.Ability);
+            var blueprint = context.Ability?.Blueprint ?? context.SourceAbility;
+            return blueprint == null ? null : new NetworkAbility { BlueprintId = blueprint.AssetGuid.ToString() };
+        }
+
         public static System.Collections.Generic.List<NetworkBuffContextState> Capture(MechanicsContext context, IRuntimeMapper mapper)
         {
             if (context == null) return null;
@@ -18,7 +26,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 BlueprintId = node.AssociatedBlueprint?.AssetGuid.ToString(),
                 CasterId = node.m_CasterRef.Id, OwnerId = node.m_OwnerRef.Id,
                 IsAbilityContext = node is AbilityExecutionContext,
-                SourceAbility = node is AbilityExecutionContext ability ? mapper.Map<NetworkAbility>(ability.Ability) : null,
+                SourceAbility = node is AbilityExecutionContext ability ? CaptureAbility(ability, mapper) : null,
                 // Params is a read-only fallback through ParentContext/Empty.
                 // No Recalculate, rule, context cloning or save lifecycle.
                 Params = mapper.Map<NetworkAbilityParams>(node.Params),

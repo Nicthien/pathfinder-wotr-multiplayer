@@ -24,6 +24,7 @@ using Kingmaker.View;
 using Kingmaker.View.MapObjects;
 using Kingmaker.Visual.Sound;
 using Microsoft.Extensions.Logging;
+using WOTRMultiplayer.Services.CombatSaving;
 using WOTRMultiplayer.Services.Random;
 
 namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
@@ -558,7 +559,12 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             try
             {
                 var rawIdentifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{blueprint.NameForAcronym}:{caster?.Unit?.UniqueId}:{fact?.UniqueId}:{blueprintSpellbook?.name}";
-                var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.AbilityData, Game.Instance.Player.GameId, rawIdentifier);
+                var game = Game.Instance;
+                var id = CombatSaveActivation.Enabled && CombatSavePauseLease.HoldsSaveWorld(game)
+                    ? (Main.Multiplayer.ValueGenerator as DeterministicValueGenerator
+                        ?? throw new NotSupportedException("combat-save-generator-unsupported"))
+                        .ReuseLatestAbilityDataId(game.Player.GameId, rawIdentifier)
+                    : Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.AbilityData, game.Player.GameId, rawIdentifier);
                 Main.GetLogger<EntitiesIdsPatches>().LogDebug("AbilityData id has been generated. RawIdentifier={RawIdentifier}, Id={Id}", rawIdentifier, id);
                 return id;
             }

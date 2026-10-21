@@ -19,5 +19,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(3)]
         [LogMe]
         public string AnswerName { get; set; }
+
+        [ProtoMember(4)]
+        public string VoteRoundId { get; set; }
     }
 }

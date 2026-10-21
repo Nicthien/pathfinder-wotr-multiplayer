@@ -36,6 +36,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         Task<bool> UpdateUnitsAsync(List<NetworkUnit> networkUnits, bool updatePosition);
 
         void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit = null);
+        void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply);
 
         void EndCombatTurn(string unitId);
 
@@ -49,11 +50,15 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         Task<NetworkCombatState> ApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState);
 
+        Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState, Func<bool> canApply);
         Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
-            NetworkCombatState networkCombatState, Func<bool> canApply);
+            NetworkCombatState networkCombatState, Func<bool> canApply, bool reconcileTurnBasedBuffs);
 
         Task<NetworkCombatState> TryRestoreNativeReferenceStateAsync(object expectedWorld, object repairOwner,
             NetworkCombatState reference, Func<bool> canApply);
+
+        Task<bool> TryCommitNativeReferenceStateAsync(object expectedWorld, object repairOwner,
+            NetworkCombatState reference, Func<bool> canCommit);
 
         void InitializeCrusadeArmyCombat();
 
@@ -128,6 +133,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         bool IsCombatInitialized();
 
         Task ExcludeUnitsFromCombatAsync(List<string> units);
+
+        Task RetireExcludedDuplicatesAsync(List<string> excluded, List<NetworkUnit> confirmed, Func<bool> canApply);
 
         void SetTacticalCombatAcceleration(bool isAccelerated);
 

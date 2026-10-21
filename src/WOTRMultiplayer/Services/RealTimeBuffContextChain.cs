@@ -46,8 +46,10 @@ namespace WOTRMultiplayer.Services
                     || node.Ranks == null || node.SharedValues == null || node.Properties == null
                     || node.Ranks.Count > MaximumValues || node.SharedValues.Count > MaximumValues
                     || node.Properties.Count > MaximumValues) return "invalid-buff-context-values";
+                // AssociatedBlueprint and the ability are independent native
+                // references (converted abilities can keep the original source).
                 if (node.IsAbilityContext && (node.SourceAbility == null
-                    || !string.Equals(node.BlueprintId, node.SourceAbility.BlueprintId, StringComparison.OrdinalIgnoreCase)))
+                    || string.IsNullOrWhiteSpace(node.SourceAbility.BlueprintId)))
                     return "invalid-buff-context-ability";
                 if (node.Direction == null || !Finite(node.Direction.X) || !Finite(node.Direction.Y) || !Finite(node.Direction.Z))
                     return "invalid-buff-context-direction";

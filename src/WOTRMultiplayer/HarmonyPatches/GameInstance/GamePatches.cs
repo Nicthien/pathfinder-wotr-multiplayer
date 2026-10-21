@@ -39,13 +39,40 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPrefix]
         public static bool Game_LoadGame_Prefix(SaveInfo saveInfo)
         {
+            if (WOTRMultiplayer.Services.SessionRejoinRuntime.ClientLoadPath != null)
+                return WOTRMultiplayer.Services.SessionRejoinRuntime.ClientSaveInfo is SaveInfo expected
+                    && (ReferenceEquals(saveInfo, expected) || ReferenceEquals(saveInfo.Saver, expected.Saver));
             if (RealTimeNativeLoadLease.IsActive) return false;
+            try
+            {
+                var combatSave = System.IO.File.Exists(saveInfo?.FolderName)
+                    && Services.CombatSaving.CombatSaveArchive.ContainsManifest(saveInfo.FolderName);
+                if (combatSave && (!Services.CombatSaving.CombatSaveActivation.Enabled || !Main.Multiplayer.IsActive))
+                {
+                    Main.PlayerNotification.ShowModalMessage(WellKnownKeys.LobbyWindow.RealTime.SaveCombatLoadFailed.Key);
+                    return false; // Native solo loading ignores tbm: never silently restart the turn.
+                }
+                if (!combatSave && !Main.Multiplayer.IsActive)
+                    Services.CombatSaving.CombatSaveLoadState.Owner = null;
+            }
+            catch (Exception error)
+            {
+                Main.GetLogger<GamePatches>().LogError(error, "[CombatSave] Unable to inspect save before loading");
+                Main.PlayerNotification.ShowModalMessage(WellKnownKeys.LobbyWindow.RealTime.SaveCombatLoadFailed.Key);
+                return false;
+            }
             if (!Main.Multiplayer.IsActive || !Game.Instance.Player.IsInGame || RootUIContext.Instance.InGameVM?.StaticPartVM?.CharGenContextVM?.CharGenVM?.Value != null || !saveInfo.CheckDlcAvailable())
             {
                 return true;
             }
 
-            Main.Multiplayer.ForceLoadGame(saveInfo.GameId, saveInfo.FolderName);
+            try { Main.Multiplayer.ForceLoadGame(saveInfo.GameId, saveInfo.FolderName); }
+            catch (Exception error)
+            {
+                Main.GetLogger<GamePatches>().LogError(error, "[CombatSave] Load refused before changing the world");
+                Main.PlayerNotification.ShowModalMessage(WellKnownKeys.LobbyWindow.RealTime.SaveCombatLoadFailed.Key);
+                return false;
+            }
             return true;
         }
 
@@ -57,6 +84,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPrefix]
         public static bool Game_StartMode_Prefix(GameModeType type)
         {
+            if (WOTRMultiplayer.Services.SessionRejoinRuntime.ClientLoadPath != null) return true;
             if (RealTimeNativeLoadLease.IsActive) return true;
             if (!Main.Multiplayer.IsActive)
             {
@@ -81,6 +109,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPrefix]
         public static bool Game_StopMode_Prefix(GameModeType type)
         {
+            if (WOTRMultiplayer.Services.SessionRejoinRuntime.ClientLoadPath != null) return true;
             if (RealTimeNativeLoadLease.IsActive) return true;
             if (!Main.Multiplayer.IsActive)
             {
@@ -105,6 +134,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
         [HarmonyPostfix]
         public static void Game_DoStopMode_Postfix(GameModeType type)
         {
+            if (WOTRMultiplayer.Services.SessionRejoinRuntime.ClientLoadPath != null) return;
             if (RealTimeNativeLoadLease.IsActive) return;
             if (!Main.Multiplayer.IsActive)
             {
@@ -230,6 +260,7 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
 
         private static void TogglePause(Game game)
         {
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return;
             if (!Main.Multiplayer.IsActive || Main.Multiplayer.TogglePause(game.IsPaused))
             {
                 game.IsPaused = !game.IsPaused;
@@ -293,7 +324,10 @@ namespace WOTRMultiplayer.HarmonyPatches.GameInstance
 
         private static void UpdateSelectedCharacter()
         {
-            var selectedCharacter = Game.Instance.Player.CapitalPartyMode || Game.Instance.SelectionCharacter.SelectedUnits?.Count == 0 ? Game.Instance.Player.MainCharacter.Value : Game.Instance.SelectionCharacter.SelectedUnits.FirstOrDefault();
+            var selectedCharacter = Game.Instance.SelectionCharacter.SelectedUnits?
+                .FirstOrDefault(u => u.IsDirectlyControllable && Main.Multiplayer.IsControlledByLocalPlayer(u.UniqueId))
+                ?? Game.Instance.Player.Party.FirstOrDefault(u => u.IsDirectlyControllable && Main.Multiplayer.IsControlledByLocalPlayer(u.UniqueId))
+                ?? Game.Instance.Player.MainCharacter.Value;
             Game.Instance.SelectionCharacter.SelectedUnit.Value = selectedCharacter;
             Game.Instance.SelectionCharacter.m_FullScreenSelectedUnit = selectedCharacter;
             Game.Instance.SelectionCharacter.SelectionCharacterUpdated.Execute();

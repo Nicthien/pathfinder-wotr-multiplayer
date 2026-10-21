@@ -178,7 +178,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                     var methods = t.Item3.DescendantNodes().OfType<MethodDeclarationSyntax>().ToList();
                     foreach (var method in methods)
                     {
-                        var createsMessage = method.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().Any(o =>
+                        // Include target-typed new() as well as new Message().
+                        var createsMessage = method.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>().Any(o =>
                         {
                             var type = t.Item2.GetTypeInfo(o).Type;
                             return SymbolEqualityComparer.Default.Equals(type, targetSymbol);

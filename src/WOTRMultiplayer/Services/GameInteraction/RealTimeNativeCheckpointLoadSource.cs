@@ -13,7 +13,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
     // obligation. The network barrier must still verify the new world.
     public static class RealTimeNativeCheckpointLoadSource
     {
-        private static void ValidateJson(string json, bool requireObject)
+        internal static void ValidateJson(string json, bool requireObject)
         {
             using var text = new StringReader(json);
             using var reader = new JsonTextReader(text) { MaxDepth = 256, DateParseHandling = DateParseHandling.None };

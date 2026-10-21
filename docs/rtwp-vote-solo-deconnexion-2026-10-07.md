@@ -1,0 +1,7 @@
+# Validation solo après déconnexion — 0.4.16.40 / protocole 62
+
+Correction demandée par Nicolas : les deux joueurs doivent choisir la même réponse uniquement tant qu'ils sont connectés. Après une véritable déconnexion de la cliente, l'hôte peut cliquer pour valider seul. Le vote de la cliente est retiré ; aucune réponse n'est automatiquement sélectionnée par l'événement de déconnexion. Un joueur connecté mais non synchronisé reste requis. Un joueur qui revient dans la session est inclus dans les participants nécessaires, doit se synchroniser et voter ; son ancien vote déconnecté n'est pas réutilisé.
+
+Cette règle ne désactive pas les protections du combat RTwP après déconnexion. Si l'hôte quitte, la cliente perd le serveur autoritaire et ne peut pas poursuivre seule : la migration d'hôte n'est pas ajoutée. Les limites et l'absence de validation moteur des versions précédentes restent applicables.
+
+Vérification effectuée : compilation Release réussie (zéro erreur, avertissement AutoMapper préexistant), JSON des textes français relu et contrôle des espaces du diff. Aucun lancement du jeu ni suite de tests, aucune installation. Empreinte du candidat : `C2EB45302F79576CFC87EA493B03A270EAD0CBBBAAB133621AFC76A91A3166FF`. Même paquet sur les deux PC. À vérifier en jeu : désaccord puis départ de la cliente, nouveau clic de l'hôte validé seul ; chargement sans déconnexion ne permettant pas de contourner l'accord ; reconnexion exigeant un nouveau vote. Les logs enregistrent le retrait du participant.

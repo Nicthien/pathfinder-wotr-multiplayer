@@ -26,6 +26,12 @@ namespace WOTRMultiplayer.Services
         private RealTimeNativeLoadOperation _nativeLoadOperation;
         private NotifyRealTimeNativeCheckpoint _nativeReferenceRequest;
         private ulong? _nativeReferenceVerifiedHash;
+        private NotifyRealTimeNativeCheckpoint _nativeAbortRequest;
+        private bool _nativeAbortAcknowledged;
+        private bool _nativePausePending;
+        private DateTime _nativeAbortAckNextAttempt;
+        private bool _nativeCommitPending;
+        private bool _nativeCommitted;
 
         private bool IsCurrentNativeReceive()
         {
@@ -45,7 +51,7 @@ namespace WOTRMultiplayer.Services
                 || !Enum.IsDefined(typeof(RealTimeNativeCheckpointStage), frame.Stage)
                 || frame.ArchiveHash?.Length > 64 || frame.ReferenceStateHash?.Length > 64
                 || frame.ReferenceStateBytes?.Length > RealTimeNativeReferenceCodec.MaximumBytes
-                || frame.Stage != (int)RealTimeNativeCheckpointStage.Verify
+                || frame.Stage != (int)RealTimeNativeCheckpointStage.Verify && frame.Stage != (int)RealTimeNativeCheckpointStage.Commit
                     && (frame.ReferenceStateBytes != null || frame.ReferenceStateHash != null)) return;
             var copied = RealTimeNativeCheckpointLimits.Copy(frame);
             _mainThreadAccessor.Post(() =>
@@ -60,6 +66,43 @@ namespace WOTRMultiplayer.Services
                         var fingerprint = Game.Players.FirstOrDefault(player => player.Id == Game.LocalPlayerId)?.ContentState?.RealTimeBuildFingerprint;
                         if (fingerprint != copied.BuildFingerprint) return;
                         if (_nativeReceivePrepare != null && !IsCurrentNativeReceive()) ResetNativeCheckpointReceive();
+                        if (copied.Stage == (int)RealTimeNativeCheckpointStage.Abort)
+                        {
+                            var source = RealTimeNativeCheckpointLimits.AbortSource(copied);
+                            if (source == null) return;
+                            var repeatedRequest = _nativeAbortRequest != null;
+                            if (_nativeReceivePrepare == null)
+                            {
+                                // A lost Prepare must not make Abort unacknowledgeable.
+                                // Retain a tombstone, never allocate/load archive data.
+                                var prepare = RealTimeNativeCheckpointLimits.Copy(source);
+                                prepare.Stage = (int)RealTimeNativeCheckpointStage.Prepare;
+                                prepare.ArchiveHash = null; prepare.ArchiveBytes = prepare.ChunkBytes = prepare.ChunkCount = 0;
+                                _nativeReceivePrepare = prepare; _nativeReceiveSession = Game;
+                                _nativeReceiveCombat = Game.Combat; _nativeReceiveState = Game.RealTimeCombat;
+                                _nativeReceivePhase = Game.RealTimeCombat.Phase;
+                                if (RealTimeNativeCheckpointLimits.IsManifest(source)) _nativeReceiveManifest = source;
+                                _nativeAbortRequest = copied;
+                                FailNativeCheckpointReceive("native-transfer-host-aborted-before-prepare", notify: false);
+                                PauseNativeCheckpointReceive(prepare);
+                            }
+                            else
+                            {
+                                if (!RealTimeNativeCheckpointLimits.SameIdentity(_nativeReceivePrepare, copied)) return;
+                                var manifest = _nativeReceiveManifest;
+                                if (manifest != null && (source.ArchiveHash != manifest.ArchiveHash
+                                    || source.ArchiveBytes != manifest.ArchiveBytes || source.ChunkCount != manifest.ChunkCount
+                                    || source.ChunkBytes != manifest.ChunkBytes)) return;
+                                if (_nativeAbortRequest != null && (_nativeAbortRequest.ArchiveHash != copied.ArchiveHash
+                                    || _nativeAbortRequest.ArchiveBytes != copied.ArchiveBytes
+                                    || _nativeAbortRequest.ChunkCount != copied.ChunkCount)) return;
+                                if (manifest == null && RealTimeNativeCheckpointLimits.IsManifest(source)) _nativeReceiveManifest = source;
+                                _nativeAbortRequest = copied;
+                                FailNativeCheckpointReceive("native-transfer-host-aborted", notify: false);
+                            }
+                            TryAcknowledgeNativeAbort(repeat: repeatedRequest);
+                            return;
+                        }
                         if (copied.Stage == (int)RealTimeNativeCheckpointStage.Prepare)
                         {
                             if (!RealTimeNativeCheckpointLimits.IsPrepare(copied)) return;
@@ -73,21 +116,33 @@ namespace WOTRMultiplayer.Services
                                 return;
                             }
                             _nativeReceivePrepare = copied; _nativeReceiveSession = Game;
+                            Game.RealTimeCombat.RecoveryStatus = "rebuilding";
                             _nativeReceiveCombat = Game.Combat; _nativeReceiveState = Game.RealTimeCombat;
                             _nativeReceivePhase = Game.RealTimeCombat.Phase; _nativeReceiveDeadline = DateTime.UtcNow.AddSeconds(60);
                             PauseNativeCheckpointReceive(copied);
                             return;
                         }
                         if (!IsCurrentNativeReceive() || !RealTimeNativeCheckpointLimits.SameIdentity(_nativeReceivePrepare, copied)) return;
-                        if (copied.Stage == (int)RealTimeNativeCheckpointStage.Abort)
+                        if (copied.Stage == (int)RealTimeNativeCheckpointStage.Commit)
                         {
-                            if (_nativeReceiveManifest != null && copied.ArchiveHash != _nativeReceiveManifest.ArchiveHash) return;
-                            FailNativeCheckpointReceive("native-transfer-host-aborted", copied, notify: false);
+                            var manifest = RealTimeNativeCheckpointLimits.Copy(copied, includeReference: false);
+                            manifest.Stage = (int)RealTimeNativeCheckpointStage.Manifest;
+                            if (!RealTimeNativeCheckpointLimits.IsManifest(manifest) || copied.ReferenceStateBytes != null
+                                || _nativeReceiveFailed || _nativeAbortRequest != null
+                                || _nativeReceiver?.MatchesManifest(manifest) != true
+                                || _nativeReferenceVerifiedHash != copied.CanonicalStateHash
+                                || copied.ReferenceStateHash != _nativeReferenceRequest?.ReferenceStateHash
+                                || !RealTimeNativeCheckpointLimits.IsHash(copied.ReferenceStateHash)) return;
+                            if (_nativeCommitted)
+                                SendNativeCheckpointAck(manifest, RealTimeNativeCheckpointAckStage.Committed,
+                                    canonicalStateHash: copied.CanonicalStateHash, referenceStateHash: copied.ReferenceStateHash);
+                            else if (!_nativeCommitPending) CommitNativeCheckpointReference(copied, manifest);
                             return;
                         }
                         if (copied.Stage == (int)RealTimeNativeCheckpointStage.Load)
                         {
                             var requested = RealTimeNativeCheckpointLimits.AsManifest(copied);
+                            Game.RealTimeCombat.RecoveryStatus = "loading";
                             if (!_nativeReceivePrepared || _nativeReceiveFailed || _nativeReceivedSource == null
                                 || requested == null || _nativeReceiver?.MatchesManifest(requested) != true) return;
                             if (_nativeLoadOperation != null)
@@ -113,6 +168,7 @@ namespace WOTRMultiplayer.Services
                         if (copied.Stage == (int)RealTimeNativeCheckpointStage.Verify)
                         {
                             var manifest = RealTimeNativeCheckpointLimits.ReferenceManifest(copied);
+                            Game.RealTimeCombat.RecoveryStatus = "verifying";
                             if (!_nativeReceivePrepared || _nativeReceiveFailed || _nativeReceivedSource == null
                                 || manifest == null || _nativeReceiver?.MatchesManifest(manifest) != true
                                 || _nativeLoadOperation?.IsLoaded != true) return;
@@ -154,6 +210,7 @@ namespace WOTRMultiplayer.Services
 
         private async void PauseNativeCheckpointReceive(NotifyRealTimeNativeCheckpoint prepare)
         {
+            _nativePausePending = true;
             try
             {
                 await GameInteraction.SetPauseAsync(true);
@@ -161,7 +218,10 @@ namespace WOTRMultiplayer.Services
                 {
                     lock (ActionLock)
                     {
-                        if (!IsCurrentNativeReceive() || !ReferenceEquals(_nativeReceivePrepare, prepare) || _nativeReceiveFailed) return;
+                        if (!ReferenceEquals(_nativeReceivePrepare, prepare)) return;
+                        _nativePausePending = false;
+                        if (!IsCurrentNativeReceive()) return;
+                        if (_nativeReceiveFailed) { TryAcknowledgeNativeAbort(); return; }
                         if (!GameInteraction.IsPaused) { FailNativeCheckpointReceive("native-transfer-pause-not-confirmed"); return; }
                         _nativeReceivePrepared = true;
                         SendNativeCheckpointAck(prepare, RealTimeNativeCheckpointAckStage.Prepared);
@@ -174,7 +234,12 @@ namespace WOTRMultiplayer.Services
                 _mainThreadAccessor.Post(() =>
                 {
                     lock (ActionLock)
-                        if (ReferenceEquals(_nativeReceivePrepare, prepare)) FailNativeCheckpointReceive("native-transfer-pause-failed");
+                    {
+                        if (!ReferenceEquals(_nativeReceivePrepare, prepare)) return;
+                        _nativePausePending = false;
+                        FailNativeCheckpointReceive("native-transfer-pause-failed");
+                        TryAcknowledgeNativeAbort();
+                    }
                 });
             }
         }
@@ -184,7 +249,7 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
-                await operation.RunAsync(() => LoadTransferredNativeCheckpointAsync(manifest, authorized));
+                await operation.RunAsync(() => LoadTransferredNativeCheckpointAsync(manifest, authorized, operation));
                 _mainThreadAccessor.Post(() =>
                 {
                     lock (ActionLock)
@@ -241,6 +306,44 @@ namespace WOTRMultiplayer.Services
                     lock (ActionLock)
                         if (Authorized()) FailNativeCheckpointReceive("native-reference-verification-failed");
                 });
+            }
+        }
+
+        private async void CommitNativeCheckpointReference(NotifyRealTimeNativeCheckpoint request, NotifyRealTimeNativeCheckpoint manifest)
+        {
+            _nativeCommitPending = true;
+            var operation = _nativeLoadOperation;
+            bool Authorized() => IsCurrentNativeReceive() && !_nativeReceiveFailed
+                && ReferenceEquals(_nativeLoadOperation, operation) && operation?.IsLoaded == true
+                && _nativeReferenceVerifiedHash == request.CanonicalStateHash;
+            try
+            {
+                var reference = Mapper.Map<NetworkCombatState>(RealTimeNativeReferenceCodec.Decode(_nativeReferenceRequest.ReferenceStateBytes));
+                var receipt = operation?.Receipt;
+                var committed = receipt != null && await CombatInteraction.TryCommitNativeReferenceStateAsync(
+                    receipt.World, receipt.RepairObligation, reference, Authorized);
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                    {
+                        if (!Authorized()) return;
+                        _nativeCommitPending = false;
+                        if (!committed) { FailNativeCheckpointReceive("native-commit-not-confirmed"); return; }
+                        _nativeCommitted = true;
+                        _localCriticalFaultState = null;
+                        Game.RealTimeCombat.CanonicalStateHash = request.CanonicalStateHash;
+                        Game.RealTimeCombat.RecoveryStatus = "committed";
+                        _nativeReceiveDeadline = DateTime.UtcNow.AddSeconds(30);
+                        SendNativeCheckpointAck(manifest, RealTimeNativeCheckpointAckStage.Committed,
+                            canonicalStateHash: request.CanonicalStateHash, referenceStateHash: request.ReferenceStateHash);
+                    }
+                });
+            }
+            catch (Exception error)
+            {
+                Logger.LogError(error, "Native reconstruction Commit refused. No resume authorized.");
+                _mainThreadAccessor.Post(() => { lock (ActionLock) { _nativeCommitPending = false;
+                    if (Authorized()) FailNativeCheckpointReceive("native-commit-failed"); } });
             }
         }
 
@@ -305,8 +408,30 @@ namespace WOTRMultiplayer.Services
             if (!IsCurrentNativeReceive()) return;
             _nativeReceiveFailed = true; _nativeReceiveDeadline = DateTime.MaxValue;
             _nativeReceiver?.Dispose(); _nativeReceivedSource?.Dispose(); _nativeReceivedSource = null;
-            if (notify) SendNativeCheckpointAck(frame ?? _nativeReceiveManifest ?? _nativeReceivePrepare, RealTimeNativeCheckpointAckStage.Failed);
-            Logger.LogWarning("Native checkpoint reception aborted. Reason={Reason}; no mechanical load or resume.", reason);
+            if (notify && _nativeAbortRequest == null)
+                SendNativeCheckpointAck(frame ?? _nativeReceiveManifest ?? _nativeReceivePrepare, RealTimeNativeCheckpointAckStage.Failed);
+            Logger.LogWarning("Native checkpoint reception revoked. Reason={Reason}; client remains protected.", reason);
+        }
+
+        private void TryAcknowledgeNativeAbort(bool repeat = false)
+        {
+            if (_nativeAbortRequest == null || !IsCurrentNativeReceive() || !_nativeReceiveFailed
+                || _nativePausePending || !GameInteraction.IsPaused || RealTimeNativeLoadLease.IsActive
+                || _nativeLoadOperation != null && !_nativeLoadOperation.CanAcknowledgeAbort
+                || _nativeReferenceRestorationOwner != null || _nativeCommitPending || _nativeAbortAcknowledged && !repeat
+                || DateTime.UtcNow < _nativeAbortAckNextAttempt) return;
+            try
+            {
+                SendNativeCheckpointAck(_nativeAbortRequest, RealTimeNativeCheckpointAckStage.Aborted);
+                _nativeAbortAcknowledged = true;
+                _nativeAbortAckNextAttempt = default;
+                _nativeCommitPending = false; _nativeCommitted = false;
+            }
+            catch (Exception error)
+            {
+                _nativeAbortAckNextAttempt = DateTime.UtcNow.AddSeconds(1);
+                Logger.LogWarning(error, "Unable to acknowledge native abort; client remains protected.");
+            }
         }
 
         private void TickNativeCheckpointReceive()
@@ -315,6 +440,7 @@ namespace WOTRMultiplayer.Services
             {
                 if (_nativeReceivePrepare == null) return;
                 if (!IsCurrentNativeReceive()) { ResetNativeCheckpointReceive(); return; }
+                if (_nativeAbortRequest != null) { TryAcknowledgeNativeAbort(); return; }
                 if (DateTime.UtcNow >= _nativeReceiveDeadline) FailNativeCheckpointReceive("native-transfer-receive-timeout");
             }
         }
@@ -341,6 +467,9 @@ namespace WOTRMultiplayer.Services
                 _nativeLoadOperation = null;
                 _nativeReferenceRestorationOwner = null;
                 _nativeReferenceRequest = null; _nativeReferenceVerifiedHash = null;
+                _nativeAbortRequest = null; _nativeAbortAcknowledged = false; _nativePausePending = false;
+                _nativeAbortAckNextAttempt = default;
+                _nativeCommitPending = false; _nativeCommitted = false;
             }
         }
     }

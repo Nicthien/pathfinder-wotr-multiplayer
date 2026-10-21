@@ -67,7 +67,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             public UnitEntityData Unit { get; set; }
             public Vector3 Start { get; set; }
             public Vector3 Target { get; set; }
-            public DateTime Started { get; set; }
+            public TimeSpan Started { get; set; }
         }
 
         public void TickRealTimePresentation(bool active)
@@ -105,7 +105,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 var move = pair.Value;
                 if (move.Unit?.View == null) { _visualMoves.Remove(pair.Key); continue; }
                 var progress = active
-                    ? RealTimeVisualInterpolation.Progress(move.Started, DateTime.UtcNow, TimeSpan.FromMilliseconds(300))
+                    ? RealTimeVisualInterpolation.Progress(move.Started, Game.Instance.TimeController.GameTime, TimeSpan.FromMilliseconds(300))
                     : 1f;
                 move.Unit.View.transform.position = Vector3.LerpUnclamped(move.Start, move.Target, progress);
                 if (progress >= 1f) _visualMoves.Remove(pair.Key);
@@ -406,11 +406,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
 
         public void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit = null)
+            => StartTurnBasedCombatTurn(unitId, onInvalidUnit, null);
+
+        public void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply)
         {
             _mainThreadAccessor.Post(() =>
             {
                 try
                 {
+                    if (canApply != null && !canApply()) return;
                     var currentUnit = _gameStateLookupService.GetUnitEntity(unitId);
                     if (currentUnit == null)
                     {
@@ -493,6 +497,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public NetworkCombatState GetRealTimeCombatState()
         {
+            using var capture = new RealTimeCaptureScope();
             // The turn-based controller is not initialized when the game runs in RTwP.
             // Do not read its round, surprise state or per-unit turn data here.
             return new NetworkCombatState
@@ -609,8 +614,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return TryApplyAndReadRealTimeCombatStateAsync(networkCombatState, () => true);
         }
 
+        public Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState, Func<bool> canApply)
+            => TryApplyAndReadRealTimeCombatStateAsync(networkCombatState, canApply, false);
+
         public Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
-            NetworkCombatState networkCombatState, Func<bool> canApply)
+            NetworkCombatState networkCombatState, Func<bool> canApply, bool reconcileTurnBasedBuffs)
         {
             if (canApply == null)
                 throw new ArgumentNullException(nameof(canApply));
@@ -624,6 +632,23 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         completion.TrySetResult(null);
                         return;
                     }
+                    using var identities = new RealTimeBuffIdentityReconciliation();
+                    if (reconcileTurnBasedBuffs && Kingmaker.Settings.SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue())
+                    {
+                        // Before retiring TB simulation, use its existing native buff
+                        // reconciliation. Never remove native mechanical facts as replicas.
+                        var units = networkCombatState.Units.Select(remote =>
+                            (Remote: remote, Local: _gameStateLookupService.GetUnitEntity(remote.Id))).ToList();
+                        if (units.Any(pair => pair.Local == null))
+                            throw new InvalidOperationException("transition-buff-unit-missing");
+                        foreach (var pair in units)
+                        {
+                            _buffInteractionService.UpdateUnitBuffs(pair.Local, pair.Remote.BuffCollection);
+                            identities.Align(pair.Local, pair.Remote.BuffCollection,
+                                _buffInteractionService.GetUnitBuffs(pair.Local));
+                        }
+                        _logger.LogInformation("[CombatMode] Reconciled native TB buffs before presentation checkpoint. Units={Units}", units.Count);
+                    }
                     NetworkCombatState applied;
                     using (var restoration = new RealTimeBuffRestoreTransaction())
                     {
@@ -631,6 +656,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         applied = GetRealTimeCombatState();
                         restoration.VerifyAndCommit(networkCombatState, applied);
                     }
+                    identities.Commit();
                     completion.TrySetResult(applied);
                 }
                 catch (Exception ex)
@@ -645,6 +671,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState, RealTimeBuffRestoreTransaction restoration,
             bool requireNativeEntities = false)
         {
+            using var capture = new RealTimeCaptureScope();
             var projectileStates = networkCombatState.ProjectilesCaptured
                 ? RealTimeProjectileReplica.ValidateAndCopy(networkCombatState.Projectiles) : null;
             var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
@@ -1167,6 +1194,40 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return tcs.Task;
         }
 
+        public Task RetireExcludedDuplicatesAsync(List<string> excluded, List<NetworkUnit> confirmed, Func<bool> canApply)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    var confirmedIds = new HashSet<string>(confirmed.Select(unit => unit.Id), StringComparer.OrdinalIgnoreCase);
+                    if (!canApply()) { completion.TrySetResult(false); return; }
+                    foreach (var id in excluded)
+                    {
+                        if (confirmedIds.Contains(id)) continue;
+                        var orphan = _gameStateLookupService.GetUnitEntity(id);
+                        if (orphan == null || orphan.IsPlayerFaction || orphan.Master != null || !orphan.IsPlayersEnemy) continue;
+                        var matches = confirmed.Where(remote => remote.BlueprintId == orphan.Blueprint.AssetGuid.ToString()
+                            && remote.SceneName == orphan.HoldingState?.SceneName
+                            && Vector3.Distance(orphan.Position, remote.Position.ToUnityVector3()) < 2f
+                            && _gameStateLookupService.GetUnitEntity(remote.Id) != null).ToList();
+                        if (matches.Count != 1)
+                        {
+                            _logger.LogWarning("[CombatEntities] Unconfirmed excluded entity retained. Id={Id}, Matches={Matches}", id, matches.Count);
+                            continue;
+                        }
+                        orphan.LeaveCombat();
+                        orphan.MarkForDestroy();
+                        _logger.LogWarning("[CombatEntities] Retired excluded duplicate. Id={Id}, ConfirmedId={ConfirmedId}", id, matches[0].Id);
+                    }
+                    completion.TrySetResult(true);
+                }
+                catch (Exception failure) { completion.TrySetException(failure); }
+            });
+            return completion.Task;
+        }
+
         public Task KillUnitAndResetTurnAsync(NetworkPlayer player, string unitId)
         {
             var tcs = new TaskCompletionSource<bool>();
@@ -1310,7 +1371,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         return;
                     }
 
-                    RunUnitAbilityCommand(executor, networkAbilityUse);
+                    RunUnitAbilityCommand(executor, networkAbilityUse, confirmedReplay: true);
                 });
             }
             catch (Exception ex)
@@ -1720,6 +1781,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     MasterUnitId = unitEntity.Master?.UniqueId,
                     GroupId = unitEntity.GroupId,
                     SceneName = unitEntity.HoldingState?.SceneName,
+                    IsSpottedByPlayer = unitEntity.Stealth?.IsSpottedByPlayer == true,
                     Position = unitEntity.Position.ToNetworkVector3(),
                     Orientation = unitEntity.Orientation,
                     TurnBasedInfo = includeTurnBasedInfo ? GetUnitTurnBasedInfo(unitEntity) : null,
@@ -1983,6 +2045,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     UpdateUnit(unit, networkUnit, updatePosition: true);
                     UpdateUnitCombatState(unit, networkUnit.CombatState);
 
+                    if (networkUnit.IsSpottedByPlayer && unit.Stealth != null && !unit.Stealth.IsSpottedByPlayer)
+                    {
+                        foreach (var observer in Game.Instance.Player.PartyAndPets)
+                            unit.Stealth.AddSpottedBy(observer);
+                        _logger.LogInformation("[CombatVisibility] Applied confirmed party detection. UnitId={UnitId}", unit.UniqueId);
+                    }
+
                     if (!requiresFullUpdate)
                     {
                         if (presentationOnly) _buffInteractionService.UpdateUnitBuffsPresentation(unit, networkUnit.BuffCollection);
@@ -2190,7 +2259,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
         }
 
-        private void RunUnitAbilityCommand(UnitEntityData executorUnit, NetworkAbilityUse networkAbilityUse)
+        private void RunUnitAbilityCommand(UnitEntityData executorUnit, NetworkAbilityUse networkAbilityUse, bool confirmedReplay = false)
         {
             var abilityData = _gameStateLookupService.FindAbility(executorUnit, networkAbilityUse.Ability);
             if (abilityData == null)
@@ -2224,16 +2293,39 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             var target = CreateTargetWrapper(networkAbilityUse.Target);
 
-            RunUnitAbilityCommand(executorUnit, abilityData, target, networkAbilityUse.VectorPath, commandType, networkAbilityUse.MovementLimit);
+            if (confirmedReplay && Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive
+                && Game.Instance.TurnBasedCombatController?.CurrentTurn != null && networkAbilityUse.CasterPosition != null)
+            {
+                var confirmedPosition = networkAbilityUse.CasterPosition.ToUnityVector3();
+                if (float.IsNaN(confirmedPosition.x) || float.IsInfinity(confirmedPosition.x)
+                    || float.IsNaN(confirmedPosition.y) || float.IsInfinity(confirmedPosition.y)
+                    || float.IsNaN(confirmedPosition.z) || float.IsInfinity(confirmedPosition.z))
+                {
+                    _logger.LogError("[AbilityReplay] Invalid confirmed caster position. UnitId={UnitId}", executorUnit.UniqueId);
+                    return;
+                }
+                _logger.LogInformation("[AbilityReplay] Aligning caster before confirmed cast. UnitId={UnitId}, Previous={Previous}, Confirmed={Confirmed}",
+                    executorUnit.UniqueId, executorUnit.Position, confirmedPosition);
+                executorUnit.Position = confirmedPosition;
+            }
+
+            RunUnitAbilityCommand(executorUnit, abilityData, target, networkAbilityUse.VectorPath, commandType, networkAbilityUse.MovementLimit, confirmedReplay);
         }
 
-        private void RunUnitAbilityCommand(UnitEntityData executorUnit, AbilityData abilityData, TargetWrapper targetWrapper, List<NetworkVector3> vectorPath, UnitCommand.CommandType commandType, string rawMovementLimit)
+        private void RunUnitAbilityCommand(UnitEntityData executorUnit, AbilityData abilityData, TargetWrapper targetWrapper, List<NetworkVector3> vectorPath, UnitCommand.CommandType commandType, string rawMovementLimit, bool confirmedReplay = false)
         {
             var command = UnitUseAbility.CreateCastCommand(abilityData, targetWrapper, commandType);
             command.CreatedByPlayer = true;
 
             SetCommandPath(vectorPath, command);
             SetTurnMovementLimit(rawMovementLimit, executorUnit);
+
+            // NotifyAbilityUsed is emitted after OnStart on the owning instance,
+            // unlike an RTwP intention. Do not reject this already approved cast
+            // because the replay's local action budget differs.
+            if (confirmedReplay && Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive
+                && Game.Instance.TurnBasedCombatController?.CurrentTurn != null)
+                ConfirmedAbilityReplay.Register(command);
 
             _logger.LogInformation("Unit UseAbility command has been initiated. UnitId={UnitId}, TargetPoint={TargetPoint}, TargetUnitId={TargetUnitId}, AbilityId={AbilityId}, AbilityName={AbilityName}, Path={Path}, MovementLimit={MovementLimit}",
                 executorUnit.UniqueId, targetWrapper.Point, targetWrapper.Unit?.UniqueId, abilityData.UniqueId, abilityData.NameForAcronym, vectorPath, rawMovementLimit);
@@ -2245,7 +2337,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void SetCommandPath(List<NetworkVector3> path, UnitCommand command)
         {
-            if (path == null)
+            if (path == null || path.Count == 0)
             {
                 return;
             }
@@ -2384,7 +2476,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 unit.View.transform.position = visualStart;
                 _visualMoves[unit.UniqueId] = new VisualMove
                 {
-                    Unit = unit, Start = visualStart, Target = target, Started = DateTime.UtcNow
+                    Unit = unit, Start = visualStart, Target = target, Started = Game.Instance.TimeController.GameTime
                 };
                 return;
             }

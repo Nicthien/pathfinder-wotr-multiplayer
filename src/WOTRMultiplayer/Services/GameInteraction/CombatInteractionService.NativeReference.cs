@@ -14,11 +14,53 @@ namespace WOTRMultiplayer.Services.GameInteraction
 {
     public partial class CombatInteractionService
     {
+        // Commit is deliberately limited to a drained, fully native world.
+        // Presentation replicas and unrelated repair obligations never qualify.
+        public Task<bool> TryCommitNativeReferenceStateAsync(object expectedWorld, object repairOwner,
+            NetworkCombatState reference, Func<bool> canCommit)
+        {
+            if (canCommit == null) throw new ArgumentNullException(nameof(canCommit));
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    var game = Game.Instance;
+                    if (!canCommit()) { completion.TrySetResult(false); return; }
+                    if (!RealTimePresentationRuntime.IsClientActive || !ReferenceEquals(game?.State, expectedWorld)
+                        || !game.IsPaused || RealTimeNativeLoadLease.IsActive
+                        || game.CurrentMode != GameModeType.Default && game.CurrentMode != GameModeType.Pause
+                        || IsInCrusadeTacticalCombat()
+                        || repairOwner is not RealTimeNativeLoadLease { IsDrainedAndCompleted: true }
+                        || !RealTimeNativeGraphRepair.IsOnlyObligation(expectedWorld, repairOwner)
+                        || LoadingProcess.Instance.IsLoadingInProcess || game.EntityCreator.CreationQueue.Any()
+                        || game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress
+                        || reference?.NativeTopology == null)
+                        throw new InvalidOperationException("native-commit-world-or-receipt-not-ready");
+                    RealTimeNativeCharacterUiGuard.RequireIdle(game);
+                    RealTimeBuffReplicaStore.RequireMechanicalState(game.State.Units.All);
+                    RealTimeAreaReplicaFactory.RequireMechanicalState(game.State.AreaEffects);
+                    var topology = RealTimeNativeGraphInspection.CaptureState(game.State.Units.All, game.State.AreaEffects, canCommit);
+                    var difference = RealTimeNativeTopologyComparison.Difference(reference.NativeTopology, topology);
+                    var actual = GetRealTimeCombatState();
+                    if (difference != null || RealTimeCombatTemporalDiff.Summarize(reference, actual) != null
+                        || RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference })
+                            != RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = actual }))
+                        throw new InvalidOperationException("native-commit-reference-changed:" + difference);
+                    if (!canCommit()) { completion.TrySetResult(false); return; }
+                    RealTimeNativeGraphRepair.Remove(expectedWorld, repairOwner);
+                    completion.TrySetResult(true); // Still paused; network Resume is separate.
+                }
+                catch (Exception error) { completion.TrySetException(error); }
+            });
+            return completion.Task;
+        }
+
         public NetworkCombatState GetRealTimeNativeReferenceState()
         {
             var game = Game.Instance;
             if (!RealTimePresentationRuntime.Enabled || RealTimePresentationRuntime.IsClientActive
-                || game?.State == null || game.Player == null || !game.IsPaused || RealTimeNativeLoadLease.IsActive
+                || game?.State == null || game.Player == null || !CombatSaving.CombatSavePauseLease.IsWorldPaused(game) || RealTimeNativeLoadLease.IsActive
                 || game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress
                 || LoadingProcess.Instance.IsLoadingInProcess || game.EntityCreator.CreationQueue.Any()
                 || game.CurrentMode != GameModeType.Default && game.CurrentMode != GameModeType.Pause
@@ -28,7 +70,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var world = game.State;
             var state = GetRealTimeCombatState();
             state.NativeTopology = RealTimeNativeGraphInspection.CaptureState(world.Units.All, world.AreaEffects,
-                () => ReferenceEquals(Game.Instance, game) && ReferenceEquals(game.State, world) && game.IsPaused);
+                () => ReferenceEquals(Game.Instance, game) && ReferenceEquals(game.State, world) && CombatSaving.CombatSavePauseLease.IsWorldPaused(game));
             return state;
         }
         // Restores confirmed data on native objects, never missing presentation

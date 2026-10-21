@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Kingmaker.EntitySystem.Persistence;
 using NUnit.Framework;
 using WOTRMultiplayer.Services.GameInteraction;
 
@@ -7,6 +8,63 @@ namespace WOTRMultiplayer.UnitTests.Services
 {
     public class RealTimeNativeLoadOperationTests
     {
+        [Test]
+        public async Task FailedTaskCannotAcknowledgeAbortBeforeItsExactLeaseHasDrainedAndClosed()
+        {
+            var operation = new RealTimeNativeLoadOperation(() => true);
+            var pending = new TaskCompletionSource<RealTimeNativeWorldLoadResult>();
+            var task = operation.RunAsync(() => pending.Task);
+            using var source = new RealTimeMemorySaver(); source.SaveJson("header", "{}");
+            source.SaveJson("player", "{}"); source.SaveJson("party", "{}"); source.Seal();
+            var info = new SaveInfo { Saver = source, FolderName = "RTwP-volatile-11111111111111111111111111111111.memory" };
+            using var lease = RealTimeNativeLoadLease.Begin(new object(), info, () => true, (_, _) => { });
+            operation.AttachLease(lease);
+            Assert.That(operation.CanAcknowledgeAbort, Is.False);
+            pending.SetException(new InvalidOperationException("synthetic-worker-fault"));
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+            Assert.That(operation.CanAcknowledgeAbort, Is.False);
+            lease.Fail("revoked"); lease.MarkWorkersDrained();
+            Assert.That(operation.CanAcknowledgeAbort, Is.False);
+            lease.Dispose();
+            Assert.That(operation.CanAcknowledgeAbort, Is.True);
+            Assert.That(operation.IsLoaded, Is.False);
+            Assert.That(lease.IsDrainedAndCompleted, Is.False);
+            await Task.CompletedTask;
+        }
+
+        [Test]
+        public async Task DisposingWithoutAPositiveDrainObservationCannotConfirmAbort()
+        {
+            var operation = new RealTimeNativeLoadOperation(() => true);
+            var pending = new TaskCompletionSource<RealTimeNativeWorldLoadResult>();
+            var task = operation.RunAsync(() => pending.Task);
+            using var source = new RealTimeMemorySaver(); source.SaveJson("header", "{}");
+            source.SaveJson("player", "{}"); source.SaveJson("party", "{}"); source.Seal();
+            var info = new SaveInfo { Saver = source, FolderName = "RTwP-volatile-11111111111111111111111111111111.memory" };
+            using var lease = RealTimeNativeLoadLease.Begin(new object(), info, () => true, (_, _) => { });
+            operation.AttachLease(lease);
+            pending.SetResult(Receipt()); await task;
+            lease.Dispose();
+            Assert.That(operation.CanAcknowledgeAbort, Is.False);
+        }
+
+        [Test]
+        public async Task DuplicateRequestCannotMakeAPendingFirstOperationLookSettled()
+        {
+            var authorized = true;
+            var operation = new RealTimeNativeLoadOperation(() => authorized);
+            var pending = new TaskCompletionSource<RealTimeNativeWorldLoadResult>();
+            var task = operation.RunAsync(() => pending.Task);
+            authorized = false;
+            Assert.ThrowsAsync<InvalidOperationException>(() => operation.RunAsync(() => Task.FromResult(Receipt())));
+            Assert.That(operation.CanAcknowledgeAbort, Is.False);
+            pending.SetResult(Receipt());
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+            Assert.That(operation.CanAcknowledgeAbort, Is.True);
+            Assert.That(operation.Receipt, Is.Null);
+            await Task.CompletedTask;
+        }
+
         private static RealTimeNativeWorldLoadResult Receipt() => new()
         { World = new object(), RepairObligation = new object() };
 

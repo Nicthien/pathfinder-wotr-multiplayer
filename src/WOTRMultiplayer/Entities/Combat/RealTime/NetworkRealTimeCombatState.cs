@@ -4,7 +4,11 @@ namespace WOTRMultiplayer.Entities.Combat.RealTime
 {
     public class NetworkRealTimeCombatState
     {
-        public const int ProtocolVersion = 58;
+        public const int ProtocolVersion = 74;
+
+        // Local diagnostic state, not an independent source of combat truth.
+        public string RecoveryStatus { get; set; }
+        public string RecoveryFailure { get; set; }
 
         public bool CombatEndPending { get; set; }
 

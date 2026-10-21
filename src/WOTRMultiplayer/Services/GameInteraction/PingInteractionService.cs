@@ -111,8 +111,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void Create(NetworkPlayer player, NetworkPing ping)
         {
+            if (ping == null) return;
+            if (ping.Type == NetworkPingType.WorldPosition && (ping.WorldPosition == null
+                || !IsFinite(ping.WorldPosition.X) || !IsFinite(ping.WorldPosition.Y) || !IsFinite(ping.WorldPosition.Z))) return;
+            var area = Game.Instance?.CurrentlyLoadedArea;
             _mainThreadAccessor.Post(() =>
             {
+                if (!ReferenceEquals(Game.Instance?.CurrentlyLoadedArea, area)) return;
                 switch (ping.Type)
                 {
                     case NetworkPingType.WorldPosition:
@@ -260,9 +265,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             // this is a placeholder that needs to be replaced with something good
             var pingObject = UnityEngine.Object.Instantiate(ClickPointerManager.Instance.PointerPrefab.gameObject);
             var decayingBehaviour = pingObject.AddComponent<WorldPositionPingBehaviour>();
-            var markerDuration = TimeSpan.FromSeconds(2);
+            var markerDuration = TimeSpan.FromSeconds(3);
             Vector3? scale = TacticalCombatHelper.IsActive ? new Vector3(1f, 3f, 1f) : null;
             decayingBehaviour.Begin(markerDuration, position, scale);
+            decayingBehaviour.SetPlayerColor(player?.IsHost != false);
             PlayPingSound(pingObject);
 
             // no need to create marker if there is no responsible player for it (local player)
@@ -277,6 +283,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void CreateOutsideOfCameraMarker(Vector3 position, TimeSpan duration)
         {
+            if (PointMarkerController.Instance == null) return;
             var marker = PointMarkerController.Instance.transform.Find(MarkerObjectName)?.GetComponent<PointMarker>();
             if (marker == null)
             {
@@ -295,8 +302,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private void PlayPingSound(GameObject pingObject)
         {
-            UISoundController.Instance.Play(UISoundType.GlobalMapLocationsSelect, pingObject);
+            UISoundController.Instance?.Play(UISoundType.GlobalMapLocationsSelect, pingObject);
         }
+
+        private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
         private NetworkPing GetPingedGuiElement()
         {

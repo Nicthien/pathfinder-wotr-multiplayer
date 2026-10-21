@@ -131,9 +131,11 @@ namespace WOTRMultiplayer.UI.Windows
 
             var baseMenuItem = SetupBaseMenuItem(baseLayout);
             var hostMenuItem = CreateMenuItem(Screen.width * 0.33f, baseMenuItem, baseLayout.transform);
+            _ownedHostMenuItem = hostMenuItem;
             _hostMenuController.Initialize(baseLayout, hostMenuItem);
 
             var joinMenuItem = CreateMenuItem(Screen.width * 0.66f, baseMenuItem, baseLayout.transform);
+            _ownedJoinMenuItem = joinMenuItem;
             _joinMenuController.Initialize(baseLayout, joinMenuItem);
             DestroyImmediate(baseMenuItem);
 
@@ -216,11 +218,19 @@ namespace WOTRMultiplayer.UI.Windows
             return baseItem;
         }
 
+        private GameObject _ownedHostMenuItem;
+        private GameObject _ownedJoinMenuItem;
+
         private new void OnDestroy()
         {
-            _logger.LogInformation("OnDestroy");
-            _hostMenuController.Dispose();
-            _joinMenuController.Dispose();
+            _logger?.LogInformation("OnDestroy");
+            // A delayed destruction of the old window must not dispose the new scene's controllers.
+            if (_hostMenuController is WOTRMultiplayer.UI.Controllers.MenuItemControllerBase host
+                && host.OwnsMenuItem(_ownedHostMenuItem))
+                host.Dispose();
+            if (_joinMenuController is WOTRMultiplayer.UI.Controllers.MenuItemControllerBase join
+                && join.OwnsMenuItem(_ownedJoinMenuItem))
+                join.Dispose();
             base.OnDestroy();
         }
     }

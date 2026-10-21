@@ -170,6 +170,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         private static bool InterceptRealTimePlayerCommand(UnitCommand command)
         {
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return false;
             if (RealTimePresentationRuntime.IsClientActive && command?.CreatedByPlayer != true)
                 return false;
             if (!RealTimeCommandExecutionScope.IsActive && Main.Multiplayer.IsRealTimeCombatBarrierActive
@@ -382,7 +383,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                         OnUnitMove(unitAttack.Executor, __instance.Executor.Position);
                         break;
                     case UnitUseAbility unitUseAbility:
-                        Main.GetLogger<UnitCommandsPatches>().LogInformation("ForceFinished unit useability command. ExecutorUnitId={ExecutorUnitId}", __instance.Executor.UniqueId, unitUseAbility.TargetUnit?.UniqueId);
+                        Main.GetLogger<UnitCommandsPatches>().LogWarning("[AbilityReplay] Spell stopped before start. ExecutorUnitId={ExecutorUnitId}, Ability={Ability}, ConfirmedReplay={ConfirmedReplay}, CloseEnough={CloseEnough}, MoveCooldown={MoveCooldown}, StandardCooldown={StandardCooldown}, MovementLimit={MovementLimit}",
+                            __instance.Executor.UniqueId, unitUseAbility.Ability?.NameForAcronym,
+                            ConfirmedAbilityReplay.Contains(__instance), __instance.IsUnitCloseEnough(),
+                            __instance.Executor.CombatState.Cooldown.MoveAction, __instance.Executor.CombatState.Cooldown.StandardAction,
+                            Game.Instance.TurnBasedCombatController?.CurrentTurn?.CurrentMovementLimit);
                         OnUnitMove(unitUseAbility.Executor, __instance.Executor.Position);
                         break;
                 }
@@ -398,6 +403,10 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void UnitUseAbility_OnStart_Postfix(UnitUseAbility __instance)
         {
+            if (ConfirmedAbilityReplay.Contains(__instance))
+                Main.GetLogger<UnitCommandsPatches>().LogInformation(
+                    "[AbilityReplay] Confirmed cast started. UnitId={UnitId}, Ability={Ability}",
+                    __instance.Executor?.UniqueId, __instance.Ability?.NameForAcronym);
             if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive
                 || (!Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive))
             {
@@ -536,6 +545,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 Target = Main.Mapper.Map<NetworkTargetWrapper>(command.Target),
                 InitiatorUnitId = command.Executor.UniqueId,
                 VectorPath = networkPath,
+                CasterPosition = command.Executor.Position.ToNetworkVector3(),
                 CommandType = command.Type.ToString(),
                 MovementLimit = movementLimit?.ToString(),
                 AttackMode = attackMode?.ToString()

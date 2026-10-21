@@ -15,5 +15,10 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(2)]
         [LogMe]
         public List<NetworkAreaEffect> TriggeredAreaEffects { get; set; } = [];
+        [ProtoMember(3)] public string SessionId { get; set; }
+        [ProtoMember(4)] public int LoadedSaveSeed { get; set; }
+        [ProtoMember(5)] public int CombatSeed { get; set; }
+        [ProtoMember(6)] public int Round { get; set; }
+        [ProtoMember(7)] public string UnitId { get; set; }
     }
 }

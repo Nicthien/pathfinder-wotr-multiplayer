@@ -321,7 +321,13 @@
             NotifyRealTimeCombatCommandRejected,
             NotifyRealTimeNativeCheckpoint,
             NotifyRealTimeNativeCheckpointChunk,
-            ClientRealTimeNativeCheckpointAck
+            ClientRealTimeNativeCheckpointAck,
+            NotifySessionRejoin,
+            NotifySessionRejoinChunk,
+            ClientSessionRejoinAck,
+            NotifyCombatSave,
+            ClientCombatSaveAck,
+            NotifyTurnMovementState
         }
 
         public static class Mods

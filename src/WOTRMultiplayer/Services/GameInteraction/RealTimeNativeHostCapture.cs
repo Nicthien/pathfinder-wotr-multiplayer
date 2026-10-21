@@ -22,6 +22,7 @@ using Owlcat.Runtime.Visual.RenderPipeline.RendererFeatures.FogOfWar;
 using UnityEngine.Rendering;
 using WOTRMultiplayer.Abstractions.GameInteraction;
 using WOTRMultiplayer.Abstractions.Unity;
+using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 
 namespace WOTRMultiplayer.Services.GameInteraction
@@ -33,6 +34,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
     {
         internal static Task<RealTimeMemorySaver> CaptureAsync(IMainThreadAccessor mainThread,
             ICombatInteractionService combat, string campaignId, string checkpointId, Func<bool> isAuthorized)
+            => CaptureCoreAsync(mainThread, combat, campaignId, checkpointId, isAuthorized, false);
+
+        internal static Task<RealTimeMemorySaver> CaptureTurnBasedAsync(IMainThreadAccessor mainThread,
+            ICombatInteractionService combat, string campaignId, string checkpointId, Func<bool> isAuthorized)
+            => CaptureCoreAsync(mainThread, combat, campaignId, checkpointId, isAuthorized, true);
+
+        private static Task<RealTimeMemorySaver> CaptureCoreAsync(IMainThreadAccessor mainThread,
+            ICombatInteractionService combat, string campaignId, string checkpointId, Func<bool> isAuthorized, bool turnBased)
         {
             var result = new TaskCompletionSource<RealTimeMemorySaver>(TaskCreationOptions.RunContinuationsAsynchronously);
             mainThread.Post(() =>
@@ -40,6 +49,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 try
                 {
                     RequireReady(combat, campaignId, checkpointId, isAuthorized);
+                    if (turnBased) CombatSaving.TurnBasedSaveNativeState.RequireReady();
                     var game = Game.Instance;
                     var world = game.State;
                     var player = game.Player;
@@ -50,7 +60,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     bool SameWorld() => isAuthorized() && ReferenceEquals(Game.Instance, game)
                         && ReferenceEquals(game.State, world) && ReferenceEquals(game.Player, player)
                         && ReferenceEquals(world.LoadedAreaState, area) && AreaService.Instance.CurrentAreaPart == part
-                        && game.TimeController.GameTime == time && game.IsPaused;
+                        && game.TimeController.GameTime == time && CombatSaving.CombatSavePauseLease.IsWorldPaused(game);
                     if (fog != null)
                     {
                         var pending = typeof(FogOfWarArea).GetField("m_DataRequest", BindingFlags.Instance | BindingFlags.NonPublic)
@@ -62,6 +72,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     CoroutineRunner.Start(FinishAfterFog(wait, SameWorld, () =>
                     {
                         RequireReady(combat, campaignId, checkpointId, isAuthorized);
+                        var nativeTurn = turnBased ? CombatSaving.TurnBasedSaveNativeState.Capture() : null;
                         if (!SameWorld() || FogOfWarArea.Active != fog)
                             throw new InvalidOperationException("native-checkpoint-world-changed-during-fog");
                         byte[] freshFog = null;
@@ -87,16 +98,28 @@ namespace WOTRMultiplayer.Services.GameInteraction
                             }
                             finally { if (data.IsCreated) data.Dispose(); }
                         }
-                        var before = combat.GetRealTimeCombatState();
+                        var before = CaptureMechanicalStateForVerification(combat, turnBased);
                         var beforeHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = before });
                         RealTimeMemorySaver source;
                         try { source = CaptureNow(game, checkpointId, freshFog, fogScene, () =>
                         {
-                            if (!SameWorld()) return false;
-                            var after = combat.GetRealTimeCombatState();
-                            return RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = after }) == beforeHash
-                                && RealTimeCombatTemporalDiff.Summarize(before, after) == null;
-                        }); }
+                            if (!SameWorld()) throw new InvalidOperationException("native-checkpoint-world-identity-or-clock-changed");
+                            var after = CaptureMechanicalStateForVerification(combat, turnBased);
+                            if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = after }) != beforeHash)
+                            {
+                                if (CombatSaving.CombatSaveActivation.Enabled)
+                                {
+                                    File.WriteAllText(Path.Combine(ApplicationPaths.persistentDataPath, "combat-save-capture-before.json"), JsonConvert.SerializeObject(before));
+                                    File.WriteAllText(Path.Combine(ApplicationPaths.persistentDataPath, "combat-save-capture-after.json"), JsonConvert.SerializeObject(after));
+                                }
+                                throw new InvalidOperationException("native-checkpoint-mechanical-state-changed");
+                            }
+                            var temporal = RealTimeCombatTemporalDiff.Summarize(before, after);
+                            if (temporal != null) throw new InvalidOperationException("native-checkpoint-temporal-state-changed:" + temporal);
+                            if (turnBased && CombatSaving.TurnBasedSaveNativeState.Capture() != nativeTurn)
+                                throw new InvalidOperationException("native-checkpoint-turn-state-changed");
+                            return true;
+                        }, nativeTurn); }
                         catch
                         {
                             // PreSave callbacks may swallow their own exception;
@@ -123,6 +146,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return result.Task;
         }
 
+        internal static NetworkCombatState CaptureMechanicalStateForVerification(
+            ICombatInteractionService combat, bool turnBased)
+        {
+            if (!turnBased) return combat.GetRealTimeCombatState();
+            // Long-lived buffs restored by the native TB loader may retain their
+            // associated blueprint while AbilityExecutionContext.Ability is null.
+            // The combat-save digest already uses this stable projection; the
+            // native before/after guard must capture the same valid world shape.
+            using var projection = new CombatSaveDigestScope();
+            return combat.GetRealTimeCombatState();
+        }
+
         private static void RequireReady(ICombatInteractionService combat, string campaignId,
             string checkpointId, Func<bool> isAuthorized)
         {
@@ -130,7 +165,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 || string.IsNullOrWhiteSpace(campaignId) || !Guid.TryParseExact(checkpointId, "N", out _))
                 throw new InvalidOperationException("native-checkpoint-host-barrier-not-authorized");
             var game = Game.Instance;
-            if (game?.State?.LoadedAreaState == null || game.Player == null || !game.IsPaused
+            if (game?.State?.LoadedAreaState == null || game.Player == null || !CombatSaving.CombatSavePauseLease.IsWorldPaused(game)
                 || game.Player.GameId != campaignId || game.Player.StartPreset?.Campaign?.DlcReward != null
                 || game.CurrentMode != GameModeType.Default && game.CurrentMode != GameModeType.Pause
                 || game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress
@@ -145,7 +180,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             RealTimeNativeCharacterUiGuard.RequireIdle(game);
         }
 
-        private static IEnumerator FinishAfterFog(IEnumerator wait, Func<bool> authorized, Action capture, Action<Exception> fail)
+        internal static IEnumerator FinishAfterFog(IEnumerator wait, Func<bool> authorized, Action capture, Action<Exception> fail)
         {
             var stack = new Stack<IEnumerator>();
             if (wait != null) stack.Push(wait);
@@ -161,7 +196,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         if (!authorized() || timer.Elapsed > TimeSpan.FromSeconds(20))
                             throw new InvalidOperationException("native-checkpoint-fog-timeout-or-obsolete-barrier");
                         if (stack.Count == 0) { capture(); completed = true; }
-                        else if (!stack.Peek().MoveNext()) (stack.Pop() as IDisposable)?.Dispose();
+                        else if (!stack.Peek().MoveNext())
+                        {
+                            (stack.Pop() as IDisposable)?.Dispose();
+                            // GPU requests are only valid during their completion frame.
+                            // Do not insert a frame between native completion and capture.
+                            continue;
+                        }
                         else
                         {
                             yielded = stack.Peek().Current;
@@ -192,7 +233,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
 
         private static RealTimeMemorySaver CaptureNow(Game game, string checkpointId, byte[] freshFog,
-            string fogScene, Func<bool> verify)
+            string fogScene, Func<bool> verify, string nativeTurn = null)
         {
             var player = game.Player;
             var area = game.State.LoadedAreaState;
@@ -210,6 +251,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (!player.IsTurnedOn || !area.Area.IsTurnedOn || scenes.Any(scene => !scene.IsTurnedOn))
                 throw new InvalidOperationException("native-checkpoint-host-lifecycle-not-ready");
             using var disabledLog = ContextData<GameLogDisabled>.Request();
+            using var combatSaveScope = nativeTurn != null ? new CombatSaving.CombatSaveCaptureScope(game) : null;
             var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             void Add(RealTimeMemorySaver source, string file, byte[] bytes)
             {
@@ -269,6 +311,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     FolderName = "RTwP-volatile-" + checkpointId + ".memory",
                     Type = SaveInfo.SaveType.Manual, Saver = source
                 };
+                if (nativeTurn != null) info.Name = "Multi — Combat — " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                 game.SaveManager.PrepareSave(info);
                 if (info.Area != game.CurrentlyLoadedArea || info.DlcCampaign != null || info.SystemSaveTime == DateTime.MinValue
                     || !ReferenceEquals(info.Saver, source))
@@ -308,18 +351,24 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 }
                 // This capture is RTwP-only. A native turn-based controller must
                 // not be guessed or serialized as if this were a TB save.
-                source.SaveJson("tbm", "");
+                source.SaveJson("tbm", nativeTurn ?? "");
                 source.SaveBytes("history", ReadStash("history"));
                 foreach (var name in player.AdditionalTexNames)
                     Add(source, name + ".png", ReadStash(name + ".png"));
             }, () =>
             {
-                return scenes.All(scene => scene.IsTurnedOn == sceneFlags[scene]
-                    && scene.AllEntityData.SequenceEqual(sceneMembers[scene]))
-                    && initiallyOn.All(pair => pair.Key.IsTurnedOn == pair.Value)
-                    && player.SavedInArea == originalArea && player.SavedInAreaPart == originalPart
-                    && area.ShouldLoad == originalShouldLoad && !game.EntityCreator.CreationQueue.Any()
-                    && game.SaveManager.CurrentState == SaveManager.State.None && verify();
+                if (scenes.Any(scene => scene.IsTurnedOn != sceneFlags[scene]))
+                    throw new InvalidOperationException("native-checkpoint-scene-flags-changed");
+                if (scenes.Any(scene => !scene.AllEntityData.SequenceEqual(sceneMembers[scene])))
+                    throw new InvalidOperationException("native-checkpoint-scene-members-changed");
+                if (initiallyOn.Any(pair => pair.Key.IsTurnedOn != pair.Value))
+                    throw new InvalidOperationException("native-checkpoint-entity-flags-changed");
+                if (player.SavedInArea != originalArea || player.SavedInAreaPart != originalPart
+                    || area.ShouldLoad != originalShouldLoad || game.EntityCreator.CreationQueue.Any()
+                    || game.SaveManager.CurrentState != SaveManager.State.None)
+                    throw new InvalidOperationException("native-checkpoint-save-lifecycle-changed");
+                combatSaveScope?.VerifyWeaponsRestored();
+                return verify();
             });
         }
 

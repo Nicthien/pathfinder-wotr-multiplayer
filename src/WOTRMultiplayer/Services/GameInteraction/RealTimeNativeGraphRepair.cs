@@ -22,5 +22,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             if (Pending.TryGetValue(world, out var obligations)) obligations.Remove(owner);
         }
+
+        internal static bool IsOnlyObligation(object world, object owner) => world != null && owner != null
+            && Pending.TryGetValue(world, out var obligations) && obligations.Count == 1 && obligations.Contains(owner);
     }
 }

@@ -15,5 +15,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(2)]
         [LogMe]
         public NetworkGlobalMapCommonPopup Popup { get; set; }
+
+        [ProtoMember(3), LogMe]
+        public string Scope { get; set; }
     }
 }

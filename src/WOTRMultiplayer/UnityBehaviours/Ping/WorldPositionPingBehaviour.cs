@@ -14,7 +14,7 @@ namespace WOTRMultiplayer.UnityBehaviours.Ping
         public void Begin(TimeSpan expiration, Vector3 position, Vector3? scale = null)
         {
             transform.SetParent(ClickPointerManager.Instance.transform);
-            transform.localPosition = position;
+            transform.position = position;
             if (scale.HasValue)
             {
                 transform.localScale += scale.Value;
@@ -25,12 +25,12 @@ namespace WOTRMultiplayer.UnityBehaviours.Ping
 
         protected override void OnExpired()
         {
-            DestroyImmediate(gameObject);
+            Destroy(gameObject);
         }
 
         protected override void OnPartialDecay(float decayState)
         {
-            var transparency = Math.Max(0f, 1f - decayState + 0.25f);
+            var transparency = Mathf.Clamp01(1f - decayState + 0.25f);
 
             foreach (var renderer in _renderers)
             {
@@ -47,16 +47,27 @@ namespace WOTRMultiplayer.UnityBehaviours.Ping
 
         private void InitRenderers()
         {
-            _renderers = [.. transform.Children().SelectMany(x => x.Children()).Select(x => x.GetComponent<MeshRenderer>())];
+            _renderers = [.. GetComponentsInChildren<MeshRenderer>(true)];
+            SetPlayerColor(true);
+        }
 
-            var even = new Color(0, 0, 167.058f, 1f);
-            var odd = new Color(167.058f, 24.006f, 2.621f, 1f);
+        public void SetPlayerColor(bool host)
+        {
+            var even = host ? new Color(0.15f, 0.55f, 1f, 1f) : new Color(1f, 0.45f, 0.1f, 1f);
+            var odd = host ? new Color(0.65f, 0.85f, 1f, 1f) : new Color(1f, 0.8f, 0.4f, 1f);
             for (int i = 0; i < _renderers.Count; i++)
             {
                 var color = i % 2 == 0 ? even : odd;
                 var renderer = _renderers[i];
                 renderer.material.color = color;
             }
+        }
+
+        private void OnDestroy()
+        {
+            if (_renderers == null) return;
+            foreach (var renderer in _renderers)
+                if (renderer != null) Destroy(renderer.material);
         }
     }
 }

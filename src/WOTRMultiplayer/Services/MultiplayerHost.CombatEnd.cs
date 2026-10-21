@@ -28,6 +28,16 @@ namespace WOTRMultiplayer.Services
                 || Game.RealTimeCombat == null || !(Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
                     || Game.RealTimeCombat.PreviousMode == CombatMode.RealTimeWithPause
                     || Game.RealTimeCombat.CombatEndPending)) return false;
+            if (!Game.RealTimeCombat.CombatEndPending && _rejoin == null && !_waitingForRealTimePeer
+                && !GetSyncedPlayers().Any(player => player.Id != Game.LocalPlayerId))
+            {
+                // No replica needs a final checkpoint. Use the original engine
+                // combat-end path instead of blocking input on unrelated or lingering
+                // projectiles/commands. A barrier already created for peers is NEVER
+                // bypassed if those peers subsequently disconnect.
+                Logger.LogInformation("[CombatMode] Solo combat end uses the normal completion path; no synchronization barrier created.");
+                return false;
+            }
             if (!ReferenceEquals(_endSession, Game) || !ReferenceEquals(_endCombat, Game.Combat)
                 || !ReferenceEquals(_endState, Game.RealTimeCombat) || _endSaveSeed != Game.LoadedSaveSeed)
             {
@@ -86,6 +96,18 @@ namespace WOTRMultiplayer.Services
                         throw new InvalidOperationException("combat-end-still-has-active-units");
                     var state = Game.RealTimeCombat;
                     var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = finalState });
+                    if (_endPeers.Length == 0)
+                    {
+                        // Only for an initially solo host, never drop required peers.
+                        if (GetSyncedPlayers().Any(player => player.Id != Game.LocalPlayerId))
+                            throw new InvalidOperationException("combat-end-peer-joined-during-solo-capture");
+                        state.CanonicalStateHash = hash;
+                        CompleteCombatEnd();
+                        state.CombatEndPending = false;
+                        GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
+                        Logger.LogInformation("[CombatMode] Solo host combat end verified locally. Hash={Hash}", hash);
+                        return;
+                    }
                     state.Epoch++; state.LastAuthoritativeSequence = 0;
                     state.CanonicalStateHash = hash;
                     _endBarrier = new RealTimeCombatEndBarrier(_endPeers, hash);

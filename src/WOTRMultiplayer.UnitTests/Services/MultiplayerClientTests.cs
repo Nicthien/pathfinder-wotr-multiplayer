@@ -23,7 +23,7 @@ using WOTRMultiplayer.UnitTests.FakeRules;
 namespace WOTRMultiplayer.UnitTests.Services
 {
     [TestFixture]
-    public class MultiplayerClientTests
+    public partial class MultiplayerClientTests
     {
         private MultiplayerClient _multiplayerClient;
 
@@ -40,6 +40,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         private INetworkClientConnection _networkClient;
         private IValueGenerator _valueGenerator;
         private IMapper _mapper;
+        private WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor _mainThreadAccessor;
 
         [TestCase("current", 17, 5, true)]
         [TestCase("previous", 17, 5, false)]
@@ -359,7 +360,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 _fileSystemService,
                 _networkClient,
                 _valueGenerator,
-                _mapper, A.Fake<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>());
+                _mapper, _mainThreadAccessor = A.Fake<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>());
         }
 
         [Test]

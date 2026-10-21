@@ -53,6 +53,17 @@ namespace WOTRMultiplayer.Services
 
         public bool IsInCombat => _multiplayerActorAccessor.Current != null && _multiplayerActorAccessor.Current.IsInCombat;
 
+        public bool CanSaveCombatFromMenu => CombatSaving.CombatSaveActivation.Enabled
+            && _multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive && host.IsInCombat
+            && host.Game.RealTimeCombat.Mode == CombatMode.TurnBased && !host.IsSavingBlockedByCombatSync
+            && !CombatSaving.CombatSavePauseLease.Active && !CombatSaving.CombatSaveLoadState.Active;
+
+        public void SaveCombatFromMenu()
+        {
+            if (CanSaveCombatFromMenu && _multiplayerActorAccessor.Host is MultiplayerHost host)
+                host.RequestCombatSaveFromMenu();
+        }
+
         public RemoteExecutionContext RemoteContext => _gameInteractionService.RemoteContext;
 
         public Multiplayer(
@@ -93,16 +104,40 @@ namespace WOTRMultiplayer.Services
 
         public void UpdateRealTimeCombat()
         {
+            if (_multiplayerActorAccessor.Current is MultiplayerActorBase movementActor)
+                movementActor.TickTurnMovement();
+            if (_multiplayerActorAccessor.Client is MultiplayerClient saveClient) saveClient.TickCombatSave();
             if (RealTimePresentationRuntime.Enabled
                 && _multiplayerActorAccessor.Client is MultiplayerClient presentationClient)
                 presentationClient.TickRealTimePresentation();
             if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
             {
+                host.TickCombatSaveRestore();
                 host.PublishRealTimeCombatSnapshot();
             }
         }
 
         public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
+
+        public void ToggleNetworkCombatMode()
+        {
+            if (CombatSaving.CombatSavePauseLease.Active || CombatSaving.CombatSaveLoadState.Active) return;
+            if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
+                host.ToggleCombatModeFromHotkey();
+            else
+                _logger.LogInformation("Combat mode hotkey ignored: only the host can change network combat mode.");
+        }
+
+        public void PingWorldPosition(NetworkVector3 position)
+        {
+            var actor = _multiplayerActorAccessor.Current;
+            if (actor == null || !actor.IsActive || actor.IsInLobby || position == null) return;
+            actor.OnPing(new Entities.Ping.NetworkPing
+            {
+                Type = Entities.Ping.NetworkPingType.WorldPosition,
+                WorldPosition = position
+            });
+        }
 
         // A combat object survives repair epochs, but not a new encounter or load.
         public object RealTimeCombatIdentity => _multiplayerActorAccessor.Current is MultiplayerActorBase actor
@@ -260,7 +295,7 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        public bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId)
+        public bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId, bool isCharacterSelection = false)
         {
             try
             {
@@ -269,7 +304,7 @@ namespace WOTRMultiplayer.Services
                     return true;
                 }
 
-                var shouldContinueExecution = _multiplayerActorAccessor.Current.OnBeforeSelectDialogAnswer(networkDialog, cueName, answerName, isExitAnswer, manualUnitSelectionId);
+                var shouldContinueExecution = _multiplayerActorAccessor.Current.OnBeforeSelectDialogAnswer(networkDialog, cueName, answerName, isExitAnswer, manualUnitSelectionId, isCharacterSelection);
                 return shouldContinueExecution;
             }
             catch (Exception ex)
@@ -353,6 +388,7 @@ namespace WOTRMultiplayer.Services
 
         public bool CanTickCombatController()
         {
+            if (CombatSaving.CombatSavePauseLease.Active || CombatSaving.CombatSaveLoadState.Active) return false;
             try
             {
                 if (_multiplayerActorAccessor.Current == null)
@@ -1580,6 +1616,8 @@ namespace WOTRMultiplayer.Services
                 throw;
             }
         }
+
+        public bool ShouldShowLevelingUI() => _multiplayerActorAccessor.Current?.ShouldShowLevelingUI() ?? true;
 
         public bool CanMakeLevelingDecisions()
         {

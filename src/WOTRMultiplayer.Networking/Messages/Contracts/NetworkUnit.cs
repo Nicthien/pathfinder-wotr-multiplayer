@@ -57,6 +57,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(16)]
         public string SceneName { get; set; }
 
+        [ProtoMember(17)]
+        public bool IsSpottedByPlayer { get; set; }
+
         public override string ToString()
         {
             return Id?.ToString();

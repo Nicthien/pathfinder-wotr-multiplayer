@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat.RealTime;
@@ -9,6 +10,8 @@ using WOTRMultiplayer.Services.GameInteraction;
 using FakeItEasy;
 using AutoMapper;
 using Kingmaker.UnitLogic.Mechanics;
+using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.EntitySystem.Persistence.JsonUtility;
 
 namespace WOTRMultiplayer.UnitTests.Services
@@ -60,6 +63,29 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void CombatSaveProjectionSurvivesMissingRuntimeAbilityReference()
+        {
+            var context = (AbilityExecutionContext)Activator.CreateInstance(typeof(AbilityExecutionContext),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, new object[] { default(JsonConstructorMark) }, null);
+            var blueprint = (BlueprintAbility)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(BlueprintAbility));
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("22222222222222222222222222222222");
+            typeof(MechanicsContext).GetField("AssociatedBlueprint").SetValue(context, blueprint);
+            var mapper = A.Fake<IRuntimeMapper>();
+            A.CallTo(() => mapper.Map<NetworkAbilityParams>(A<object>._)).Returns(new NetworkAbilityParams());
+
+            Assert.Throws<InvalidOperationException>(() => RealTimeBuffContextCapture.Capture(context, mapper));
+            using (new CombatSaveDigestScope())
+            {
+                var captured = RealTimeBuffContextCapture.Capture(context, mapper);
+                Assert.That(captured.Single().SourceAbility.BlueprintId,
+                    Is.EqualTo("22222222222222222222222222222222"));
+                Assert.That(captured.Single().SourceAbility.Id, Is.Null);
+            }
+        }
+
+        [Test]
         public void CapturesChildBeforeParentsAndSamplesOnlyAfterTopologyValidation()
         {
             var child = new Node { Id = "child", Parent = new Node { Id = "parent" } };
@@ -70,6 +96,17 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.Throws<InvalidOperationException>(() => RealTimeBuffContextChain.Capture(child, node => node.Parent,
                 node => { calls++; return State(); }));
             Assert.That(calls, Is.Zero);
+        }
+
+        [Test]
+        public void AssociatedBlueprintMayDifferFromExecutionAbilityWithoutLosingEitherReference()
+        {
+            var node = State("associated-blueprint");
+            node.IsAbilityContext = true;
+            node.SourceAbility = new WOTRMultiplayer.Entities.Combat.NetworkAbility { BlueprintId = "executed-ability" };
+            Assert.That(RealTimeBuffContextChain.Validate(new[] { node }), Is.Null);
+            node.SourceAbility.BlueprintId = null;
+            Assert.That(RealTimeBuffContextChain.Validate(new[] { node }), Is.EqualTo("invalid-buff-context-ability"));
         }
 
         [Test]

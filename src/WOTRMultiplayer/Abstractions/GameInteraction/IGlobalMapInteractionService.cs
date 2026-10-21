@@ -37,7 +37,13 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         void AcceptEncounter();
 
-        void RollEncounter(NetworkGlobalMapEncounter globalMapEncounter);
+        void RollEncounter(NetworkGlobalMapEncounter globalMapEncounter, string eventId = null);
+
+        void TickMapPresentation();
+
+        void ObserveCommonPopup(NetworkGlobalMapCommonPopup popup);
+
+        void ShowReceivedLocation(NetworkGlobalMapLocation location);
 
         void OpenGroupChanger();
 

@@ -23,7 +23,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
     internal static class RealTimeNativeClientLoad
     {
         internal static Task<RealTimeNativeWorldLoadResult> LoadAsync(IMainThreadAccessor mainThread,
-            object owner, ICombatInteractionService combat, RealTimeMemorySaver source, string campaignId, string checkpointId, Func<bool> authorized)
+            object owner, ICombatInteractionService combat, RealTimeMemorySaver source, string campaignId, string checkpointId,
+            Func<bool> authorized, Action<RealTimeNativeLoadLease> leaseCreated = null)
         {
             var completion = new TaskCompletionSource<RealTimeNativeWorldLoadResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             mainThread.Post(() =>
@@ -67,6 +68,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         using var output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
                         output.Write(bytes, 0, bytes.Length);
                     });
+                    leaseCreated?.Invoke(lease);
                     RealTimeNativeGraphRepair.Add(game.State, lease);
                     combat.ClearRealTimePresentationForNativeLoad();
                     // Presentation cleanup may dispatch callbacks. Check again

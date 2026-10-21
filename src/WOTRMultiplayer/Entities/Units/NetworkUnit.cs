@@ -20,6 +20,8 @@ namespace WOTRMultiplayer.Entities.Units
 
         public string SceneName { get; set; }
 
+        public bool IsSpottedByPlayer { get; set; }
+
         public NetworkVector3 Position { get; set; }
 
         public float Orientation { get; set; }

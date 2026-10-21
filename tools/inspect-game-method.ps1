@@ -3,6 +3,8 @@
 param(
     [Parameter(Mandatory)][string]$TypeName,
     [Parameter(Mandatory)][string]$MethodName,
+    [switch]$FindCallers,
+    [string]$CallerTypePattern = '*',
     [string]$GamePath = 'C:\Jeux\Steam\steamapps\common\Pathfinder Second Adventure'
 )
 # Read metadata/IL only. Never load Assembly-CSharp into an execution context.
@@ -63,14 +65,16 @@ try {
     foreach ($typeHandle in $metadata.TypeDefinitions) {
         $type = $metadata.GetTypeDefinition($typeHandle)
         $fullName = Resolve-TypeName $typeHandle
-        if ($fullName -ne $TypeName) { continue }
+        if ($FindCallers -and $fullName -notlike $CallerTypePattern) { continue }
+        if (-not $FindCallers -and $fullName -ne $TypeName) { continue }
         foreach ($methodHandle in $type.GetMethods()) {
             $method = $metadata.GetMethodDefinition($methodHandle)
-            if ($metadata.GetString($method.Name) -ne $MethodName) { continue }
-            $found = $true
+            if (-not $FindCallers -and $metadata.GetString($method.Name) -ne $MethodName) { continue }
+            if ($FindCallers -and $method.RelativeVirtualAddress -eq 0) { continue }
+            if (-not $FindCallers) { $found = $true }
             if ($method.RelativeVirtualAddress -eq 0) { throw 'Méthode sans corps IL.' }
             $bytes = [System.Reflection.Metadata.PEReaderExtensions]::GetMethodBody($pe, $method.RelativeVirtualAddress).GetILBytes()
-            Write-Output "$fullName.$MethodName"
+            if (-not $FindCallers) { Write-Output "$fullName.$MethodName" }
             $index = 0
             while ($index -lt $bytes.Length) {
                 $offset = $index
@@ -96,7 +100,12 @@ try {
                         }
                     }
                 }
-                Write-Output ('IL_{0:X4}: {1} {2}' -f $offset, $opcode.Name, $operand)
+                if (-not $FindCallers) {
+                    Write-Output ('IL_{0:X4}: {1} {2}' -f $offset, $opcode.Name, $operand)
+                } elseif ($opcode.OperandType.ToString() -eq 'InlineMethod' -and $operand -eq ($TypeName + '::' + $MethodName)) {
+                    $found = $true
+                    Write-Output ('{0}::{1} IL_{2:X4}' -f $fullName, $metadata.GetString($method.Name), $offset)
+                }
                 $index += $length
             }
         }

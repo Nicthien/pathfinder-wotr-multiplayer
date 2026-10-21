@@ -20,5 +20,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(3)]
         [LogMe]
         public List<NetworkDialogAnswerSuggestion> Suggestions { get; set; } = [];
+
+        [ProtoMember(4)]
+        public string VoteRoundId { get; set; }
     }
 }

@@ -10,7 +10,8 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         Verify = 2,
         Apply = 3,
         Fallback = 4,
-        Resume = 5
+        Resume = 5,
+        Stopped = 6
     }
 
     [ProtoContract]
@@ -35,5 +36,9 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 
         [ProtoMember(5)]
         public NetworkCombatState State { get; set; }
+
+        [ProtoMember(6)] public string Reason { get; set; }
+        [ProtoMember(7)] public string SessionId { get; set; }
+        [ProtoMember(8)] public int LoadedSaveSeed { get; set; }
     }
 }

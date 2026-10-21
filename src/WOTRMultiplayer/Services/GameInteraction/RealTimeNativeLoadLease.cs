@@ -25,8 +25,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
         internal SaveInfo Info { get; }
         internal bool NativeCallbackCompleted => Volatile.Read(ref _completed) != 0;
         internal string Fault => Volatile.Read(ref _fault);
-        internal bool IsDrainedAndCompleted => Volatile.Read(ref _disposed) != 0
-            && Volatile.Read(ref _workersDrained) != 0 && NativeCallbackCompleted && Fault == null;
+        internal bool IsDrained => Volatile.Read(ref _disposed) != 0 && Volatile.Read(ref _workersDrained) != 0;
+        internal bool IsDrainedAndCompleted => IsDrained && NativeCallbackCompleted && Fault == null;
         internal static bool IsActive => Volatile.Read(ref _current) != null;
         internal static bool IsHydrating => Hydration.Value is { } lease
             && ReferenceEquals(Volatile.Read(ref _current), lease) && lease.IsAuthorized;

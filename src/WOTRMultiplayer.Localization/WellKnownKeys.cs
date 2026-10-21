@@ -506,6 +506,126 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("manualSyncRequested")]
+            public static class ManualSyncRequested
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("manualSyncUnavailable")]
+            public static class ManualSyncUnavailable
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("manualSyncOutsideCombat")]
+            public static class ManualSyncOutsideCombat
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombat")]
+            public static class SaveCombat
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatLoadFailed")]
+            public static class SaveCombatLoadFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatReady")]
+            public static class SaveCombatReady
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatWorking")]
+            public static class SaveCombatWorking
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatSaved")]
+            public static class SaveCombatSaved
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatRecovering")]
+            public static class SaveCombatRecovering
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatBusy")]
+            public static class SaveCombatBusy
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatWaitAction")]
+            public static class SaveCombatWaitAction
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatWaitTurn")]
+            public static class SaveCombatWaitTurn
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatSync")]
+            public static class SaveCombatSync
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatTimeout")]
+            public static class SaveCombatTimeout
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatPeerRefused")]
+            public static class SaveCombatPeerRefused
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatSessionChanged")]
+            public static class SaveCombatSessionChanged
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatNativeRefused")]
+            public static class SaveCombatNativeRefused
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatTransition")]
+            public static class SaveCombatTransition
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatFailed")]
+            public static class SaveCombatFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatLocked")]
+            public static class SaveCombatLocked
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("requestResume")]
             public static class RequestResume
             {
@@ -514,6 +634,66 @@ public static class WellKnownKeys
 
             [Description("requestPause")]
             public static class RequestPause
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryPreparing")]
+            public static class RecoveryPreparing
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryRebuilding")]
+            public static class RecoveryRebuilding
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryLoading")]
+            public static class RecoveryLoading
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryVerifying")]
+            public static class RecoveryVerifying
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryCommitted")]
+            public static class RecoveryCommitted
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryReconnecting")]
+            public static class RecoveryReconnecting
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("modeUnavailable")]
+            public static class ModeUnavailable
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("modeQueued")]
+            public static class ModeQueued
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryStopped")]
+            public static class RecoveryStopped
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryFailureCode")]
+            public static class RecoveryFailureCode
             {
                 public static string Key { get; set; }
             }
@@ -1309,6 +1489,42 @@ public static class WellKnownKeys
             {
                 public static string Key { get; set; }
             }
+
+            [Description("waitingForAgreement")]
+            public static class WaitingForAgreement
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("soloAfterDisconnect")]
+            public static class SoloAfterDisconnect
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("rejoinSync")]
+            public static class RejoinSync
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("rejoinWaiting")]
+            public static class RejoinWaiting
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("rejoinFailed")]
+            public static class RejoinFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("agreementChooseCharacter")]
+            public static class AgreementChooseCharacter
+            {
+                public static string Key { get; set; }
+            }
         }
 
         [Description("rolls")]
@@ -1818,6 +2034,12 @@ public static class WellKnownKeys
 
             [Description("loading")]
             public static class Loading
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("eventDisplayFailed")]
+            public static class EventDisplayFailed
             {
                 public static string Key { get; set; }
             }

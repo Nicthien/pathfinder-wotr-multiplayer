@@ -32,6 +32,8 @@ namespace WOTRMultiplayer.Abstractions
 {
     public interface IMultiplayer
     {
+        bool CanSaveCombatFromMenu { get; }
+        void SaveCombatFromMenu();
         RemoteExecutionContext RemoteContext { get; }
 
         IUIFactory UIFactory { get; }
@@ -45,6 +47,10 @@ namespace WOTRMultiplayer.Abstractions
         void Initialize();
 
         void UpdateRealTimeCombat();
+
+        void ToggleNetworkCombatMode();
+
+        void PingWorldPosition(NetworkVector3 position);
 
         void PublishRealTimeAuthoritativeEvent(
             WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent);
@@ -73,7 +79,7 @@ namespace WOTRMultiplayer.Abstractions
 
         void OnAfterCueShow(NetworkDialog networkDialog, string cueName, bool hasSystemAnswer);
 
-        bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId);
+        bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId, bool isCharacterSelection = false);
 
         void OnAlternateCueAnswerAction(string cueName, string answerName);
 
@@ -176,6 +182,8 @@ namespace WOTRMultiplayer.Abstractions
         void OnLevelingTerminated();
 
         bool CanMakeLevelingDecisions();
+
+        bool ShouldShowLevelingUI();
 
         void OnWitnessLevelingPhase(NetworkLevelingPhase networkLevelingPhase);
 

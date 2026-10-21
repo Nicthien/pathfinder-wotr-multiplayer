@@ -10,6 +10,8 @@ param(
 
     [switch]$HostPresentationPrototype,
 
+    [switch]$CompileOnly,
+
     [string]$CandidateFingerprint,
 
     [string]$SavePath
@@ -270,14 +272,20 @@ function Collect-Diagnostics {
 }
 
 function Build-Experimental {
-    & (Join-Path $PSScriptRoot 'check-localization.ps1')
+    if (-not $CompileOnly) { & (Join-Path $PSScriptRoot 'check-localization.ps1') }
     $env:WOTR_PATH = $GamePath
     & dotnet build (Join-Path $repoPath 'src\WOTRMultiplayer.Localization.Generator\WOTRMultiplayer.Localization.Generator.csproj') --configuration Release --verbosity minimal
     if ($LASTEXITCODE -ne 0) { throw 'La génération des traductions a échoué.' }
     $presentationProperty = "-p:HostPresentationPrototype=$($HostPresentationPrototype.IsPresent.ToString().ToLowerInvariant())"
-    & dotnet test (Join-Path $repoPath 'src\WOTRMultiplayer.sln') --configuration Release $presentationProperty --verbosity minimal
-    if ($LASTEXITCODE -ne 0) { throw 'La compilation ou les tests ont échoué.' }
-    & (Join-Path $PSScriptRoot 'check-package-protocol.ps1')
+    if ($CompileOnly) {
+        & dotnet build (Join-Path $repoPath 'src\WOTRMultiplayer\WOTRMultiplayer.csproj') --configuration Release $presentationProperty --verbosity minimal
+        if ($LASTEXITCODE -ne 0) { throw 'La compilation a échoué.' }
+        Write-Warning 'Compilation seule : aucun test exécuté, aucune validation en jeu revendiquée.'
+    } else {
+        & dotnet test (Join-Path $repoPath 'src\WOTRMultiplayer.sln') --configuration Release $presentationProperty --verbosity minimal
+        if ($LASTEXITCODE -ne 0) { throw 'La compilation ou les tests ont échoué.' }
+        & (Join-Path $PSScriptRoot 'check-package-protocol.ps1')
+    }
 }
 
 function Prepare-A0Candidate {
@@ -301,7 +309,10 @@ function Prepare-A0Candidate {
     }
     if (-not (Test-Path -LiteralPath $packagePath)) {
         New-Item -ItemType Directory -Path $packagePath -Force | Out-Null
-        Copy-Item -Path (Join-Path $buildPath '*') -Destination $packagePath -Recurse -Force
+        # Satellite resources from build-time Roslyn dependencies are not mod
+        # payload. Copy the runtime DLLs and symbols, not all locale trees.
+        & robocopy.exe $buildPath $packagePath '*.dll' '*.pdb' 'Info.json' /MT:8 /R:1 /W:1 /NP /NJH /NJS /NDL /NFL | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "Copie du candidat incomplete (robocopy $LASTEXITCODE)." }
         New-Item -ItemType Directory -Path (Join-Path $packagePath 'localization') -Force | Out-Null
         Copy-Item -Path (Join-Path $repoPath 'localization\*.json') -Destination (Join-Path $packagePath 'localization') -Force
         Assert-ExperimentalFingerprintParity $packagePath

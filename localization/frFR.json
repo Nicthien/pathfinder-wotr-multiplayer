@@ -64,9 +64,39 @@
         "preferRealTime": "Préférer le temps réel pour les prochains combats",
         "preferTurnBased": "Préférer le tour par tour pour les prochains combats",
         "changePausePolicy": "Changer la politique de pause",
-        "repair": "Réparer la synchronisation",
+        "repair": "Forcer la synchronisation",
+        "manualSyncRequested": "Synchronisation demandée. Attente des confirmations de l'autre joueur.",
+        "manualSyncUnavailable": "Synchronisation indisponible : hors combat, action en cours ou aucun point de reprise sûr.",
+        "manualSyncOutsideCombat": "Récupération disponible pendant un combat bloqué.",
+        "saveCombat": "Sauvegarder le combat",
+        "saveCombatLoadFailed": "Le combat sauvegardé n'a pas pu être restauré sur les deux PC. La reprise est bloquée pour éviter un état incohérent. Chargez une autre sauvegarde sûre depuis le menu du jeu.",
+        "saveCombatReady": "Combat restauré et vérifié sur chaque PC connecté. La partie reprend.",
+        "saveCombatWorking": "Sauvegarde du combat : pause et vérification des deux PC…",
+        "saveCombatSaved": "Combat sauvegardé dans un nouvel emplacement.",
+        "saveCombatRecovering": "Sauvegarde annulée : reconstruction des deux PC depuis le tour inchangé de l’hôte. Attendez la confirmation avant de reprendre.",
+        "saveCombatBusy": "Une sauvegarde du combat est déjà en cours.",
+        "saveCombatWaitAction": "Sauvegarde refusée : attendez la fin de l’action ou du déplacement.",
+        "saveCombatWaitTurn": "Sauvegarde refusée : attendez un tour joueur en tour par tour.",
+        "saveCombatSync": "Sauvegarde refusée : les deux PC doivent être synchronisés.",
+        "saveCombatTimeout": "Sauvegarde annulée : confirmation de l’autre joueur non reçue sous 15 secondes.",
+        "saveCombatPeerRefused": "Sauvegarde annulée : l’autre PC n’est pas prêt.",
+        "saveCombatSessionChanged": "Sauvegarde annulée : déconnexion ou changement de partie.",
+        "saveCombatNativeRefused": "Sauvegarde refusée par le jeu dans la situation actuelle.",
+        "saveCombatTransition": "Sauvegarde refusée : chargement ou transition en cours.",
+        "saveCombatFailed": "Le combat n'a pas été sauvegardé. Vérifiez qu'aucune action ou synchronisation n'est en cours.",
+        "saveCombatLocked": "Indisponible : reprise du combat multijoueur en cours de développement et non validée en jeu.",
         "requestResume": "Demander la reprise",
-        "requestPause": "Mettre en pause"
+        "requestPause": "Mettre en pause",
+        "recoveryPreparing": "Récupération : pause et accord des deux PC",
+        "recoveryRebuilding": "Récupération : reconstruction depuis l’hôte",
+        "recoveryLoading": "Récupération : chargement du monde de l’hôte",
+        "recoveryVerifying": "Récupération : vérification des unités et effets",
+        "recoveryCommitted": "État restauré et vérifié ; attente de la reprise",
+        "recoveryReconnecting": "Connexion perdue : combat suspendu en attendant l’autre PC",
+        "modeUnavailable": "Changement de mode indisponible : attendez la fin de l’action ou de la synchronisation. Consultez le menu multijoueur.",
+        "modeQueued": "Changement de mode demandé : il sera appliqué après la synchronisation en cours.",
+        "recoveryStopped": "Récupération impossible : ne sauvegardez pas. Quittez la session et rechargez une copie sûre.",
+        "recoveryFailureCode": "Code de diagnostic : {0}"
       },
       "server": { "title": "Serveur", "external": { "gameCode": { "title": "Code de partie" }, "state": { "connecting": "connexion", "gettingCode": "obtention du code" }, "errors": { "generic": "Erreur" } } },
       "players": { "title": "Joueurs" }, "characters": { "title": "Personnages" },
@@ -134,7 +164,15 @@
       "unreachableGameHost": "La partie est indisponible", "gameNotFound": "Partie introuvable ou mot de passe incorrect", "peerToPeerTimeout": "La connexion à l'hôte a expiré"
     } },
     "gameNotifications": {
-      "dialogs": { "waitingForOtherPlayers": "Certains joueurs n'ont pas encore vu cette réplique." },
+      "dialogs": {
+        "waitingForOtherPlayers": "Certains joueurs n'ont pas encore vu cette réplique.",
+        "waitingForAgreement": "En attente du même vote de l’autre joueur.",
+        "soloAfterDisconnect": "L'autre joueur s'est déconnecté. Cliquez sur votre réponse pour valider seul ; aucune réponse n'est choisie automatiquement.",
+        "rejoinSync": "Reconnexion : transfert de l'état actuel et vérification. L'hôte reste dans sa partie ; veuillez patienter.",
+        "rejoinWaiting": "Reconnexion en attente : terminez le combat tour par tour, le dialogue ou le butin côté hôte et revenez dans une zone locale. L'hôte peut rester en partie.",
+        "rejoinFailed": "La reconnexion n'a pas pu être vérifiée. La partie reste en pause protégée ; consultez les journaux et reconnectez la cliente depuis une zone sûre.",
+        "agreementChooseCharacter": "Vous avez choisi la même réponse. L'hôte peut cliquer à nouveau dessus pour choisir le personnage qui effectuera l'action."
+      },
       "rolls": {
         "missingDamageRoll": "Impossible d'obtenir le jet de dégâts de l'unité {0}.\nLa partie risque de se désynchroniser.",
         "discrepantDamageRoll": "Le jet de dégâts reçu pour l'unité {0} contient un nombre de valeurs incorrect. Attendu : {1}, reçu : {2}.\nLa partie risque de se désynchroniser.",
@@ -202,7 +240,7 @@
       "tacticalCombat": { "disabledAutoCombat": "Le combat automatique est désactivé en multijoueur." },
       "looting": { "disposedLootbagBugWarning": "Impossible de placer des objets dans un contenant supprimé.", "itemsMismatch": "Objets récupérés introuvables. Vérifiez que les DLC sont identiques.\nObjets : {0}" },
       "cutscenes": { "skipped": "{0} a passé la cinématique." },
-      "globalMap": { "disabledActionBar": "Les sorts de la carte globale sont réservés à l'hôte.", "loading": "Attente du chargement de tous les joueurs." }
+      "globalMap": { "disabledActionBar": "Les sorts de la carte globale sont réservés à l'hôte.", "loading": "Attente du chargement de tous les joueurs.", "eventDisplayFailed": "Impossible d’afficher un événement de la carte. Signalez l’heure du problème ; les détails sont dans le journal." }
     }
   }
 }

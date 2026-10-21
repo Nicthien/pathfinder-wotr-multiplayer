@@ -33,7 +33,7 @@ using WOTRMultiplayer.UnitTests.FakeRules;
 namespace WOTRMultiplayer.UnitTests.Services
 {
     [TestFixture]
-    public class MultiplayerHostTests
+    public partial class MultiplayerHostTests
     {
         private MultiplayerHost _multiplayerHost;
 
@@ -861,6 +861,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             await _multiplayerHost.BeginRealTimeRepairAsync();
             handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Prepare, 0));
             handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Verify, 1));
+            if (RealTimePresentationRuntime.Enabled)
+            {
+                await AssertNativeRecoveryWithoutEngineStops();
+                handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Apply, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+                handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Resume, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+                Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+                return;
+            }
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Apply && x.State != null)))
                 .MustHaveHappenedOnceExactly();
             handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Apply, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
@@ -883,6 +891,14 @@ namespace WOTRMultiplayer.UnitTests.Services
                 handler.Invoke(42, RepairAck(epoch, RealTimeRepairStage.Prepare, 0));
                 handler.Invoke(42, RepairAck(epoch, RealTimeRepairStage.Verify, 1));
                 handler.Invoke(42, RepairAck(epoch, RealTimeRepairStage.Apply, 1, applied: false));
+            }
+
+            if (RealTimePresentationRuntime.Enabled)
+            {
+                await AssertNativeRecoveryWithoutEngineStops();
+                A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                    x.Stage == (int)RealTimeRepairStage.Fallback))).MustNotHaveHappened();
+                return;
             }
 
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
@@ -933,6 +949,17 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _networkServer.Broadcast(A<NotifyAIActionSelected>.That.Matches(x =>
                 x.RealTimeEpoch == 3 && x.RealTimeSequence == 1 && x.Action.UnitId == "enemy-a"
                 && x.Action.Id == null))).MustHaveHappenedOnceExactly();
+        }
+
+        private async Task AssertNativeRecoveryWithoutEngineStops()
+        {
+            for (var i = 0; i < 1000 && _multiplayerHost.Game.RealTimeCombat.RecoveryStatus != "stopped"; i++)
+                await Task.Delay(1);
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.RecoveryStatus, Is.EqualTo("stopped"));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.RecoveryFailure, Is.EqualTo("native-reconstruction-not-committed"));
+            Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
+                x.Stage == (int)RealTimeRepairStage.Apply || x.Stage == (int)RealTimeRepairStage.Resume))).MustNotHaveHappened();
         }
 
         private void PrepareRealTimeRepairTest()

@@ -49,6 +49,8 @@ namespace WOTRMultiplayer
 
         public static IHashService HashService { get; private set; }
 
+        public static Version ModVersion { get; private set; }
+
         public static IMultiplayerRollsProcessor Rolls { get; private set; }
 
         public const int MaxCharactersInParty = 6;
@@ -62,6 +64,7 @@ namespace WOTRMultiplayer
         {
             try
             {
+                ModVersion = entry.Version;
                 var isolatedProfile = RealTimeTestProfileBootstrap.ApplyIfRequested();
                 if (isolatedProfile != null)
                     entry.Logger.Log($"RTwP isolated test profile: {isolatedProfile}");
@@ -144,7 +147,10 @@ namespace WOTRMultiplayer
         {
             try
             {
+                (ServiceProvider?.GetService<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>()
+                    as WOTRMultiplayer.UI.MainThreadAccessor)?.Drain();
                 Multiplayer?.UpdateRealTimeCombat();
+                ServiceProvider?.GetService<IGlobalMapInteractionService>()?.TickMapPresentation();
             }
             catch (Exception ex)
             {

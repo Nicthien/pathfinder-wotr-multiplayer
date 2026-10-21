@@ -28,14 +28,19 @@ namespace WOTRMultiplayer.Services
             public DateTime NextHeader;
             public bool LoadRequested;
             public bool VerificationRequested;
+            public bool CommitRequested;
             public Func<bool> VerificationOwned;
             public NetworkCombatState Reference;
             public byte[] ReferenceBytes;
             public string ReferenceHash;
+            public RealTimeNativeCheckpointAbort Abort;
+            public bool AbortExpired;
             public readonly TaskCompletionSource<bool> Prepared = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly TaskCompletionSource<bool> Transferred = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly TaskCompletionSource<bool> Loaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly TaskCompletionSource<bool> ReferenceVerified = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<bool> Aborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<bool> Committed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         // Enclosing reconstruction barrier must subsequently restore/verify its
@@ -70,6 +75,28 @@ namespace WOTRMultiplayer.Services
                 return IsCurrentNativeTransfer(owner) ? RealTimeNativeCheckpointLimits.Copy(owner.Manifest) : null;
         }
         private NativeTransfer _nativeTransfer;
+
+        private async Task<bool> CommitCurrentNativeCheckpointAsync(NotifyRealTimeNativeCheckpoint manifest, Func<bool> barrierOwned)
+        {
+            var started = new TaskCompletionSource<NativeTransfer>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                lock (ActionLock)
+                {
+                    var transfer = _nativeTransfer;
+                    if (!barrierOwned() || !IsCurrentNativeTransfer(transfer)
+                        || !RealTimeNativeCheckpointLimits.SameIdentity(transfer.Manifest, manifest)
+                        || transfer.Manifest.ArchiveHash != manifest.ArchiveHash
+                        || !transfer.ReferenceVerified.Task.IsCompleted || !transfer.ReferenceVerified.Task.Result)
+                    { started.TrySetResult(null); return; }
+                    transfer.CommitRequested = true;
+                    transfer.Deadline = DateTime.UtcNow.AddSeconds(30); transfer.NextHeader = default;
+                    started.TrySetResult(transfer); TickNativeCheckpointTransfer();
+                }
+            });
+            var owner = await started.Task;
+            return owner != null && await owner.Committed.Task;
+        }
 
         internal async Task<bool> VerifyCurrentNativeReferenceAsync(NotifyRealTimeNativeCheckpoint expected, Func<bool> barrierOwned)
         {
@@ -119,19 +146,22 @@ namespace WOTRMultiplayer.Services
             lock (ActionLock) return IsCurrentNativeTransfer(owner);
         }
 
-        private bool IsCurrentNativeTransfer(NativeTransfer transfer)
+        private bool IsCurrentNativeTransferIdentity(NativeTransfer transfer)
         {
             var session = Game;
             return transfer != null
             && ReferenceEquals(_nativeTransfer, transfer) && RealTimePresentationRuntime.Enabled && IsActive
             && ReferenceEquals(session, transfer.Session) && ReferenceEquals(session?.Combat, transfer.Combat)
             && ReferenceEquals(session?.RealTimeCombat, transfer.State) && session.Id == transfer.Prepare.SessionId
-            && session.LoadedSaveSeed == transfer.Prepare.LoadedSaveSeed && transfer.State.Epoch == transfer.Prepare.Epoch
+            && session.LoadedSaveSeed == transfer.Prepare.LoadedSaveSeed && transfer.State.Epoch == transfer.Prepare.Epoch;
+        }
+
+        private bool IsCurrentNativeTransfer(NativeTransfer transfer)
+            => IsCurrentNativeTransferIdentity(transfer) && transfer.Abort == null
             && transfer.State.LastAuthoritativeSequence == transfer.Prepare.LastIncludedSequence
             && transfer.State.Phase == transfer.Phase && transfer.Phase != CombatSynchronizationPhase.Stable
             && transfer.State.Mode == CombatMode.RealTimeWithPause && transfer.BarrierOwned()
             && (!transfer.VerificationRequested || transfer.VerificationOwned?.Invoke() == true);
-        }
 
         // Future native reconstruction coordinator calls this AFTER owning a
         // repair barrier. Success only means client-verified archive bytes, not
@@ -246,15 +276,20 @@ namespace WOTRMultiplayer.Services
             {
                 var transfer = _nativeTransfer;
                 if (transfer == null) return;
-                if (!IsCurrentNativeTransfer(transfer)) { ResetNativeCheckpointTransfer(); return; }
+                if (!IsCurrentNativeTransferIdentity(transfer)) { ResetNativeCheckpointTransfer(); return; }
+                if (transfer.Abort != null) { TickNativeCheckpointAbort(transfer); return; }
+                if (!IsCurrentNativeTransfer(transfer))
+                { FailNativeCheckpointTransfer(transfer, "native-transfer-barrier-revoked"); return; }
                 if (DateTime.UtcNow >= transfer.Deadline)
                 { FailNativeCheckpointTransfer(transfer, "native-transfer-timeout"); return; }
-                if (transfer.ReferenceVerified.Task.IsCompleted && transfer.ReferenceVerified.Task.Result) return;
+                if (!transfer.CommitRequested && transfer.ReferenceVerified.Task.IsCompleted && transfer.ReferenceVerified.Task.Result) return;
                 if (!transfer.VerificationRequested && transfer.Loaded.Task.IsCompleted && transfer.Loaded.Task.Result) return;
                 try
                 {
                     if (DateTime.UtcNow >= transfer.NextHeader)
                     {
+                        transfer.State.RecoveryStatus = transfer.CommitRequested ? "committed"
+                            : transfer.VerificationRequested ? "verifying" : transfer.LoadRequested ? "loading" : "rebuilding";
                         transfer.NextHeader = DateTime.UtcNow.AddSeconds(1);
                         var header = RealTimeNativeCheckpointLimits.Copy(transfer.Manifest ?? transfer.Prepare);
                         if (transfer.LoadRequested) header.Stage = (int)RealTimeNativeCheckpointStage.Load;
@@ -263,6 +298,11 @@ namespace WOTRMultiplayer.Services
                             header.Stage = (int)RealTimeNativeCheckpointStage.Verify;
                             header.ReferenceStateBytes = (byte[])transfer.ReferenceBytes.Clone();
                             header.ReferenceStateHash = transfer.ReferenceHash;
+                        }
+                        if (transfer.CommitRequested)
+                        {
+                            header.Stage = (int)RealTimeNativeCheckpointStage.Commit;
+                            header.ReferenceStateBytes = null;
                         }
                         Send(transfer.Peer, header);
                     }
@@ -290,11 +330,29 @@ namespace WOTRMultiplayer.Services
                 lock (ActionLock)
                 {
                     var transfer = _nativeTransfer;
+                    if (IsCurrentNativeTransferIdentity(transfer) && transfer.Abort != null)
+                    {
+                        if (!transfer.AbortExpired && transfer.Abort.Acknowledge(receivedFrom, copied))
+                        {
+                            transfer.Aborted.TrySetResult(true);
+                            Logger.LogInformation("Native checkpoint abort acknowledged. Checkpoint={Checkpoint}; no resume or save authorization.",
+                                transfer.Prepare.CheckpointId);
+                        }
+                        return;
+                    }
                     if (!IsCurrentNativeTransfer(transfer) || receivedFrom != transfer.Peer) return;
                     var expected = transfer.Manifest ?? transfer.Prepare;
                     if (!RealTimeNativeCheckpointLimits.Matches(expected, copied)) return;
                     if (copied.Stage == (int)RealTimeNativeCheckpointAckStage.Failed)
                     { FailNativeCheckpointTransfer(transfer, "native-transfer-client-refused"); return; }
+                    if (copied.Stage == (int)RealTimeNativeCheckpointAckStage.Committed)
+                    {
+                        if (!transfer.CommitRequested || copied.Number != 0 || copied.Reason != null
+                            || copied.ReferenceStateHash != transfer.ReferenceHash
+                            || copied.CanonicalStateHash != expected.CanonicalStateHash) return;
+                        transfer.Committed.TrySetResult(true);
+                        return;
+                    }
                     if (copied.Stage == (int)RealTimeNativeCheckpointAckStage.Prepared && transfer.Manifest == null && copied.Number == 0)
                     { transfer.Prepared.TrySetResult(true); return; }
                     if (copied.Stage == (int)RealTimeNativeCheckpointAckStage.Loaded)
@@ -330,12 +388,51 @@ namespace WOTRMultiplayer.Services
         private void FailNativeCheckpointTransfer(NativeTransfer transfer, string reason)
         {
             if (transfer == null || !ReferenceEquals(_nativeTransfer, transfer)) return;
-            var abort = RealTimeNativeCheckpointLimits.Copy(transfer.Manifest ?? transfer.Prepare);
-            abort.Stage = (int)RealTimeNativeCheckpointStage.Abort;
+            if (transfer.Abort != null) return; // Never renew a lost abort's retry budget.
+            transfer.Sender?.Dispose(); transfer.Sender = null;
+            transfer.Reference = null; transfer.ReferenceBytes = null; transfer.ReferenceHash = null;
+            transfer.Prepared.TrySetResult(false); transfer.Transferred.TrySetResult(false);
+            transfer.Loaded.TrySetResult(false); transfer.ReferenceVerified.TrySetResult(false);
+            transfer.Committed.TrySetResult(false);
+            transfer.Abort = new RealTimeNativeCheckpointAbort(transfer.Peer, transfer.Manifest ?? transfer.Prepare, DateTime.UtcNow);
+            Logger.LogWarning("Native checkpoint transfer abort requested. Reason={Reason}; awaiting revoked client work, combat remains protected.", reason);
+            TickNativeCheckpointAbort(transfer);
+        }
+
+        private void TickNativeCheckpointAbort(NativeTransfer transfer)
+        {
+            if (transfer.AbortExpired) return;
+            NotifyRealTimeNativeCheckpoint abort;
+            try { abort = transfer.Abort.GetDue(DateTime.UtcNow); }
+            catch (InvalidOperationException error)
+            {
+                Logger.LogWarning(error, "Native checkpoint abort was not acknowledged; protected recovery remains incomplete.");
+                transfer.AbortExpired = true;
+                transfer.Aborted.TrySetResult(false);
+                // Retain the checkpoint tombstone until identity/epoch reset.
+                // A timeout is not permission for a legacy repair ACK to resume.
+                return;
+            }
+            if (abort == null) return;
             try { Send(transfer.Peer, abort); }
-            catch (Exception error) { Logger.LogWarning(error, "Unable to send native checkpoint abort."); }
-            Logger.LogWarning("Native checkpoint transfer aborted. Reason={Reason}; combat remains protected.", reason);
-            ResetNativeCheckpointTransfer(); // No resume, phase change or save authorization.
+            catch (Exception error) { Logger.LogWarning(error, "Unable to send native checkpoint abort; bounded retry remains active."); }
+        }
+
+        internal async Task<bool> AbortCurrentNativeCheckpointAsync()
+        {
+            var started = new TaskCompletionSource<NativeTransfer>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                lock (ActionLock)
+                {
+                    var transfer = _nativeTransfer;
+                    if (!IsCurrentNativeTransferIdentity(transfer)) { started.TrySetResult(null); return; }
+                    FailNativeCheckpointTransfer(transfer, "native-transfer-coordinator-aborted");
+                    started.TrySetResult(transfer);
+                }
+            });
+            var owner = await started.Task;
+            return owner != null && await owner.Aborted.Task;
         }
 
         private void ResetNativeCheckpointTransfer()
@@ -347,6 +444,8 @@ namespace WOTRMultiplayer.Services
                 transfer?.Prepared.TrySetResult(false); transfer?.Transferred.TrySetResult(false);
                 transfer?.Loaded.TrySetResult(false);
                 transfer?.ReferenceVerified.TrySetResult(false);
+                transfer?.Aborted.TrySetResult(false);
+                transfer?.Committed.TrySetResult(false);
             }
         }
     }

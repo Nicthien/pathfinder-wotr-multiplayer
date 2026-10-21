@@ -7,6 +7,8 @@ namespace WOTRMultiplayer.Services
 {
     public partial class MultiplayerHost
     {
+        // Engine boundary; protocol tests replace capture, never the transfer or its guards.
+        internal Func<string, string, Func<bool>, Task<RealTimeMemorySaver>> NativeCheckpointCapture;
         // Capture capability for the native reconstruction barrier. Not wired to
         // a user button or the old snapshot repair: a transfer/load/ACK protocol
         // must consume it before any mechanical repair obligation is cleared.
@@ -31,7 +33,9 @@ namespace WOTRMultiplayer.Services
                         && state.Epoch == epoch && state.LastAuthoritativeSequence == sequence && state.Phase == phase
                         && state.Mode == CombatMode.RealTimeWithPause && phase != CombatSynchronizationPhase.Stable;
             }
-            return RealTimeNativeHostCapture.CaptureAsync(_mainThreadAccessor, CombatInteraction, id, checkpointId, Authorized);
+            return NativeCheckpointCapture != null
+                ? NativeCheckpointCapture(id, checkpointId, Authorized)
+                : RealTimeNativeHostCapture.CaptureAsync(_mainThreadAccessor, CombatInteraction, id, checkpointId, Authorized);
         }
     }
 }

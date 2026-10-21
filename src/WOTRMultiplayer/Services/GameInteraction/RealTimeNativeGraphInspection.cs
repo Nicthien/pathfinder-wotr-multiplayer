@@ -28,6 +28,22 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (units == null || areas == null) throw new InvalidOperationException("native-graph-pools-missing");
             var unitArray = units.ToArray(); var areaArray = areas.ToArray();
             RequireState(unitArray, areaArray, authorized);
+            var nativeUnits = unitArray.ToDictionary(unit => unit.UniqueId, StringComparer.Ordinal);
+            foreach (var unit in unitArray)
+            {
+                // Raw is a fixed array of command slots. Empty slots are normal,
+                // unlike a null entry in the pending command queue.
+                foreach (var command in unit.Commands.Raw.Where(command => command != null).Concat(unit.Commands.Queue))
+                {
+                    if (command == null || !ReferenceEquals(command.Executor, unit))
+                        throw Invalid(unit.UniqueId, "command-executor-reference");
+                    var target = command is UnitAttack attack ? attack.Target
+                        : command is UnitUseAbility ability ? ability.Target?.Unit : null;
+                    if (target != null && (!nativeUnits.TryGetValue(target.UniqueId, out var nativeTarget)
+                        || !ReferenceEquals(nativeTarget, target)))
+                        throw Invalid(unit.UniqueId, "command-target-reference");
+                }
+            }
             var result = new NetworkNativeTopology();
             void Capture(EntityDataBase entity, string kind)
             {

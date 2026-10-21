@@ -65,6 +65,16 @@ namespace WOTRMultiplayer.Networking
             return IsManifest(manifest) ? manifest : null;
         }
 
+        public static NotifyRealTimeNativeCheckpoint AbortSource(NotifyRealTimeNativeCheckpoint frame)
+        {
+            if (!HasIdentity(frame) || frame.Stage != (int)RealTimeNativeCheckpointStage.Abort
+                || frame.ReferenceStateBytes != null || frame.ReferenceStateHash != null) return null;
+            var source = Copy(frame);
+            source.Stage = string.IsNullOrEmpty(source.ArchiveHash)
+                ? (int)RealTimeNativeCheckpointStage.Prepare : (int)RealTimeNativeCheckpointStage.Manifest;
+            return IsPrepare(source) || IsManifest(source) ? source : null;
+        }
+
         public static NotifyRealTimeNativeCheckpoint Copy(NotifyRealTimeNativeCheckpoint frame, bool includeReference = true) => new()
         {
             SessionId = frame.SessionId, LoadedSaveSeed = frame.LoadedSaveSeed, Epoch = frame.Epoch,

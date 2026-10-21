@@ -120,6 +120,7 @@ internal static partial class Program
             success &= ProbeAcceptedOrderReference();
             success &= ProbePresentationSnapshotBarrier();
             success &= ProbePresentationLifetime();
+            success &= ProbeNativeAbortTransport();
         }
         finally { AppDomain.CurrentDomain.FirstChanceException -= trace; }
         return success ? 0 : 1;
@@ -181,6 +182,9 @@ internal static partial class Program
             safe &= !(bool)leaseType.GetProperty("NativeCallbackCompleted", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(lease);
             Console.WriteLine("native-lifecycle-catches: installed-targets=10; synthetic-caught-fault=" + safe
                 + "; original-log-preserved=True; native-callbacks-not-invoked=True");
+            var operationType = typeof(WOTRMultiplayer.Main).Assembly.GetType("WOTRMultiplayer.Services.GameInteraction.RealTimeNativeWorldLoadResult", true);
+            safe &= (bool)typeof(Program).GetMethod(nameof(ProbeAbortOperation), BindingFlags.NonPublic | BindingFlags.Static)
+                .MakeGenericMethod(operationType).Invoke(null, new object[] { lease });
             lease.Dispose(); lease = null;
             try { clone.CopyToStash("history"); safe = false; } catch (InvalidOperationException) { }
             safe &= !(bool)leaseType.GetProperty("IsActive", flags).GetValue(null);

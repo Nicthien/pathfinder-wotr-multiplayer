@@ -381,14 +381,18 @@ namespace WOTRMultiplayer.Config.Mapping
                 DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
                 Name = areaEffectEntityData.Blueprint.name,
                 Orientation = RealTimePresentationRuntime.Enabled
-                    && Main.Multiplayer?.IsRealTimeCombatActive == true && areaEffectEntityData.View != null
+                    && (Main.Multiplayer?.IsRealTimeCombatActive == true
+                        || WOTRMultiplayer.Services.CombatSaving.CombatSaveActivation.Enabled && RealTimeCaptureScope.Active)
+                    && areaEffectEntityData.View != null
                         ? areaEffectEntityData.View.transform.eulerAngles.y : areaEffectEntityData.m_Rotation,
-                ContextChain = RealTimePresentationRuntime.Enabled
+                ContextChain = RealTimePresentationRuntime.Enabled && RealTimeCaptureScope.Active
                         ? RealTimeBuffContextCapture.Capture(areaEffectEntityData.Context, context.Mapper) : null,
                 // Attached zones move their view without refreshing m_Position.
-                // Capture the confirmed visible host location for RTwP only.
+                // Native PreSave copies the view transform to these cached fields.
+                // Combat capture must compare that same effective transform in TB too.
                 Position = (RealTimePresentationRuntime.Enabled
-                    && Main.Multiplayer?.IsRealTimeCombatActive == true
+                    && (Main.Multiplayer?.IsRealTimeCombatActive == true
+                        || WOTRMultiplayer.Services.CombatSaving.CombatSaveActivation.Enabled && RealTimeCaptureScope.Active)
                     && areaEffectEntityData.View != null
                         ? areaEffectEntityData.View.transform.position
                         : areaEffectEntityData.m_Position).ToNetworkVector3(),
@@ -446,14 +450,16 @@ namespace WOTRMultiplayer.Config.Mapping
                 IsHidden = buff.Hidden
             };
 
-            if (WOTRMultiplayer.Services.RealTimePresentationRuntime.Enabled)
+            if (RealTimePresentationRuntime.Enabled && RealTimeCaptureScope.Active)
                 networkBuff.ContextChain = WOTRMultiplayer.Services.GameInteraction.RealTimeBuffContextCapture.Capture(buff.Context, context.Mapper);
 
-            if (buff.Context.ParentContext is AbilityExecutionContext abilityContext)
+            if (buff.Context?.ParentContext is AbilityExecutionContext abilityContext)
             {
-                networkBuff.SourceAbility = context.Mapper.Map<NetworkAbility>(abilityContext.Ability);
+                networkBuff.SourceAbility = WOTRMultiplayer.Services.GameInteraction.RealTimeBuffContextCapture
+                    .CaptureAbility(abilityContext, context.Mapper);
                 networkBuff.SourceAbilityParams = context.Mapper.Map<NetworkAbilityParams>(abilityContext.m_Params);
-                networkBuff.SourceAbilityCasterId = abilityContext.Ability?.Caster?.Unit.UniqueId;
+                networkBuff.SourceAbilityCasterId = CombatSaveDigestScope.Active
+                    ? abilityContext.MaybeCaster?.UniqueId : abilityContext.Ability?.Caster?.Unit.UniqueId;
             }
 
             return networkBuff;
@@ -516,7 +522,9 @@ namespace WOTRMultiplayer.Config.Mapping
                 return null;
             }
 
-            var sourceAbility = GetSourceAbility(abilityData);
+            // Command replay may normalize converted spells; a captured context
+            // must retain the actual executing ability and its blueprint.
+            var sourceAbility = RealTimeCaptureScope.Active ? abilityData : GetSourceAbility(abilityData);
             var ability = new NetworkAbility
             {
                 Id = sourceAbility.UniqueId,

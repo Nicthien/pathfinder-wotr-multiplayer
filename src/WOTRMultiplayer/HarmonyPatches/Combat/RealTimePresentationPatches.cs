@@ -28,6 +28,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         private static readonly ConcurrentDictionary<UnitCommand, string> ActionIds = new();
         private static readonly ConcurrentDictionary<string, string> UnitActions = new(StringComparer.Ordinal);
 
+        internal static bool IsCurrentAction(string unitId, string actionId) => unitId != null
+            && UnitActions.TryGetValue(unitId, out var current) && current == actionId;
+
         private static bool CanPublish => RealTimePresentationRuntime.Enabled
             && Main.Multiplayer?.IsRealTimeCombatActive == true
             && !Main.Multiplayer.IsRealTimeClientCombatActive
@@ -72,7 +75,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         {
             RealTimeAbilityPresentationPatches.AfterEnded(__instance);
             if (__instance is not UnitAttack attack || !ActionIds.TryRemove(__instance, out var actionId)) return;
-            if (!string.IsNullOrWhiteSpace(attack.Executor?.UniqueId))
+            // An older command may end after a replacement has started. Its
+            // End must not remove the replacement's impact correlation.
+            if (!string.IsNullOrWhiteSpace(attack.Executor?.UniqueId)
+                && UnitActions.TryGetValue(attack.Executor.UniqueId, out var current)
+                && current == actionId)
                 UnitActions.TryRemove(attack.Executor.UniqueId, out _);
             if (!CanPublish) return;
             Main.Multiplayer.PublishRealTimeAuthoritativeEvent(new NotifyRealTimeAuthoritativeEvent
@@ -85,6 +92,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 Attack = new RealTimeAttackPresentationPayload
                 {
                     Stage = (int)(__instance.Result == UnitCommand.ResultType.Interrupt
+                        || __instance.Result == UnitCommand.ResultType.Fail
                         ? RealTimePresentationStage.Interrupt : RealTimePresentationStage.End)
                 }
             });

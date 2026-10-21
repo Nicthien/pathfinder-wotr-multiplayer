@@ -18,5 +18,11 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(3)]
         [LogMe]
         public int PausePolicy { get; set; }
+
+        [ProtoMember(4), LogMe]
+        public string SessionId { get; set; }
+
+        [ProtoMember(5), LogMe]
+        public int LoadedSaveSeed { get; set; }
     }
 }

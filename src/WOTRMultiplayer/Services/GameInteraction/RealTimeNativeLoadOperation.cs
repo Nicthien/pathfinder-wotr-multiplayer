@@ -10,8 +10,22 @@ namespace WOTRMultiplayer.Services.GameInteraction
     {
         private readonly Func<bool> _authorized;
         private int _started;
+        private int _settled;
+        private RealTimeNativeLoadLease _lease;
         internal RealTimeNativeWorldLoadResult Receipt { get; private set; }
         internal bool IsLoaded => Receipt != null && _authorized();
+        // A faulted task alone is NOT worker completion: the loader can report
+        // a failure while its drain coroutine still owns native work.
+        internal bool CanAcknowledgeAbort => Volatile.Read(ref _settled) != 0
+            && (Volatile.Read(ref _lease) is not { } lease || lease.IsDrained);
+
+        internal void AttachLease(RealTimeNativeLoadLease lease)
+        {
+            if (lease == null) throw new ArgumentNullException(nameof(lease));
+            if (Volatile.Read(ref _started) == 0 || Volatile.Read(ref _settled) != 0
+                || Interlocked.CompareExchange(ref _lease, lease, null) != null)
+                throw new InvalidOperationException("native-load-lease-already-bound-or-operation-inactive");
+        }
 
         internal RealTimeNativeLoadOperation(Func<bool> authorized)
             => _authorized = authorized ?? throw new ArgumentNullException(nameof(authorized));
@@ -21,12 +35,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (load == null) throw new ArgumentNullException(nameof(load));
             if (Interlocked.CompareExchange(ref _started, 1, 0) != 0)
                 throw new InvalidOperationException("native-load-checkpoint-already-started");
-            if (!_authorized()) throw new InvalidOperationException("native-load-barrier-revoked");
-            var receipt = await load();
-            if (!_authorized()) throw new InvalidOperationException("native-load-barrier-revoked");
-            if (receipt?.World == null || receipt.RepairObligation == null)
-                throw new InvalidOperationException("native-load-receipt-incomplete");
-            Receipt = receipt;
+            try
+            {
+                if (!_authorized()) throw new InvalidOperationException("native-load-barrier-revoked");
+                var receipt = await load();
+                if (!_authorized()) throw new InvalidOperationException("native-load-barrier-revoked");
+                if (receipt?.World == null || receipt.RepairObligation == null)
+                    throw new InvalidOperationException("native-load-receipt-incomplete");
+                Receipt = receipt;
+            }
+            finally { Volatile.Write(ref _settled, 1); }
         }
     }
 }
