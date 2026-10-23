@@ -16,6 +16,8 @@ namespace WOTRMultiplayer.Entities.Units
         public int Type { get; set; }
         public string SpellBlueprintId { get; set; }
         public int Metamagic { get; set; }
+        public int MetamagicSpellLevelCost { get; set; }
+        public int MetamagicHeightenLevel { get; set; }
         public bool Available { get; set; }
         public bool IsOpposition { get; set; }
     }

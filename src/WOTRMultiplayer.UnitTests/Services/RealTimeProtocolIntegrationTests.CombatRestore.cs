@@ -105,12 +105,18 @@ namespace WOTRMultiplayer.UnitTests.Services
             var header = new NotifyCombatSave { SessionId = host.Game.Id, SessionSeed = host.Game.SessionSeed,
                 LoadedSaveSeed = host.Game.LoadedSaveSeed, Epoch = host.Game.RealTimeCombat.Epoch,
                 Operation = Guid.NewGuid().ToString("N"), Stage = "RestorePrepare" };
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
             void Set(string name, object value) => typeof(MultiplayerHost).GetField(name,
-                BindingFlags.Instance | BindingFlags.NonPublic).SetValue(host, value);
+                flags).SetValue(host, value);
             Set("_combatRestore", header);
             Set("_combatRestoreDeadline", DateTime.UtcNow.AddMinutes(1));
             ((HashSet<long>)typeof(MultiplayerHost).GetField("_combatRestorePeers", BindingFlags.Instance | BindingFlags.NonPublic)
                 .GetValue(host)).Add(42);
+            // A verified combat-save load is the documented recovery path after
+            // an earlier save/turn barrier failed.  That old latch must not
+            // reject RestorePrepare for the newly loaded host archive.
+            typeof(MultiplayerHost).GetField("_turnEndSynchronizationFailed", flags).SetValue(host, true);
+            typeof(MultiplayerClient).GetField("_turnEndSynchronizationFailed", flags).SetValue(client, true);
             A.CallTo(() => hostNetwork.Send(42, A<object>._)).Invokes(call => queued.Enqueue(ProtoBuf.Serializer.DeepClone((NotifyCombatSave)call.Arguments[1])));
             // Start after native world restoration. Sender/identity gates are tested
             // separately; this exercise drives the real stage handlers and retries.
@@ -152,6 +158,8 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Assert.That(release.Stage, Is.EqualTo("RestoreRelease"));
                 Client(release);
                 Assert.That(pending.GetValue(client), Is.Null);
+                Assert.That(typeof(MultiplayerHost).GetField("_turnEndSynchronizationFailed", flags).GetValue(host), Is.False);
+                Assert.That(typeof(MultiplayerClient).GetField("_turnEndSynchronizationFailed", flags).GetValue(client), Is.False);
                 Client(release); // Idempotent release must neither restart nor acknowledge a turn.
                 Assert.That(queued, Is.Empty);
             }

@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
 using FakeItEasy;
+using Kingmaker.EntitySystem.Stats;
 using NUnit.Framework;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Networking;
+using WOTRMultiplayer.Networking.Abstractions;
 using WOTRMultiplayer.Networking.Messages.Game;
 using WOTRMultiplayer.Services;
 using WOTRMultiplayer.UnitTests.FakeRules;
@@ -66,11 +68,52 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
-        public void FinalDeathIsCapturedAfterCallbackAndClosedOnlyAfterFinalAck()
+        public async Task HostCertifiedModeCompletionClearsSpuriousClientEndWait()
+        {
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            host.Game.RealTimeCombat.Mode = client.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+            client.CombatEnded();
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(client.Game.Combat, Is.Null); return; }
+            Assert.That(client.IsSavingBlockedByCombatSync, Is.True);
+
+            Pump(queued, hostNetwork, clientNetwork);
+
+            Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+            Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(client.Game.Combat, Is.Not.Null);
+            Assert.That(client.IsSavingBlockedByCombatSync, Is.False,
+                "The current host checkpoint explicitly certifies that combat continues.");
+        }
+
+        [Test]
+        public void HostConfirmedTurnStartClearsSpuriousClientEndWait()
+        {
+            var (_, client, _, clientNetwork, _, _) = CreatePair();
+            client.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            client.CombatEnded();
+            if (!RealTimePresentationRuntime.Enabled) { Assert.That(client.Game.Combat, Is.Null); return; }
+            Assert.That(client.IsSavingBlockedByCombatSync, Is.True);
+            client.Game.RealTimeCombat.Mode = CombatMode.TurnBased;
+            client.Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Stable;
+            client.Game.Combat.Round = 3;
+            client.Game.Combat.Turn = new NetworkCombatTurn
+            {
+                UnitId = "host-unit", Stage = NetworkCombatTurnStage.StartSynchronization
+            };
+            FakeUtils.GetNetworkReceiverHandler<NotifyCombatTurnStarted>(clientNetwork)(NetworkConstants.HostPlayerId,
+                new NotifyCombatTurnStarted { UnitId = "host-unit", Round = 3, Seed = 71 });
+            Assert.That(client.IsSavingBlockedByCombatSync, Is.False);
+        }
+
+        [Test]
+        public async Task FinalDeathIsCapturedAfterCallbackAndClosedOnlyAfterFinalAck()
         {
             var finalState = new NetworkCombatState();
             var mainThread = new Queue<Action>();
-            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair(finalState, mainThread);
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair(finalState, mainThread,
+                nativeRecovery: true);
             host.Game.RealTimeCombat.Mode = client.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
             host.CombatEnded();
             if (!RealTimePresentationRuntime.Enabled) { Assert.That(host.Game.Combat, Is.Null); return; }
@@ -84,7 +127,13 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 Id = "last-enemy", Descriptor = new()
                 {
-                    Damage = 40, Vitals = new() { Damage = 40, LifeState = 2, IsFinallyDead = true, IsInCombat = false }
+                    Damage = 40,
+                    CalculatedStats = [new()
+                    {
+                        Type = (int)StatType.AC,
+                        Values = new() { BaseValue = 10, ModifiedValue = 10, ModifiedValueRaw = 10, PermanentValue = 10 }
+                    }],
+                    Vitals = new() { Damage = 40, LifeState = 2, IsFinallyDead = true, IsInCombat = false }
                 }
             });
             mainThread.Dequeue()();
@@ -96,27 +145,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             var prepareAck = (ClientRealTimeCombatEndAck)queued.Dequeue();
             FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatEndAck>(hostNetwork)(42, prepareAck);
             Assert.That(host.Game.Combat, Is.Not.Null);
-            mainThread.Dequeue()();
-            var commit = (NotifyRealTimeCombatEnd)queued.Dequeue();
-            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatEnd>(clientNetwork)(-1, commit);
-            Assert.That(client.Game.Combat, Is.Not.Null);
-            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatEndAck>(hostNetwork)(42,
-                (ClientRealTimeCombatEndAck)queued.Dequeue());
-            mainThread.Dequeue()();
-            var finalize = (NotifyRealTimeCombatEnd)queued.Dequeue();
-            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatEnd>(clientNetwork)(-1, finalize);
-            Assert.That(client.Game.Combat, Is.Null);
-            Assert.That(client.IsSavingBlockedByCombatSync, Is.False);
-            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
-            // A lost final acknowledgement is recovered by replaying Finalize,
-            // without executing the client's cleanup a second time.
-            queued.Dequeue();
-            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatEnd>(clientNetwork)(-1, finalize);
-            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatEndAck>(hostNetwork)(42,
-                (ClientRealTimeCombatEndAck)queued.Dequeue());
-            mainThread.Dequeue()();
+            await PumpCombatEnd(mainThread, queued, hostNetwork, clientNetwork, host, client);
             Assert.That(host.Game.Combat, Is.Null);
+            Assert.That(client.Game.Combat, Is.Null);
             Assert.That(host.IsSavingBlockedByCombatSync, Is.False);
+            Assert.That(client.IsSavingBlockedByCombatSync, Is.False);
         }
 
         [TestCase("apply")]
@@ -149,9 +182,9 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
-        public void FailedApplicationMayRetryTheSamePrepareInTheSameEpoch()
+        public async Task FailedApplicationMayRetryTheSamePrepareInTheSameEpoch()
         {
-            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair();
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair(nativeRecovery: true);
             host.Game.RealTimeCombat.Mode = client.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
             host.CombatEnded();
             if (!RealTimePresentationRuntime.Enabled) { Assert.That(host.Game.Combat, Is.Null); return; }
@@ -170,15 +203,15 @@ namespace WOTRMultiplayer.UnitTests.Services
             var successful = (ClientRealTimeCombatEndAck)queued.Dequeue();
             Assert.That(successful.Applied, Is.True);
             FakeUtils.GetNetworkReceiverHandler<ClientRealTimeCombatEndAck>(hostNetwork)(42, successful);
-            Pump(queued, hostNetwork, clientNetwork);
+            await PumpCombatEnd(null, queued, hostNetwork, clientNetwork, host, client);
             Assert.That(host.Game.Combat, Is.Null);
             Assert.That(client.Game.Combat, Is.Null);
         }
 
         [Test]
-        public void LateAckAfterTimeoutStillRecoversWithoutSavingAnUnverifiedState()
+        public async Task LateAckAfterTimeoutStillRecoversWithoutSavingAnUnverifiedState()
         {
-            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair();
+            var (host, client, hostNetwork, clientNetwork, queued, _) = CreatePair(nativeRecovery: true);
             host.Game.RealTimeCombat.Mode = client.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
             host.CombatEnded();
             if (!RealTimePresentationRuntime.Enabled) { Assert.That(host.Game.Combat, Is.Null); return; }
@@ -189,9 +222,40 @@ namespace WOTRMultiplayer.UnitTests.Services
             host.PublishRealTimeCombatSnapshot();
             Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
             FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeCombatEnd>(clientNetwork)(-1, frame);
-            Pump(queued, hostNetwork, clientNetwork);
+            await PumpCombatEnd(null, queued, hostNetwork, clientNetwork, host, client);
             Assert.That(host.Game.Combat, Is.Null);
             Assert.That(client.Game.Combat, Is.Null);
+        }
+
+        private static async Task PumpCombatEnd(Queue<Action> mainThread, Queue<object> queued,
+            INetworkHostConnection hostNetwork, INetworkClientConnection clientNetwork,
+            MultiplayerHost host, MultiplayerClient client)
+        {
+            for (var i = 0; i < 1000; i++)
+            {
+                if (mainThread != null)
+                {
+                    while (true)
+                    {
+                        Action action;
+                        lock (mainThread)
+                        {
+                            if (mainThread.Count == 0) break;
+                            action = mainThread.Dequeue();
+                        }
+                        action();
+                    }
+                }
+                Pump(queued, hostNetwork, clientNetwork);
+                if (host.Game.Combat == null && client.Game.Combat == null) return;
+                await Task.Delay(1);
+            }
+            Assert.Fail($"Combat end did not settle after native reconstruction. "
+                + $"HostPhase={host.Game.RealTimeCombat.Phase}, HostStatus={host.Game.RealTimeCombat.RecoveryStatus}, "
+                + $"HostFailure={host.Game.RealTimeCombat.RecoveryFailure}, ClientPhase={client.Game.RealTimeCombat.Phase}, "
+                + $"ClientStatus={client.Game.RealTimeCombat.RecoveryStatus}, ClientFailure={client.Game.RealTimeCombat.RecoveryFailure}, "
+                + $"Queued={queued.Count}, "
+                + $"MainThread={mainThread?.Count ?? 0}");
         }
 
         [Test]

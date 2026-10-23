@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
@@ -11,6 +12,7 @@ namespace WOTRMultiplayer.Services
         private CombatMode? _queuedCombatMode;
         private NetworkGame _queuedCombatModeSession;
         private int _queuedCombatModeSaveSeed;
+        private bool _nativeReconstructionRequiredForModeSwitch;
 
         private bool HasModeBlockingForcedPause => Game.ForcedPause != null
             && Game.ForcedPause.Reason != NetworkForcedPauseReason.Manual;
@@ -31,8 +33,10 @@ namespace WOTRMultiplayer.Services
                 || Game.LoadedSaveSeed != _queuedCombatModeSaveSeed)
             {
                 _queuedCombatMode = null;
+                _nativeReconstructionRequiredForModeSwitch = false;
                 return; // Never apply an old request after loading or reconnecting.
             }
+            if (_nativeReconstructionRequiredForModeSwitch) return;
             var state = Game.RealTimeCombat;
             if (state == null || state.Phase != CombatSynchronizationPhase.Stable
                 || state.CombatEndPending || (Game.Combat?.Stage == NetworkCombatStage.Running && HasModeBlockingForcedPause)
@@ -53,6 +57,33 @@ namespace WOTRMultiplayer.Services
             catch (Exception failure)
             {
                 Logger.LogError(failure, "[CombatMode] Retained mode request failed; no local-only switch performed.");
+            }
+        }
+
+        private async Task ContinueCombatModeAfterNativeReconstructionAsync()
+        {
+            if (!_nativeReconstructionRequiredForModeSwitch || !_queuedCombatMode.HasValue)
+                return;
+            var mode = _queuedCombatMode.Value;
+            var session = _queuedCombatModeSession;
+            var saveSeed = _queuedCombatModeSaveSeed;
+            _nativeReconstructionRequiredForModeSwitch = false;
+            _queuedCombatMode = null;
+            if (!IsActive || !ReferenceEquals(Game, session) || Game.LoadedSaveSeed != saveSeed
+                || Game?.Combat?.Stage != NetworkCombatStage.Running
+                || Game.RealTimeCombat?.Phase != CombatSynchronizationPhase.Stable
+                || Game.RealTimeCombat.Mode == mode)
+                return;
+            try
+            {
+                Logger.LogInformation("[CombatMode] Native reconstruction verified; continuing retained mode request. Mode={Mode}", mode);
+                if (!await RequestRealTimeCombatModeAsync(mode))
+                    PlayerNotification.ShowWarningNotification(WellKnownKeys.LobbyWindow.RealTime.ModeUnavailable.Key);
+            }
+            catch (Exception failure)
+            {
+                Logger.LogError(failure, "[CombatMode] Mode request failed after native reconstruction.");
+                PlayerNotification.ShowWarningNotification(WellKnownKeys.LobbyWindow.RealTime.ModeUnavailable.Key);
             }
         }
     }

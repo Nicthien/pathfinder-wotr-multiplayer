@@ -12,12 +12,137 @@ using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services;
+using Kingmaker.Visual.Animation.Kingmaker;
+using Kingmaker.View.Animation;
+using Kingmaker.UnitLogic.Buffs.Blueprints;
+using Kingmaker.EntitySystem;
+using Kingmaker.EntitySystem.Persistence.JsonUtility;
 
 namespace WOTRMultiplayer.UnitTests.Services
 {
     [TestFixture]
     public class CombatInteractionServiceTests
     {
+        [Test]
+        public void NativeRestoreReferenceExcludesHistoricalRealTimeParticipants()
+        {
+            var state = new NetworkCombatState
+            {
+                Units =
+                [
+                    new NetworkUnit { Id = "active-party" },
+                    new NetworkUnit { Id = "active-enemy" },
+                    new NetworkUnit { Id = "withdrawn-enemy" }
+                ]
+            };
+
+            CombatInteractionService.RetainNativeCombatUnits(state,
+                new[] { "ACTIVE-PARTY", "active-enemy" });
+
+            Assert.That(state.Units.ConvertAll(unit => unit.Id),
+                Is.EqualTo(new[] { "active-party", "active-enemy" }));
+        }
+
+        [TestCase(true, false, 12, false)]
+        [TestCase(true, true, 0, true)]
+        [TestCase(false, false, 0, false)]
+        [TestCase(false, false, 1, true)]
+        public void CombatInitializationUsesNativeMembershipInRealTimeMode(
+            bool turnBasedEnabled,
+            bool turnBasedInitialized,
+            int nativeCombatUnits,
+            bool expected)
+        {
+            Assert.That(CombatInteractionService.IsCombatInitializationReady(
+                turnBasedEnabled,
+                turnBasedInitialized,
+                nativeCombatUnits), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void NativeCheckpointPreparationSupportsContextlessSavedBuff()
+        {
+            var prepared = BuffInteractionService.PrepareNativeBuffForCheckpoint(
+                new BlueprintBuff(), null, TimeSpan.MaxValue, "contextless-native-buff");
+
+            Assert.That(prepared.Context, Is.Null);
+            Assert.That(prepared.UniqueId, Is.EqualTo("contextless-native-buff"));
+            Assert.That(prepared.IsPostLoadExecuted, Is.True);
+            Assert.That(RealTimeBuffReplicaStore.IsReplica(prepared), Is.False);
+        }
+
+        [Test]
+        public void NativeReconstructionRemovesOnlyTransactionIntroducedSurplus()
+        {
+            var existing = (Kingmaker.UnitLogic.Buffs.Buff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            var introduced = (Kingmaker.UnitLogic.Buffs.Buff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            var before = new System.Collections.Generic.HashSet<EntityFact> { existing };
+
+            Assert.That(CombatInteractionService.TakeTransactionIntroducedSurplus(
+                new[] { existing, introduced }, before, expectedCount: 1), Is.EqualTo(new[] { introduced }));
+            Assert.That(CombatInteractionService.TakeTransactionIntroducedSurplus(
+                new[] { existing, introduced }, before, expectedCount: 2), Is.Empty);
+        }
+
+        [Test]
+        public void NativeReconstructionKeepsAnIntroducedFactWithTheHostId()
+        {
+            var expected = (Kingmaker.UnitLogic.Buffs.Buff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            var sideEffect = (Kingmaker.UnitLogic.Buffs.Buff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            var uniqueId = typeof(EntityFact).GetField("<UniqueId>k__BackingField",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            uniqueId.SetValue(expected, "host-id");
+            uniqueId.SetValue(sideEffect, "side-effect-id");
+
+            Assert.That(CombatInteractionService.TakeTransactionIntroducedSurplus(
+                new[] { expected, sideEffect }, new System.Collections.Generic.HashSet<EntityFact>(),
+                expectedCount: 1, expectedIds: new System.Collections.Generic.HashSet<string> { "host-id" }),
+                Is.EqualTo(new[] { sideEffect }));
+        }
+
+        [Test]
+        public void NativeReconstructionFinalSweepRemovesLoadTimeSurplusButKeepsHostId()
+        {
+            var expected = (Kingmaker.UnitLogic.Buffs.Buff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            var loadSideEffect = (Kingmaker.UnitLogic.Buffs.Buff)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Buffs.Buff));
+            var uniqueId = typeof(EntityFact).GetField("<UniqueId>k__BackingField",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            uniqueId.SetValue(expected, "host-id");
+            uniqueId.SetValue(loadSideEffect, "load-side-effect-id");
+
+            Assert.That(CombatInteractionService.TakeAuthoritativeSurplus(
+                    new[] { expected, loadSideEffect }, expectedCount: 1,
+                    expectedIds: new System.Collections.Generic.HashSet<string> { "host-id" }),
+                Is.EqualTo(new[] { loadSideEffect }));
+            Assert.That(CombatInteractionService.TakeAuthoritativeSurplus(
+                new[] { expected, loadSideEffect }, expectedCount: 2), Is.Empty);
+        }
+
+        [Test]
+        public void EmptyProjectedContextDoesNotRejectAReconstructedNativeContext()
+        {
+            var native = (Kingmaker.UnitLogic.Mechanics.MechanicsContext)
+                System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                    typeof(Kingmaker.UnitLogic.Mechanics.MechanicsContext));
+
+            Assert.That(RealTimeBuffContextReplication.Validate(native,
+                new System.Collections.Generic.List<NetworkBuffContextState>()), Is.Null);
+            Assert.DoesNotThrow(() => RealTimeBuffContextReplication.Apply(native,
+                new System.Collections.Generic.List<NetworkBuffContextState>(), _ => null));
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void NativeReferenceRevocationOrForeignReceiptNeverAccessesWorld(bool authorized)
@@ -136,6 +261,37 @@ namespace WOTRMultiplayer.UnitTests.Services
                 }, () => current);
             Assert.That(task.Result, Is.EqualTo(current ? (bool?)false : null));
             A.CallTo(() => lookup.GetUnitEntity(A<string>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void ValidActionWithUnavailableLocalRenderer_IsSafelyOmitted()
+        {
+            var mainThread = A.Fake<IMainThreadAccessor>();
+            A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) => action());
+            var lookup = A.Fake<IGameStateLookupService>();
+            A.CallTo(() => lookup.GetUnitEntity("unit-a")).Returns(null);
+            var service = new CombatInteractionService(
+                A.Fake<ILogger<CombatInteractionService>>(), lookup,
+                A.Fake<IPlayerNotificationService>(), A.Fake<IBuffInteractionService>(),
+                mainThread, A.Fake<IMapper>());
+
+            var task = service.TryPresentRealTimeActionAsync(
+                new WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent
+                {
+                    UnitId = "unit-a", ActionId = "attack-a",
+                    Kind = (int)WOTRMultiplayer.Networking.Messages.Game.RealTimeAuthoritativeEventKind.AttackPresentation,
+                    Attack = new WOTRMultiplayer.Networking.Messages.Game.RealTimeAttackPresentationPayload
+                    {
+                        Stage = (int)RealTimePresentationStage.Start,
+                        AnimationType = (int)UnitAnimationType.MainHandAttack,
+                        WeaponStyle = (int)WeaponAnimationStyle.None,
+                        SpeedScale = 1,
+                        TargetDistance = 1
+                    }
+                }, () => true);
+
+            Assert.That(task.Result, Is.True);
+            A.CallTo(() => lookup.GetUnitEntity("unit-a")).MustHaveHappenedOnceExactly();
         }
 
         [Test]

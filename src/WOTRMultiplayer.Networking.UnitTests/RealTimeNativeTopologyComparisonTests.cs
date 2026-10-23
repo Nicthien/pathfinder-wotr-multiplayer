@@ -42,18 +42,33 @@ namespace WOTRMultiplayer.Networking.UnitTests
             Assert.That(actual.Entities[0].Id, Is.EqualTo("area")); // Comparison does not sort caller lists in place.
         }
 
+        [Test]
+        public void EntityPartEnumerationOrderDoesNotChangeInventory()
+        {
+            var expected = Source(); var actual = Serializer.DeepClone(expected); actual.Entities[0].Parts.Reverse();
+            Assert.That(RealTimeNativeTopologyComparison.Difference(expected, actual), Is.Null);
+            Assert.That(actual.Entities[0].Parts, Is.EqualTo(new[] { "PartB", "PartA" }));
+        }
+
+        [Test]
+        public void FactRuntimeIdsAndEnumerationOrderDoNotChangeInventory()
+        {
+            var expected = Source(); var actual = Serializer.DeepClone(expected);
+            actual.Entities[0].Facts[0].Id = "regenerated-fact";
+            actual.Entities[0].Facts.Reverse();
+            actual.Entities[0].Facts[1].Components.Reverse();
+            Assert.That(RealTimeNativeTopologyComparison.Difference(expected, actual), Is.Null);
+        }
+
         [TestCase("missing-entity")]
         [TestCase("extra-entity")]
         [TestCase("entity-id")]
         [TestCase("entity-kind")]
         [TestCase("missing-part")]
-        [TestCase("part-order")]
         [TestCase("missing-fact")]
-        [TestCase("fact-order")]
         [TestCase("fact-type")]
         [TestCase("fact-blueprint")]
         [TestCase("missing-component")]
-        [TestCase("component-order")]
         [TestCase("component-type")]
         [TestCase("component-source")]
         public void MissingOrReplacedNativeObjectsCannotPassComparison(string fault)
@@ -67,13 +82,10 @@ namespace WOTRMultiplayer.Networking.UnitTests
                 case "entity-id": unit.Id = "other"; break;
                 case "entity-kind": unit.Kind = "area"; break;
                 case "missing-part": unit.Parts.RemoveAt(0); break;
-                case "part-order": unit.Parts.Reverse(); break;
                 case "missing-fact": unit.Facts.RemoveAt(0); break;
-                case "fact-order": unit.Facts.Reverse(); break;
                 case "fact-type": fact.RuntimeType = "Other"; break;
                 case "fact-blueprint": fact.BlueprintId = "other-blueprint"; break;
                 case "missing-component": fact.Components.RemoveAt(0); break;
-                case "component-order": fact.Components.Reverse(); break;
                 case "component-type": fact.Components[0].RuntimeType = "OtherComponent"; break;
                 case "component-source": fact.Components[0].SourceName = "other-source"; break;
             }

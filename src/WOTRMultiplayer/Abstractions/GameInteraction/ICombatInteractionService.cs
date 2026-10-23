@@ -31,6 +31,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         List<NetworkUnit> GetParty();
 
+        int RegroupDistantPlayersForCombat(IReadOnlyCollection<string> playerControlledUnitIds, float minimumDistance);
+
         void UpdateUnits(List<NetworkUnit> networkUnits, bool updatePosition);
 
         Task<bool> UpdateUnitsAsync(List<NetworkUnit> networkUnits, bool updatePosition);
@@ -53,6 +55,9 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState, Func<bool> canApply);
         Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
             NetworkCombatState networkCombatState, Func<bool> canApply, bool reconcileTurnBasedBuffs);
+
+        Task<NetworkCombatState> TryApplyCombatSaveStateAsync(
+            NetworkCombatState savedState, Func<bool> canApply);
 
         Task<NetworkCombatState> TryRestoreNativeReferenceStateAsync(object expectedWorld, object repairOwner,
             NetworkCombatState reference, Func<bool> canApply);
@@ -97,6 +102,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
             Func<bool> canExecute);
 
         Task<bool> StartCombatAsync(NetworkCombatState networkCombatState);
+
+        Task WaitForTurnBasedModeStabilizationAsync();
 
         Task<List<string>> EnsureUnitsInCombatAsync(List<string> units);
 

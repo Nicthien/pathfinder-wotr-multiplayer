@@ -63,7 +63,7 @@ internal static partial class Program
             NetworkNativeTopology Capture() => (NetworkNativeTopology)capture.Invoke(null,
                 new object[] { Array.Empty<UnitEntityData>(), new[] { area }, (Func<bool>)(() => true) });
             var expected = Capture(); fact.Components.Clear();
-            safe &= RealTimeNativeTopologyComparison.Difference(expected, Capture())?.Contains("components-count") == true;
+            safe &= RealTimeNativeTopologyComparison.Difference(expected, Capture())?.Contains("facts-inventory") == true;
             Console.WriteLine("native-graph-inspection: detached-graph=" + safe
                 + "; corrupt-component-part-and-entity-rejected=True; missing-component-inventory-rejected=True; native-callbacks-not-invoked=True");
             return safe;

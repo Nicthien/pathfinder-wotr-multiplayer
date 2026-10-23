@@ -458,8 +458,11 @@ namespace WOTRMultiplayer.Config.Mapping
                 networkBuff.SourceAbility = WOTRMultiplayer.Services.GameInteraction.RealTimeBuffContextCapture
                     .CaptureAbility(abilityContext, context.Mapper);
                 networkBuff.SourceAbilityParams = context.Mapper.Map<NetworkAbilityParams>(abilityContext.m_Params);
-                networkBuff.SourceAbilityCasterId = CombatSaveDigestScope.Active
-                    ? abilityContext.MaybeCaster?.UniqueId : abilityContext.Ability?.Caster?.Unit.UniqueId;
+                // AbilityData.Caster is a transient runtime wrapper and can be
+                // rebuilt differently by a same-area native load. The mechanics
+                // context owns the canonical caster reference on both the host
+                // and client, including ordinary moving snapshots.
+                networkBuff.SourceAbilityCasterId = abilityContext.MaybeCaster?.UniqueId;
             }
 
             return networkBuff;

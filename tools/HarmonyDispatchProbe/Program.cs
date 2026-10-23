@@ -336,7 +336,8 @@ internal static partial class Program
                     var actual = new WOTRMultiplayer.Entities.Combat.NetworkCombatState
                         { Units = new System.Collections.Generic.List<NetworkUnit> { new NetworkUnit { Id = "unexpected" } } };
                     try { rollback.VerifyAndCommit(expected, actual); throw new InvalidOperationException("Bad checkpoint was committed."); }
-                    catch (InvalidOperationException mismatch) when (mismatch.Message == "buff-restoration-checkpoint-hash-mismatch") { }
+                    catch (InvalidOperationException mismatch) when (mismatch.Message.StartsWith(
+                        "buff-restoration-checkpoint-hash-mismatch:", StringComparison.Ordinal)) { }
                 }
                 rolledBack &= !manager.GetAll<Kingmaker.UnitLogic.Buffs.Buff>().Any() && buff.Manager == null;
                 Console.WriteLine("installed-buff-restoration: guarded-callbacks=" + replicaGuards.Count + "; mismatch-rollback=" + rolledBack);

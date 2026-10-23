@@ -83,15 +83,34 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
                 if (!sameReceipt || frame.Epoch != state.Epoch || !state.CombatEndPending
-                    || state.Phase != CombatSynchronizationPhase.Stable
                     || combat == null || frame.Stage != _endAppliedStage + 1 || frame.State != null) return;
+                if (frame.Stage == (int)RealTimeCombatEndStage.Commit)
+                {
+                    if (state.Phase != CombatSynchronizationPhase.Stable) return;
+                    if (state.Mode == CombatMode.RealTimeWithPause)
+                    {
+                        state.Phase = CombatSynchronizationPhase.Repairing;
+                        state.RecoveryStatus = "rebuilding";
+                    }
+                    _endAppliedStage = frame.Stage;
+                    SendCombatEndAck(frame, true, frame.CanonicalStateHash, null);
+                    return;
+                }
                 if (frame.Stage == (int)RealTimeCombatEndStage.Finalize)
                 {
+                    var expectedPhase = state.Mode == CombatMode.RealTimeWithPause
+                        ? CombatSynchronizationPhase.Repairing
+                        : CombatSynchronizationPhase.Stable;
+                    if (state.Phase != expectedPhase) return;
                     if (!await CombatInteraction.TryFinalizeRealTimeCombatAsync(
                         () => IsCurrentRealTimeMessage(session, state, frame.Epoch) && ReferenceEquals(session.Combat, combat)
-                            && session.LoadedSaveSeed == frame.LoadedSaveSeed && state.CombatEndPending,
+                            && session.LoadedSaveSeed == frame.LoadedSaveSeed && state.CombatEndPending
+                            && state.Phase == expectedPhase,
                         () =>
                         {
+                            ResetNativeCheckpointReceive();
+                            state.Phase = CombatSynchronizationPhase.Stable;
+                            state.RecoveryStatus = null;
                             CompleteCombatEnd();
                             state.CombatEndPending = false;
                             _deferredEndCombat = null;

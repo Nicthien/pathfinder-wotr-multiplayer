@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Linq;
 using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (!RealTimePresentationRuntime.Enabled || unit == null
                 || Main.Multiplayer?.IsRealTimeCombatActive != true || Main.Multiplayer.IsRealTimeClientCombatActive
                 || Main.Multiplayer.IsRealTimeCombatBarrierActive) return;
+            // Engine construction uses synthetic units such as <default-unit> to
+            // calculate templates. They are not world entities, cannot exist on
+            // the peer, and are intentionally absent from canonical snapshots.
+            // A real unit is captured after it is registered in Game.State.Units.
+            var registered = Game.Instance?.State?.Units?.All?.Any(candidate =>
+                ReferenceEquals(candidate, unit)) == true;
+            if (!CanPublishUnit(unit.UniqueId, registered)) return;
             // CharacterStats construction sets AC before the unit's complete
             // stat collection exists. Do not sample a partially created unit;
             // its initialized state is captured by subsequent events/checkpoints.
@@ -57,5 +65,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 throw;
             }
         }
+
+        public static bool CanPublishUnit(string uniqueId, bool registered) => registered
+            && !string.IsNullOrWhiteSpace(uniqueId)
+            && uniqueId[0] != '<';
     }
 }

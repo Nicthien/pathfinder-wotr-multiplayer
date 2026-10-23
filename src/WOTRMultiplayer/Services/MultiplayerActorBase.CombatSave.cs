@@ -69,7 +69,13 @@ namespace WOTRMultiplayer.Services
         {
             if (CombatSaveDigestReader != null) return CombatSaveDigestReader();
             using var combatSaveProjection = new CombatSaveDigestScope();
-            var reference = CombatInteraction.GetRealTimeNativeReferenceState();
+            // Before publication compare the synchronized combat projection.
+            // The presentation client deliberately owns inert replicas rather
+            // than an identical native graph.  After loading the host archive,
+            // however, both peers must match the complete native reference.
+            var reference = restoreProjection
+                ? CombatInteraction.GetRealTimeNativeReferenceState()
+                : CombatInteraction.GetRealTimeCombatState();
             var world = restoreProjection ? CombatSaveRestoreHasher.Compute(reference)
                 : RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
             var json = JObject.Parse(TurnBasedSaveNativeState.Capture());

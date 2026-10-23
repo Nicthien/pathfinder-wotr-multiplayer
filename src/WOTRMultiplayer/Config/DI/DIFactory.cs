@@ -18,6 +18,7 @@ using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Config.Mapping;
 using WOTRMultiplayer.Networking.Extensions;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.Automation;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services.Hashing;
 using WOTRMultiplayer.Services.Hotkeys;
@@ -102,6 +103,7 @@ namespace WOTRMultiplayer.Config.DI
             serviceCollection.AddSingleton<IMultiplayerClient, MultiplayerClient>();
             serviceCollection.AddSingleton<IMultiplayerSettingsService, MultiplayerSettingsProvider>();
             serviceCollection.AddSingleton<ISettingsControllerAccessor, SettingsControllerAccessor>();
+            serviceCollection.AddSingleton<TestControlBridge>();
 
             serviceCollection.ConfigureNetworking();
 

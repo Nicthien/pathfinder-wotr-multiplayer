@@ -98,6 +98,8 @@ namespace WOTRMultiplayer.Services
                                 writer.Write(slot?.Type ?? -1);
                                 WriteString(writer, slot?.SpellBlueprintId);
                                 writer.Write(slot?.Metamagic ?? 0);
+                                writer.Write(slot?.MetamagicSpellLevelCost ?? 0);
+                                writer.Write(slot?.MetamagicHeightenLevel ?? 0);
                                 writer.Write(slot?.Available ?? false);
                                 writer.Write(slot?.IsOpposition ?? false);
                             }

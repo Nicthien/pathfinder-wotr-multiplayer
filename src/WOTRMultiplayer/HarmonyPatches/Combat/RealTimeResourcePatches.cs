@@ -27,8 +27,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         public static bool BeforeMutation(UnitAbilityResourceCollection __instance, MethodBase __originalMethod)
         {
             if (!RealTimePresentationRuntime.IsClientActive) return true;
-            Main.Multiplayer.ReportRealTimeAIActionFault(__instance.m_Owner?.Unit?.UniqueId, null,
-                "autonomous-client-resource:" + __originalMethod.Name);
+            // The client still owns native schedulers and animation callbacks,
+            // so an attempted mutation is expected even though it must never be
+            // authoritative. Because the prefix prevents the write, reporting a
+            // repair fault here would turn a successfully blocked callback into
+            // a false desynchronization and permanently pause RTwP.
             return false;
         }
 

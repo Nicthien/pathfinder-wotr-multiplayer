@@ -21,6 +21,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public static bool IsAllowedScript(Type type) => type?.FullName == "Kingmaker.View.ProjectileView"
             || type?.FullName == "Kingmaker.Visual.Particles.FxDestroyOnStop";
 
+        public static bool CanSafelyOmit(Exception failure)
+        {
+            if (failure is not InvalidOperationException invalid) return false;
+            return invalid.Message?.StartsWith("projectile-blueprint-missing:", StringComparison.Ordinal) == true
+                || invalid.Message?.StartsWith("projectile-prefab-missing:", StringComparison.Ordinal) == true
+                || invalid.Message?.StartsWith("projectile-prefab-unverified-scripts:", StringComparison.Ordinal) == true;
+        }
+
         public RealTimeProjectileVisual(NetworkProjectileState state, Action<RealTimeProjectileVisual> onDispose)
         {
             _onDispose = onDispose;
@@ -87,6 +95,33 @@ namespace WOTRMultiplayer.Services.GameInteraction
             _root = null;
             _confirmed = null;
             _onDispose?.Invoke(this);
+        }
+    }
+
+    // Some game projectile prefabs cannot be instantiated safely on a remote
+    // peer because their OnEnable scripts perform gameplay work. Keep the
+    // authoritative logical projectile in the replica while deliberately
+    // omitting only that optional presentation.
+    public sealed class RealTimeOmittedProjectileVisual : IRealTimeProjectileVisual
+    {
+        private NetworkProjectileState _confirmed;
+        public bool IsAlive { get; private set; } = true;
+
+        public RealTimeOmittedProjectileVisual(NetworkProjectileState state) => Confirm(state);
+
+        public void Confirm(NetworkProjectileState state)
+        {
+            if (!IsAlive) throw new ObjectDisposedException(nameof(RealTimeOmittedProjectileVisual));
+            if (state == null || _confirmed != null && (_confirmed.Id != state.Id
+                    || _confirmed.BlueprintId != state.BlueprintId || _confirmed.IsHit && !state.IsHit))
+                throw new InvalidOperationException("conflicting-projectile-state");
+            _confirmed = state.Copy();
+        }
+
+        public void Dispose()
+        {
+            IsAlive = false;
+            _confirmed = null;
         }
     }
 }

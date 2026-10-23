@@ -28,12 +28,23 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly List<RealTimeAreaPresence> _areaPresence = new();
         private readonly List<RealTimeNativeAreaRetirement> _nativeAreas = new();
         private readonly List<RealTimeNativeAreaVisualRetirement> _nativeAreaVisuals = new();
+        private readonly List<Buff> _nativeBuffs = new();
+        private readonly List<(Action Validate, Action Rollback)> _nativeStateChanges = new();
         private bool _disposed;
         private bool _committed;
         public bool HasChanges => _registrations.Count != 0 || _removals.Count != 0
             || _areaRegistrations.Count != 0 || _areaRemovals.Count != 0
             || _createdAreaVisuals.Count != 0 || _removedAreaVisuals.Count != 0 || _areaPoolChanges.Count != 0
-            || _areaViewBindings.Count != 0 || _areaPresence.Count != 0 || _nativeAreas.Count != 0;
+            || _areaViewBindings.Count != 0 || _areaPresence.Count != 0 || _nativeAreas.Count != 0
+            || _nativeBuffs.Count != 0 || _nativeStateChanges.Count != 0;
+
+        public void TrackNativeState(Action validateForCommit, Action rollback)
+        {
+            EnsureOpen();
+            if (validateForCommit == null) throw new ArgumentNullException(nameof(validateForCommit));
+            if (rollback == null) throw new ArgumentNullException(nameof(rollback));
+            _nativeStateChanges.Add((validateForCommit, rollback));
+        }
 
         public void SuspendNativeArea(AreaEffectEntityData area, object world)
         {
@@ -108,6 +119,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (refreshAfterRollback != null) _refreshAfterRollback.Add(refreshAfterRollback);
         }
 
+        public void TrackNativeBuff(Buff buff, Action refreshAfterRollback)
+        {
+            EnsureOpen();
+            if (buff == null || buff.Manager == null || RealTimeBuffReplicaStore.IsReplica(buff)
+                || _nativeBuffs.Contains(buff))
+                throw new InvalidOperationException("invalid-native-buff-restoration-registration");
+            _nativeBuffs.Add(buff);
+            if (refreshAfterRollback != null) _refreshAfterRollback.Add(refreshAfterRollback);
+        }
+
         public void VerifyAndCommit(NetworkCombatState expected, NetworkCombatState actual)
         {
             EnsureOpen();
@@ -115,7 +136,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = expected })
                     != RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = actual }))
-                    throw new InvalidOperationException("buff-restoration-checkpoint-hash-mismatch");
+                    throw new InvalidOperationException("buff-restoration-checkpoint-hash-mismatch:"
+                        + RealTimeCombatDiff.Summarize(expected, actual));
                 var mismatch = RealTimeCombatTemporalDiff.Summarize(expected, actual);
                 if (mismatch != null) throw new InvalidOperationException("buff-restoration:" + mismatch);
             }
@@ -126,6 +148,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             foreach (var presence in _areaPresence) presence.ValidateForCommit();
             foreach (var retirement in _nativeAreas) retirement.ValidateForCommit();
             foreach (var visual in _nativeAreaVisuals) visual.ValidateForCommit();
+            foreach (var buff in _nativeBuffs)
+                if (buff.Manager == null || RealTimeBuffReplicaStore.IsReplica(buff))
+                    throw new InvalidOperationException("native-buff-restoration-lost-before-commit");
+            foreach (var change in _nativeStateChanges) change.Validate();
             foreach (var registration in _registrations) registration.Commit();
             foreach (var removal in _removals) removal.Commit();
             foreach (var registration in _areaRegistrations) registration.Commit();
@@ -135,6 +161,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             foreach (var presence in _areaPresence) presence.Commit();
             foreach (var retirement in _nativeAreas) retirement.Commit();
             _committed = true;
+        }
+
+        public void ResolveVerifiedNativeGraphObligations()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(RealTimeBuffRestoreTransaction));
+            if (!_committed) throw new InvalidOperationException("buff-restoration-not-committed");
+            // Validate every retirement before resolving any marker so a
+            // partial failure cannot accidentally reopen saving.
+            foreach (var retirement in _nativeAreas) retirement.ValidateForCommit();
+            foreach (var retirement in _nativeAreas) retirement.ResolveAfterVerifiedNativeGraphRebuild();
         }
 
         private void EnsureOpen()
@@ -182,6 +218,23 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try { _removals[i].Dispose(); }
                 catch (Exception failure) { (failures ??= new()).Add(failure); }
+            }
+            if (!_committed)
+            {
+                for (var i = _nativeBuffs.Count - 1; i >= 0; i--)
+                {
+                    try
+                    {
+                        using (RealTimePresentationRuntime.BeginAuthoritativePresentation())
+                            if (_nativeBuffs[i].Manager != null) _nativeBuffs[i].Remove();
+                    }
+                    catch (Exception failure) { (failures ??= new()).Add(failure); }
+                }
+                for (var i = _nativeStateChanges.Count - 1; i >= 0; i--)
+                {
+                    try { _nativeStateChanges[i].Rollback(); }
+                    catch (Exception failure) { (failures ??= new()).Add(failure); }
+                }
             }
             // Restore entity registration/pools before re-enabling subscribers.
             for (var i = _nativeAreas.Count - 1; i >= 0; i--)

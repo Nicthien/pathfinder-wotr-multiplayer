@@ -36,6 +36,7 @@ namespace WOTRMultiplayer.Services.Settings
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Hotkeys.ForceCombatEnd);
 
             // misc
+            _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Miscellaneous.RegroupDistantPlayersOnCombatStart);
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Miscellaneous.HideServerAddress);
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Miscellaneous.TrackConnectionHistory);
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Miscellaneous.MaxConnectionHistoryRecords);
@@ -73,6 +74,7 @@ namespace WOTRMultiplayer.Services.Settings
                 PeerToPeerPort = _settingsControllerAccessor.GetValue(WellKnownSettings.Networking.PeerToPeerPort),
 
                 // misc
+                RegroupDistantPlayersOnCombatStart = _settingsControllerAccessor.GetValue(WellKnownSettings.Miscellaneous.RegroupDistantPlayersOnCombatStart),
                 HideServerAddress = _settingsControllerAccessor.GetValue(WellKnownSettings.Miscellaneous.HideServerAddress),
                 TrackConnectionHistory = _settingsControllerAccessor.GetValue(WellKnownSettings.Miscellaneous.TrackConnectionHistory),
                 MaxConnectionHistoryRecords = _settingsControllerAccessor.GetValue(WellKnownSettings.Miscellaneous.MaxConnectionHistoryRecords),

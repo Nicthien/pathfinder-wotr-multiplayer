@@ -354,6 +354,35 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void VerifiedNativeGraphTransactionCanResolveCommittedRetirementObligation()
+        {
+            var area = Native(); var world = new object();
+            using (var transaction = new RealTimeBuffRestoreTransaction())
+            {
+                transaction.SuspendNativeArea(area, world);
+                var checkpoint = new WOTRMultiplayer.Entities.Combat.NetworkCombatState();
+                transaction.VerifyAndCommit(checkpoint, checkpoint);
+                Assert.That(RealTimeNativeGraphRepair.RequiresRebuild(world), Is.True);
+                transaction.ResolveVerifiedNativeGraphObligations();
+                Assert.That(RealTimeNativeGraphRepair.RequiresRebuild(world), Is.False);
+            }
+            Assert.That(RealTimeAreaReplicaFactory.IsReplica(area), Is.False);
+        }
+
+        [Test]
+        public void UnverifiedTransactionCannotResolveNativeRetirementObligation()
+        {
+            var area = Native(); var world = new object();
+            using (var transaction = new RealTimeBuffRestoreTransaction())
+            {
+                transaction.SuspendNativeArea(area, world);
+                Assert.Throws<InvalidOperationException>(() =>
+                    transaction.ResolveVerifiedNativeGraphObligations());
+            }
+            Assert.That(RealTimeNativeGraphRepair.RequiresRebuild(world), Is.False);
+        }
+
+        [Test]
         public void MissingMechanicalManagersCannotBeSilentlyRetired()
         {
             Assert.That(RealTimeNativeAreaRetirement.CanRetire(new AreaEffectEntityData(default(JsonConstructorMark))), Is.False);

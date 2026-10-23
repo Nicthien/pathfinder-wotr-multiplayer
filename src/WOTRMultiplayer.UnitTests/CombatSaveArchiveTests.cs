@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using NUnit.Framework;
+using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Services.CombatSaving;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services.Random;
@@ -17,6 +18,8 @@ namespace WOTRMultiplayer.UnitTests
             Protocol = 70, BuildFingerprint = new string('A', 64), CanonicalDigest = new string('B', 64),
             RestoreDigest = new string('C', 64),
             GameVersion = "test", Campaign = "campaign", Unit = "unit", Round = 2,
+            MechanicalState = new NetworkCombatState(),
+            NativeSupplement = CombatSaveNativeContractTests.Supplement(),
             Generators = new DeterministicGeneratorCheckpoint()
         };
         private static RealTimeMemorySaver Source(string tbm = "{\"RoundNumber\":2}")
@@ -75,6 +78,23 @@ namespace WOTRMultiplayer.UnitTests
             Assert.Throws<InvalidDataException>(() => CombatSaveArchive.ValidateFile(file, 71, new string('A', 64), "test"));
             Assert.Throws<InvalidDataException>(() => CombatSaveArchive.ValidateFile(file, 70, new string('C', 64), "test"));
             Assert.Throws<InvalidDataException>(() => CombatSaveArchive.ValidateFile(file, 70, new string('A', 64), "other"));
+        }
+
+        [Test]
+        public void SchemaTwoRequiresMechanicalStateWhileLegacySchemaRemainsReadable()
+        {
+            using var source = Source();
+            var current = Manifest();
+            current.MechanicalState = null;
+            Assert.Throws<InvalidDataException>(() =>
+                CombatSaveArchive.WriteNew(_directory, source, current, DateTime.Now));
+
+            var legacy = Manifest();
+            legacy.Schema = 1;
+            legacy.MechanicalState = null;
+            var file = CombatSaveArchive.WriteNew(_directory, source, legacy, DateTime.Now);
+            Assert.That(CombatSaveArchive.ValidateFile(file, 70, legacy.BuildFingerprint, "test").Schema,
+                Is.EqualTo(1));
         }
 
         [Test]

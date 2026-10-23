@@ -100,5 +100,67 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn(A<string>._, A<Action>._, A<Func<bool>>._))
                 .MustNotHaveHappened();
         }
+
+        [TestCase(NetworkCombatTurnStage.Initialization)]
+        [TestCase(NetworkCombatTurnStage.StartSynchronization)]
+        [TestCase(NetworkCombatTurnStage.Playing)]
+        public void SessionRecovery_HostCheckpointReplacesStaleLocalTurn(NetworkCombatTurnStage localStage)
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp()) { Id = "game", LoadedSaveSeed = 17,
+                RealTimeCombat = { Mode = WOTRMultiplayer.Entities.Combat.RealTime.CombatMode.TurnBased,
+                    Phase = WOTRMultiplayer.Entities.Combat.RealTime.CombatSynchronizationPhase.Stable },
+                Combat = new NetworkCombat { Seed = 21, Round = 2, Stage = NetworkCombatStage.Running,
+                    Turn = new NetworkCombatTurn { UnitId = "stale-unit", Stage = localStage } } };
+            A.CallTo(() => _mainThreadAccessor.Post(A<Action>._)).Invokes((Action a) => a());
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyInvalidCombatTurnStarted>(_networkClient)(-1,
+                new NotifyInvalidCombatTurnStarted { SessionId = "game", LoadedSaveSeed = 17,
+                    CombatSeed = 21, Round = 2, UnitId = "host-unit" });
+
+            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn("host-unit", A<Action>._, A<Func<bool>>._))
+                .MustHaveHappenedOnceExactly();
+            Assert.That(_multiplayerClient.Game.Combat.Turn, Is.Null);
+        }
+
+        [Test]
+        public void CombatSaveAlignment_ReplacesStalePlayingTurnBeforeDigestBarrier()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            A.CallTo(() => _mainThreadAccessor.Post(A<Action>._)).Invokes((Action action) => action());
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "game", SessionSeed = 13, LoadedSaveSeed = 17,
+                Stage = NetworkLobbyStage.Playing,
+                RealTimeCombat =
+                {
+                    Mode = WOTRMultiplayer.Entities.Combat.RealTime.CombatMode.TurnBased,
+                    Phase = WOTRMultiplayer.Entities.Combat.RealTime.CombatSynchronizationPhase.Stable,
+                    Epoch = 8
+                },
+                Combat = new NetworkCombat
+                {
+                    Seed = 21, Round = 2, Stage = NetworkCombatStage.Running,
+                    Turn = new NetworkCombatTurn
+                    {
+                        UnitId = "stale-unit", Seed = 40, IsAI = false,
+                        Stage = NetworkCombatTurnStage.Playing
+                    }
+                }
+            };
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyCombatSave>(_networkClient)(-1,
+                new NotifyCombatSave
+                {
+                    SessionId = "game", SessionSeed = 13, LoadedSaveSeed = 17, Epoch = 8,
+                    Operation = Guid.NewGuid().ToString("N"), Stage = "Align",
+                    Round = 2, UnitId = "host-unit", TurnSeed = 71
+                });
+
+            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn(
+                    "host-unit", A<Action>._, A<Func<bool>>._))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientCombatSaveAck>._)).MustNotHaveHappened();
+        }
     }
 }

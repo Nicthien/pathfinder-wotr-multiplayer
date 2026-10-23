@@ -4884,6 +4884,13 @@ namespace WOTRMultiplayer.Services
                 }
                 return;
             }
+            // The host owns irreversible combat results in the presentation build,
+            // including after returning to native turn-based mode.  A client's native
+            // controller may replay death callbacks for stale same-area corpses while
+            // rebuilding its roster; forwarding those callbacks can end only the
+            // client's combat and poison the host state.
+            if (!CanPublishLegacyTurnBasedDeath(Game.LocalPlayerId))
+                return;
             if (Game.Combat?.Turn == null)
             {
                 return;
@@ -4897,6 +4904,9 @@ namespace WOTRMultiplayer.Services
 
             OnUnitDeath(unitId, Game.Combat.RemotelyKilledUnits, CombatInteraction.IsRiderActive);
         }
+
+        internal static bool CanPublishLegacyTurnBasedDeath(long localPlayerId) =>
+            !RealTimePresentationRuntime.Enabled || localPlayerId == Networking.NetworkConstants.HostPlayerId;
 
         private void OnUnitDeathInTacticalCombat(string unitId, string groupId)
         {

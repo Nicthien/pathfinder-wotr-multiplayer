@@ -81,21 +81,25 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             if (unit?.CombatState == null || state.GroupCounterCaptured && unit.Group == null)
                 throw new InvalidOperationException("missing-unit-combat-membership");
-            ApplyValues(unit.Descriptor, state);
-            unit.CombatState.m_InCombat = state.IsInCombat;
-            if (state.GroupCounterCaptured) unit.Group.IsInCombat.m_GuardCount = state.GroupCombatCounter;
+            // Animation setters can synchronously refresh the descriptor in a few
+            // native death/unconsciousness controllers.  Update presentation first,
+            // then seal the authoritative plain fields last so the checkpoint sampled
+            // in the same main-thread callback cannot observe those side effects.
             var manager = unit.View?.AnimationManager;
             if (manager != null)
             {
                 manager.IsDead = state.LifeState == (int)UnitLifeState.Dead;
                 manager.IsUnconscious = state.LifeState == (int)UnitLifeState.Unconscious;
             }
+            ApplyValues(unit.Descriptor, state);
+            unit.CombatState.m_InCombat = state.IsInCombat;
+            if (state.GroupCounterCaptured) unit.Group.IsInCombat.m_GuardCount = state.GroupCombatCounter;
         }
 
         public static void ApplyValidated(UnitEntityData unit, NetworkUnitDescriptor state)
         {
-            ApplyVitals(unit, state.Vitals);
             RealTimeCalculatedStatReplication.Apply(unit.Stats.AllStats, state.CalculatedStats);
+            ApplyVitals(unit, state.Vitals);
             var resources = unit.Descriptor.Resources.PersistantResources.ToDictionary(
                 resource => resource.Blueprint.AssetGuid.ToString(), StringComparer.OrdinalIgnoreCase);
             foreach (var resource in state.Resources) resources[resource.BlueprintId].Amount = resource.Amount;

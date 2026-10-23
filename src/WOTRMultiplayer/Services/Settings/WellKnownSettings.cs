@@ -76,6 +76,9 @@ namespace WOTRMultiplayer.Services.Settings
         [Description("miscellaneous")]
         public static class Miscellaneous
         {
+            [Description("regroup-distant-players-on-combat-start")]
+            public static WellKnownSettingKey<bool> RegroupDistantPlayersOnCombatStart { get; } = new(true);
+
             [Description("hide-server-address")]
             public static WellKnownSettingKey<bool> HideServerAddress { get; } = new(false);
 

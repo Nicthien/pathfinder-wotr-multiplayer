@@ -331,6 +331,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             _globalMapInteractionService = A.Fake<IGlobalMapInteractionService>();
             _pingInteractionService = A.Fake<IPingInteractionService>();
             _combatInteractionService = A.Fake<ICombatInteractionService>();
+            A.CallTo(() => _combatInteractionService.WaitForTurnBasedModeStabilizationAsync())
+                .Returns(Task.CompletedTask);
+            A.CallTo(() => _combatInteractionService.EnsureUnitsInCombatAsync(
+                    A<System.Collections.Generic.List<string>>._))
+                .Returns(new System.Collections.Generic.List<string>());
             A.CallTo(() => _combatInteractionService.TryPauseAtProjectileSafePointAsync(
                     A<Func<bool>>._, A<Action>._))
                 .ReturnsLazily((Func<bool> canPause, Action pause) =>
@@ -1168,6 +1173,30 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
                 x.Stage == (int)RealTimeModeTransitionStage.Prepare && x.Applied))).MustHaveHappenedTwiceExactly();
+        }
+
+        [Test]
+        public void RealTimeModePrepare_TurnBasedReportsRequiredNativeReconstruction()
+        {
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause }
+            };
+            A.CallTo(() => _gameInteractionService.RequiresRealTimeMechanicalReconstruction())
+                .Returns(true);
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyRealTimeModeTransition>(_networkClient)(-1,
+                new NotifyRealTimeModeTransition
+                {
+                    Epoch = 1, Stage = (int)RealTimeModeTransitionStage.Prepare,
+                    Mode = (int)CombatMode.TurnBased
+                });
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeModeTransitionAck>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Prepare && x.Applied
+                && x.RequiresNativeReconstruction))).MustHaveHappenedOnceExactly();
         }
 
         [Test]

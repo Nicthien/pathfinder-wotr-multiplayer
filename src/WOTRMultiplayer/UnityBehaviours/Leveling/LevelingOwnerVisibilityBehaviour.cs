@@ -5,8 +5,10 @@ using UnityEngine;
 
 namespace WOTRMultiplayer.UnityBehaviours.Leveling
 {
-    // Keep the bound views alive: replay uses SelectedDetailView and their phase
-    // witness callbacks. SetActive(false) during leveling would stop that sync.
+    // Keep the bound views alive and visible as a read-only spectator: replay uses
+    // SelectedDetailView and phase witness callbacks. Hiding only the canvas left
+    // the non-owner on an unexplained blurred screen while the modal game mode was
+    // still active.
     public sealed class LevelingOwnerVisibilityBehaviour : MonoBehaviour
     {
         private CharGenPCView _view;
@@ -37,7 +39,7 @@ namespace WOTRMultiplayer.UnityBehaviours.Leveling
                 IsHidden = true;
                 _nextScan = 0;
                 Main.GetLogger<LevelingOwnerVisibilityBehaviour>().LogInformation(
-                    "[LevelingOwnerUI] Background replication; window hidden. UnitId={UnitId}", view.ViewModel?.LevelUpConfig?.Unit?.UniqueId);
+                    "[LevelingOwnerUI] Read-only replicated window shown. UnitId={UnitId}", view.ViewModel?.LevelUpConfig?.Unit?.UniqueId);
             }
             Mask();
         }
@@ -45,7 +47,7 @@ namespace WOTRMultiplayer.UnityBehaviours.Leveling
         private void Mask()
         {
             if (!_mask) return;
-            _mask.alpha = 0;
+            _mask.alpha = _alpha <= 0 ? 1 : _alpha;
             _mask.interactable = false;
             _mask.blocksRaycasts = false;
             _mask.ignoreParentGroups = false;
@@ -54,7 +56,6 @@ namespace WOTRMultiplayer.UnityBehaviours.Leveling
             foreach (var canvas in GetComponentsInChildren<Canvas>(true))
             {
                 if (!_canvases.ContainsKey(canvas)) _canvases.Add(canvas, canvas.enabled);
-                canvas.enabled = false;
             }
             foreach (var group in GetComponentsInChildren<CanvasGroup>(true))
             {

@@ -22,6 +22,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private static readonly ConditionalWeakTable<Projectile, Stamp> Stamps = new();
 
         public static List<NetworkProjectileState> CaptureAll() => Game.Instance.ProjectileController.Projectiles
+            // Impacted controller entries may remain registered for presentation cleanup.
+            // They are no longer mechanical work and must not survive in a canonical
+            // checkpoint after the projectile-safe-point gate has opened.
+            .Where(projectile => projectile?.OnTheWay == true)
             .Select(Capture).Where(state => state != null).ToList();
 
         public static NetworkProjectileState Capture(Projectile projectile)

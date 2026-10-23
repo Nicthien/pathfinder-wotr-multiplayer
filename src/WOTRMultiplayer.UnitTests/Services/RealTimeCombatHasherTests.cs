@@ -35,6 +35,20 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatHasher.Compute(zero), Is.Not.EqualTo(RealTimeCombatHasher.Compute(spent)));
         }
         [Test]
+        public void NativeWorldBuffInventoriesAreNotEncounterParticipantsInTemporalHash()
+        {
+            var baseline = Sample();
+            var withNativeInventory = Sample();
+            withNativeInventory.Combat.NativeUnits.Add(new NetworkUnit
+            {
+                Id = "world-npc",
+                BuffCollection = new NetworkUnitBuffCollection()
+            });
+
+            Assert.That(RealTimeCombatHasher.Compute(withNativeInventory),
+                Is.EqualTo(RealTimeCombatHasher.Compute(baseline)));
+        }
+        [Test]
         public void OrderOfUnitsBuffsAndAreas_DoesNotAffectHash()
         {
             var first = Sample();

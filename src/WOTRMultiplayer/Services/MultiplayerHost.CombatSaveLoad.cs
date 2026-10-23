@@ -89,6 +89,8 @@ namespace WOTRMultiplayer.Services
                         // any resumed host commands can be sent on this connection.
                         foreach (var peer in _combatRestorePeers) Send(peer, release);
                         CompleteCombatSaveRestore();
+                        _turnEndSynchronizationFailed = false;
+                        _turnEndSynchronizationFailedPlayers.Clear();
                     }
                     catch (Exception error) { FailCombatSaveRestore(error.Message); return; }
                     _combatRestore = null;

@@ -85,7 +85,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             });
             initializer.Invoke(null, new object[] { rule });
             var rejection = Rejections.GetValue(rule, _ => new Rejection());
-            if (!rejection.Reported)
+            // A protected native load intentionally suppresses every host-only
+            // rule raised by Owlcat's hydration/post-load callbacks.  Those are
+            // not autonomous client gameplay and must not fault the load; the
+            // reconstructed world is still checked against the host reference
+            // before it can be committed or resumed.
+            if (!rejection.Reported && !RealTimePresentationRuntime.IsApplyingAuthoritativePresentation
+                && !WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease.IsActive)
             {
                 rejection.Reported = true;
                 report?.Invoke(rule);

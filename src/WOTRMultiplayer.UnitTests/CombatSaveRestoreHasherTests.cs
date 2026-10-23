@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
@@ -54,6 +55,49 @@ namespace WOTRMultiplayer.UnitTests
 
             Assert.That(CombatSaveRestoreHasher.Project(expected).AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(100));
             Assert.That(CombatSaveRestoreHasher.Project(changed).AreaEffects[0].CreationGameTimeTicks, Is.EqualTo(200));
+        }
+
+        [Test]
+        public void NativeLoadDerivedImpatienceFactDoesNotChangeRestoreFingerprint()
+        {
+            var before = State(-61.21f, "AE_old", "FA_aura_old", "FA_spell_old", 4, true);
+            var after = State(-61.21f, "AE_old", "FA_aura_old", "FA_spell_old", 4, true);
+            before.Units[0].BuffCollection.Buffs.Add(new NetworkBuff
+            {
+                Id = "runtime-impatience", BlueprintId = "46b39651560c13f41a1f5deebb9caa1a",
+                CasterId = "unit", Rank = 1, IsPermanent = true, IsHidden = true
+            });
+            before.Units[0].BuffCollection.Buffs.Add(new NetworkBuff
+            {
+                Id = "runtime-rage-toggle", BlueprintId = "9fd2dd27d838f0049ab56e9da3508b25",
+                CasterId = "unit", Rank = 1, IsPermanent = true, IsHidden = true
+            });
+
+            Assert.That(CombatSaveRestoreHasher.Compute(before), Is.EqualTo(CombatSaveRestoreHasher.Compute(after)));
+        }
+
+        [Test]
+        public void LoadedWorldApplicationRetainsFreshDerivedObjectsAndSavedMechanics()
+        {
+            var saved = State(-61.21f, "AE_old", "FA_aura_old", "FA_spell_old", 4, true);
+            var loaded = State(-61.21f, "AE_new", "FA_aura_new", null, 2, false);
+            loaded.Units[0].Descriptor.Damage = 0;
+            loaded.Units[0].BuffCollection.Buffs.Add(new NetworkBuff
+            {
+                Id = "runtime-impatience", BlueprintId = "46b39651560c13f41a1f5deebb9caa1a",
+                CasterId = "unit", Rank = 1, IsPermanent = true, IsHidden = true
+            });
+
+            var expected = CombatSaveRestoreHasher.PrepareLoadedWorldApplication(saved, loaded);
+
+            Assert.That(expected.Units[0].Descriptor.Damage, Is.EqualTo(3));
+            Assert.That(expected.AreaEffects[0].Id, Is.EqualTo("AE_new"));
+            Assert.That(expected.Units[0].BuffCollection.Buffs.Select(buff => buff.Id), Is.EquivalentTo(new[]
+            {
+                "FA_spell_old", "FA_aura_new", "runtime-impatience"
+            }));
+            Assert.That(CombatSaveRestoreHasher.Compute(expected),
+                Is.EqualTo(CombatSaveRestoreHasher.Compute(saved)));
         }
 
         private static NetworkCombatState State(float position, string areaId, string auraId,

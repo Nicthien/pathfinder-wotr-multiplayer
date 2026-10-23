@@ -23,6 +23,7 @@ using WOTRMultiplayer.Localization;
 using WOTRMultiplayer.Networking.Abstractions.ExternalConnections;
 using WOTRMultiplayer.Services.PubSub;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.Automation;
 using WOTRMultiplayer.Services.Settings;
 
 namespace WOTRMultiplayer
@@ -30,6 +31,7 @@ namespace WOTRMultiplayer
     public class Main
     {
         private static ILogger<Main> _logger;
+        private static TestControlBridge _testControlBridge;
 
         public static IServiceProvider ServiceProvider { get; private set; }
 
@@ -62,10 +64,11 @@ namespace WOTRMultiplayer
 
         public static bool Load(UnityModManager.ModEntry entry)
         {
+            string isolatedProfile = null;
             try
             {
                 ModVersion = entry.Version;
-                var isolatedProfile = RealTimeTestProfileBootstrap.ApplyIfRequested();
+                isolatedProfile = RealTimeTestProfileBootstrap.ApplyIfRequested();
                 if (isolatedProfile != null)
                     entry.Logger.Log($"RTwP isolated test profile: {isolatedProfile}");
                 ModManagerSettings = UnityModManager.ModSettings.Load<UnityModManagerSettings>(entry);
@@ -100,6 +103,8 @@ namespace WOTRMultiplayer
                 State = ServiceProvider.GetRequiredService<IGameStateLookupService>();
                 HashService = ServiceProvider.GetRequiredService<IHashService>();
                 Lobby = ServiceProvider.GetRequiredService<ILobbyWindowController>();
+                _testControlBridge = ServiceProvider.GetRequiredService<TestControlBridge>();
+                _testControlBridge.Start(isolatedProfile);
 
                 entry.OnGUI += OnGui;
                 entry.OnSaveGUI += OnSaveGui;
@@ -149,6 +154,7 @@ namespace WOTRMultiplayer
             {
                 (ServiceProvider?.GetService<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>()
                     as WOTRMultiplayer.UI.MainThreadAccessor)?.Drain();
+                _testControlBridge?.Tick();
                 Multiplayer?.UpdateRealTimeCombat();
                 ServiceProvider?.GetService<IGlobalMapInteractionService>()?.TickMapPresentation();
             }

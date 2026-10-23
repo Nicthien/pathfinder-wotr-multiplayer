@@ -21,5 +21,7 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(5)] public int Metamagic { get; set; }
         [ProtoMember(6)] public bool Available { get; set; }
         [ProtoMember(7)] public bool IsOpposition { get; set; }
+        [ProtoMember(8)] public int MetamagicSpellLevelCost { get; set; }
+        [ProtoMember(9)] public int MetamagicHeightenLevel { get; set; }
     }
 }

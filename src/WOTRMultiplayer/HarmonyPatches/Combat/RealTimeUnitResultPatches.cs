@@ -22,7 +22,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         private static bool RejectClient(UnitEntityData unit, string reason)
         {
             if (!RealTimePresentationRuntime.IsClientActive) return true;
-            Main.Multiplayer.ReportRealTimeAIActionFault(unit?.UniqueId, null, "autonomous-client-unit-state:" + reason);
+            // The attempted client-side mutation is fully rejected by this
+            // prefix. Trigger recovery only for a mutation that escaped a guard
+            // or for a host event that cannot be applied.
             return false;
         }
 

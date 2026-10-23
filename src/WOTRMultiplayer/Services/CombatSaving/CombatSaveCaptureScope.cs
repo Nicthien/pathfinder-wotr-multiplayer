@@ -13,6 +13,7 @@ namespace WOTRMultiplayer.Services.CombatSaving
         [ThreadStatic] private static CombatSaveCaptureScope current;
         private readonly Game game;
         private readonly object world;
+        private readonly Func<bool> nativeBarrierOwned;
         private readonly Dictionary<object, Queue<ItemEntityWeapon>> weapons = new();
         private Queue<ItemEntityWeapon> restoring;
 
@@ -51,17 +52,20 @@ namespace WOTRMultiplayer.Services.CombatSaving
             public void Dispose() { scope.restoring = previous; }
         }
 
-        internal CombatSaveCaptureScope(Game game)
+        internal CombatSaveCaptureScope(Game game, Func<bool> nativeBarrierOwned = null)
         {
-            if (current != null || !CombatSaveActivation.Enabled || !CombatSavePauseLease.HoldsWorld(game))
+            if (current != null || !CombatSaveActivation.Enabled
+                || !CombatSavePauseLease.HoldsWorld(game) && nativeBarrierOwned?.Invoke() != true)
                 throw new InvalidOperationException("combat-save-capture-scope-not-authorized");
             this.game = game;
             world = game.State;
+            this.nativeBarrierOwned = nativeBarrierOwned;
             current = this;
         }
 
         internal static bool Active => current != null && ReferenceEquals(Game.Instance, current.game)
-            && ReferenceEquals(current.game.State, current.world) && CombatSavePauseLease.HoldsWorld(current.game);
+            && ReferenceEquals(current.game.State, current.world)
+            && (CombatSavePauseLease.HoldsWorld(current.game) || current.nativeBarrierOwned?.Invoke() == true);
 
         public void Dispose()
         {

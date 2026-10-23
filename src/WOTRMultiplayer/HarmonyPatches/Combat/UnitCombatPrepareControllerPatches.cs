@@ -8,6 +8,7 @@ using Kingmaker.Controllers.Combat;
 using Kingmaker.RuleSystem.Rules;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
 {
@@ -19,13 +20,20 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool UnitCombatPrepareController_Tick_Prefix()
         {
-            if (!Main.Multiplayer.IsActive)
-            {
-                return true;
-            }
+            return ShouldTick(Main.Multiplayer.IsActive,
+                RealTimePresentationRuntime.IsClientActive,
+                () => Main.Multiplayer.CanTickUnitCombatPrepareController());
+        }
 
-            var canContinue = Main.Multiplayer.CanTickUnitCombatPrepareController();
-            return canContinue;
+        public static bool ShouldTick(bool multiplayerActive, bool realTimePresentationClient,
+            Func<bool> multiplayerGate)
+        {
+            if (!multiplayerActive) return true;
+            // Initiative preparation is host-owned in RTwP. Letting the client
+            // tick this controller restarts native initiative for the whole combat
+            // when new encounter groups are discovered.
+            if (realTimePresentationClient) return false;
+            return multiplayerGate();
         }
 
         [HarmonyPatch(typeof(UnitCombatPrepareController), nameof(UnitCombatPrepareController.Tick))]

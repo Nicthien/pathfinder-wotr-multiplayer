@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using NUnit.Framework;
 using ProtoBuf;
 using WOTRMultiplayer.Networking.Messages.Contracts;
@@ -66,6 +68,23 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(ack.CanonicalStateHash, Is.EqualTo(123));
             Assert.That(ack.Applied, Is.False);
             Assert.That(ack.Reason, Is.EqualTo("final-state-hash-mismatch"));
+        }
+
+        [Test]
+        public void ModeCompletion_RoundTripsHostCombatContinuationCertificate()
+        {
+            var frame = Serializer.DeepClone(new NotifyRealTimeModeTransition
+            {
+                Epoch = 12,
+                Stage = (int)RealTimeModeTransitionStage.Complete,
+                Mode = 0,
+                CanonicalStateHash = 456,
+                CombatContinues = true
+            });
+
+            Assert.That(frame.Epoch, Is.EqualTo(12));
+            Assert.That(frame.CanonicalStateHash, Is.EqualTo(456));
+            Assert.That(frame.CombatContinues, Is.True);
         }
 
         [Test]
@@ -178,6 +197,21 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
 
             Assert.That(copy.RealTimeProtocolVersion, Is.EqualTo(30));
             Assert.That(copy.RealTimeBuildFingerprint, Is.EqualTo("ABCD1234"));
+        }
+
+        [Test]
+        public void DialogCueAnswerSuggested_RoundTripsContinueReadiness()
+        {
+            var copy = Serializer.DeepClone(new NotifyDialogCueAnswerSuggested
+            {
+                CueName = "cue-a",
+                VoteRoundId = "round-a",
+                CanContinue = true
+            });
+
+            Assert.That(copy.CueName, Is.EqualTo("cue-a"));
+            Assert.That(copy.VoteRoundId, Is.EqualTo("round-a"));
+            Assert.That(copy.CanContinue, Is.True);
         }
 
         [Test]
@@ -501,12 +535,42 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 Stage = (int)RealTimeModeTransitionStage.Abort,
                 PlayerId = 42,
                 Applied = false,
-                CanonicalStateHash = 999UL
+                CanonicalStateHash = 999UL,
+                RequiresNativeReconstruction = true
             });
 
             Assert.That(copy.PlayerId, Is.EqualTo(42));
             Assert.That(copy.Applied, Is.False);
             Assert.That(copy.CanonicalStateHash, Is.EqualTo(999UL));
+            Assert.That(copy.RequiresNativeReconstruction, Is.True);
+        }
+
+        [Test]
+        public void CombatSave_RoundTripsAuthoritativeTurnAlignment()
+        {
+            var copy = Serializer.DeepClone(new NotifyCombatSave
+            {
+                SessionId = "session", SessionSeed = 13, LoadedSaveSeed = 17,
+                Epoch = 8, Operation = Guid.NewGuid().ToString("N"), Stage = "Align",
+                Round = 2, UnitId = "host-unit", TurnSeed = 71,
+                State = new NetworkCombatState
+                {
+                    Units = [new NetworkUnit { Id = "host-unit" }],
+                    AreaEffects = [new NetworkAreaEffect { Id = "host-aura" }]
+                },
+                NativeTurnState = "{\"m_CurrentTurn\":{}}"
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(copy.Stage, Is.EqualTo("Align"));
+                Assert.That(copy.Round, Is.EqualTo(2));
+                Assert.That(copy.UnitId, Is.EqualTo("host-unit"));
+                Assert.That(copy.TurnSeed, Is.EqualTo(71));
+                Assert.That(copy.State.Units.Single().Id, Is.EqualTo("host-unit"));
+                Assert.That(copy.State.AreaEffects.Single().Id, Is.EqualTo("host-aura"));
+                Assert.That(copy.NativeTurnState, Is.EqualTo("{\"m_CurrentTurn\":{}}"));
+            });
         }
 
         [Test]

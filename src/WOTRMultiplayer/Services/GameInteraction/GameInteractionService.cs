@@ -372,6 +372,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
+        public bool RequiresRealTimeMechanicalReconstruction()
+        {
+            if (!RealTimePresentationRuntime.Enabled || Game.Instance?.State == null)
+                return false;
+            return RealTimeBuffReplicaStore.RequiresMechanicalRebuild(Game.Instance.State.Units)
+                || RealTimeAreaReplicaFactory.RequiresMechanicalRebuild(Game.Instance.State.AreaEffects)
+                || RealTimeNativeGraphRepair.RequiresRebuild(Game.Instance.State);
+        }
+
         public List<NetworkCharacter> GetPartyPlayers()
         {
             // Dungeon restart
@@ -975,6 +984,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             _mainThreadAccessor.Post(() =>
             {
+                using var presentation = RealTimePresentationRuntime.BeginAuthoritativePresentation();
                 // based on PartyPerceptionController.RollPerception
                 try
                 {
@@ -1044,6 +1054,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             _mainThreadAccessor.Post(() =>
             {
+                using var presentation = RealTimePresentationRuntime.BeginAuthoritativePresentation();
                 try
 
                 {
@@ -1084,6 +1095,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                using var presentation = RealTimePresentationRuntime.BeginAuthoritativePresentation();
                 var initiatorUnitId = _gameStateLookupService.GetUnitEntity(networkStealthPerceptionCheck.InitiatorId);
                 if (initiatorUnitId == null)
                 {

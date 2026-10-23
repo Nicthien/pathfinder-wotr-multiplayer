@@ -49,6 +49,7 @@ namespace WOTRMultiplayer.Services
 {
     public partial class MultiplayerHost : MultiplayerActorBase, IMultiplayerHost
     {
+        private const float DistantPlayerCombatRegroupDistance = 30f;
         private readonly INetworkHostConnection _networkHost;
         private readonly IHashService _hashService;
         private readonly IMainThreadAccessor _mainThreadAccessor;
@@ -532,7 +533,12 @@ namespace WOTRMultiplayer.Services
                 Epoch = Game.RealTimeCombat.Epoch,
                 Stage = (int)RealTimeModeTransitionStage.Complete,
                 Mode = (int)Game.RealTimeCombat.Mode,
-                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash
+                CanonicalStateHash = Game.RealTimeCombat.CanonicalStateHash,
+                // A client can receive a transient native CombatEnded callback while
+                // rebuilding turn-based mode. Only the authoritative host can certify
+                // that the protected encounter is still alive.
+                CombatContinues = Game.Combat?.Stage == NetworkCombatStage.Running
+                    && !Game.RealTimeCombat.CombatEndPending
             };
             _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(10);
             Send(_lastRealTimeModeComplete);
@@ -570,6 +576,18 @@ namespace WOTRMultiplayer.Services
             _lastRealTimeModeCommit = null;
             _lastRealTimeModeComplete = null;
             _lastRealTimeAbort = null;
+            if (_realTimeModeCompleteIsAbort && _nativeReconstructionRequiredForModeSwitch
+                && _queuedCombatMode == CombatMode.TurnBased
+                && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
+                && Game.Combat?.Stage == NetworkCombatStage.Running)
+            {
+                // Keep the game frozen between the cancelled transition and
+                // the native checkpoint. No moving presentation snapshot may
+                // recreate an inert replica in this gap.
+                GameInteraction.SetPause(true);
+                _ = BeginRealTimeRepairAsync();
+                return;
+            }
             if (_realTimeCriticalFaulted && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
                 && Game.Combat?.Stage == NetworkCombatStage.Running)
             {
@@ -743,7 +761,18 @@ namespace WOTRMultiplayer.Services
                     if ((RealTimeModeTransitionStage)message.Stage == RealTimeModeTransitionStage.Prepare
                         && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.PreparingModeSwitch)
                     {
-                        if (!message.Applied)
+                        if (message.Applied && message.RequiresNativeReconstruction
+                            && Game.RealTimeCombat.PendingMode == CombatMode.TurnBased
+                            && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause
+                            && RealTimePresentationRuntime.Enabled)
+                        {
+                            Logger.LogInformation("[CombatMode] Peer requires native mechanical reconstruction before turn-based mode. PlayerId={PlayerId}, Epoch={Epoch}",
+                                receivedFrom, message.Epoch);
+                            QueueRequestedCombatMode(CombatMode.TurnBased);
+                            _nativeReconstructionRequiredForModeSwitch = true;
+                            await AbortRealTimeModeSwitchAsync();
+                        }
+                        else if (!message.Applied)
                         {
                             await AbortRealTimeModeSwitchAsync();
                         }
@@ -971,6 +1000,8 @@ namespace WOTRMultiplayer.Services
             _realTimeRepairStage = null;
             _lastRealTimeRepairMessage = null;
             _realTimeRepairDeadline = default;
+            _queuedCombatMode = null;
+            _nativeReconstructionRequiredForModeSwitch = false;
 
             _networkHost.Reset();
         }
@@ -1256,6 +1287,7 @@ namespace WOTRMultiplayer.Services
                 switch (Game.Combat.Stage)
                 {
                     case NetworkCombatStage.Initiating:
+                        TryRegroupDistantPlayersForCombat();
                         if (Game.Combat.IsInitiated)
                         {
                             var canAdvanceStage = Game.Combat.PlayersInCombat.Count >= GetSyncedPlayersCount();
@@ -1372,6 +1404,34 @@ namespace WOTRMultiplayer.Services
                 Logger.LogError(ex, "Error while initializing combat");
                 throw;
             }
+        }
+
+        private void TryRegroupDistantPlayersForCombat()
+        {
+            if (Game.Combat.DistantPlayersRegroupAttempted)
+            {
+                return;
+            }
+
+            Game.Combat.DistantPlayersRegroupAttempted = true;
+            if (!SettingsService.GetSettings().RegroupDistantPlayersOnCombatStart)
+            {
+                Logger.LogInformation("Distant player combat regroup is disabled");
+                return;
+            }
+
+            var playerControlledUnitIds = Game.Characters
+                .Where(character => character.Owner != null && !string.IsNullOrWhiteSpace(character.UnitId))
+                .Select(character => character.UnitId)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var moved = CombatInteraction.RegroupDistantPlayersForCombat(
+                playerControlledUnitIds,
+                DistantPlayerCombatRegroupDistance);
+            Logger.LogInformation(
+                "Distant player combat regroup completed. MovedUnits={MovedUnits}, MinimumDistance={MinimumDistance}",
+                moved,
+                DistantPlayerCombatRegroupDistance);
         }
 
         /// <summary>
@@ -2864,7 +2924,19 @@ namespace WOTRMultiplayer.Services
             var epoch = combat.Epoch;
             try
             {
-                await GameInteraction.SetPauseAsync(true);
+                if (!await PauseAtRealTimeRepairSafePointAsync(
+                        session, combat, epoch,
+                        () => _realTimeRepairStage == RealTimeRepairStage.Prepare))
+                {
+                    if (ReferenceEquals(Game, session) && ReferenceEquals(Game?.RealTimeCombat, combat)
+                        && combat.Epoch == epoch && combat.Phase == CombatSynchronizationPhase.Repairing)
+                    {
+                        combat.RecoveryStatus = "stopped";
+                        combat.RecoveryFailure = "repair-safe-point-timeout";
+                        GameInteraction.SetPause(true);
+                    }
+                    return;
+                }
                 if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, combat)
                     || combat.Epoch != epoch || combat.Phase != CombatSynchronizationPhase.Repairing
                     || _realTimeRepairStage != RealTimeRepairStage.Prepare)
@@ -2889,6 +2961,90 @@ namespace WOTRMultiplayer.Services
             }
         }
 
+        private async Task<bool> PauseAtRealTimeRepairSafePointAsync(NetworkGame session,
+            NetworkRealTimeCombatState state, long epoch, Func<bool> barrierOwned)
+        {
+            if (barrierOwned == null) throw new ArgumentNullException(nameof(barrierOwned));
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline)
+            {
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var resumeToDrainFrozenAction = false;
+                _mainThreadAccessor.Post(() =>
+                {
+                    try
+                    {
+                        if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, state)
+                            || state.Epoch != epoch || state.Phase != CombatSynchronizationPhase.Repairing
+                            || !barrierOwned())
+                        {
+                            completion.TrySetResult(false);
+                            return;
+                        }
+                        // The repair phase already rejects new commands. Let the
+                        // last accepted native action/projectile finish before
+                        // freezing the clock, otherwise it can never drain and a
+                        // native checkpoint can never be captured.
+                        var activeProjectiles = CombatInteraction.HasActiveRealTimeProjectiles();
+                        var activeAtomicActions = CombatInteraction.HasActiveRealTimeAtomicActions();
+                        resumeToDrainFrozenAction = GameInteraction.IsPaused
+                            && (activeProjectiles || activeAtomicActions);
+                        if (!CanCaptureRepairCheckpoint(GameInteraction.IsPaused,
+                                activeProjectiles, activeAtomicActions))
+                        {
+                            completion.TrySetResult(false);
+                            return;
+                        }
+                        completion.TrySetResult(true);
+                    }
+                    catch (Exception error) { completion.TrySetException(error); }
+                });
+                if (await completion.Task)
+                {
+                    // Keep the actual pause asynchronous as well: a session can
+                    // be replaced while the main-thread request is queued. The
+                    // caller revalidates the exact session before publishing.
+                    await GameInteraction.SetPauseAsync(true);
+                    return ReferenceEquals(Game, session)
+                        && ReferenceEquals(Game?.RealTimeCombat, state)
+                        && state.Epoch == epoch
+                        && state.Phase == CombatSynchronizationPhase.Repairing
+                        && barrierOwned();
+                }
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, state)
+                    || state.Epoch != epoch || state.Phase != CombatSynchronizationPhase.Repairing
+                    || !barrierOwned()) return false;
+                if (resumeToDrainFrozenAction)
+                {
+                    // Repair already rejects every new gameplay command. If a
+                    // synchronized user pause froze an accepted attack or
+                    // projectile, briefly run only that existing native work;
+                    // otherwise the capture precondition can never become true.
+                    await GameInteraction.SetPauseAsync(false);
+                    if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, state)
+                        || state.Epoch != epoch || state.Phase != CombatSynchronizationPhase.Repairing
+                        || !barrierOwned()) return false;
+                }
+                await Task.Delay(50);
+            }
+            Logger.LogWarning(
+                "Real-time repair could not reach an action-safe pause within 30 seconds. Epoch={Epoch}, ActiveProjectiles={ActiveProjectiles}, ActiveAtomicActions={ActiveAtomicActions}",
+                epoch, CombatInteraction.HasActiveRealTimeProjectiles(), CombatInteraction.HasActiveRealTimeAtomicActions());
+            return false;
+        }
+
+        internal static bool CanCaptureRepairCheckpoint(
+            bool alreadyPaused,
+            bool activeProjectiles,
+            bool activeAtomicActions)
+        {
+            // A native checkpoint never includes an in-flight atomic action or
+            // projectile. The coordinator may temporarily resume an already
+            // paused repair world to drain accepted work, but it must pause
+            // again only after both guards are clear.
+            return !activeProjectiles && !activeAtomicActions;
+        }
+
         private async Task StartRealTimeRepairVerificationAsync()
         {
             var owner = new object();
@@ -2900,6 +3056,12 @@ namespace WOTRMultiplayer.Services
             }
             try
             {
+                if (_nativeReconstructionRequiredForModeSwitch
+                    && _queuedCombatMode == CombatMode.TurnBased)
+                {
+                    await RunNativeRecoveryAsync();
+                    return;
+                }
                 if (_realTimeCriticalFaulted)
                 {
                     if (RealTimePresentationRuntime.Enabled) { await RunNativeRecoveryAsync(); return; }
@@ -3034,6 +3196,12 @@ namespace WOTRMultiplayer.Services
             _realTimeRepairStage = null;
             _lastRealTimeRepairMessage = null;
             _realTimeRepairDeadline = default;
+            if (_nativeReconstructionRequiredForModeSwitch && _queuedCombatMode == CombatMode.TurnBased)
+            {
+                GameInteraction.SetPause(true);
+                _ = ContinueCombatModeAfterNativeReconstructionAsync();
+                return;
+            }
             GameInteraction.SetPause(Game.RealTimeCombat.CombatEndPending || Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
             RepublishActivePresentationActions();
         }
@@ -3322,6 +3490,13 @@ namespace WOTRMultiplayer.Services
                 .Where(x => x?.Owner != null && !string.IsNullOrWhiteSpace(x.UnitId))
                 .GroupBy(x => x.UnitId, StringComparer.Ordinal)
                 .ToDictionary(x => x.Key, x => x.First().Owner.Id, StringComparer.Ordinal);
+            // Enemies, summons and other native combatants are not represented
+            // by NetworkCharacter. A command observed locally by the
+            // authoritative host for one of those units is nevertheless a
+            // legitimate host order and must be broadcast for presentation on
+            // clients. Never extend ownership for a network-supplied command.
+            if (!executeOnHost && !owners.ContainsKey(unitId))
+                owners[unitId] = Game.LocalPlayerId;
             var envelope = new RealTimeCommandEnvelope
             {
                 Epoch = message.Epoch,
@@ -3802,6 +3977,7 @@ namespace WOTRMultiplayer.Services
 
         private void OnClientCombatTurnStarted(long playerId, ClientCombatTurnStarted started)
         {
+            if (_combatSave?.ConfirmTurnAlignment(playerId, started) == true) return;
             AddPlayerReadyStatus(PlayerTurnReadinessType.Start, playerId, started.UnitId);
 
             TryStartTurn();
@@ -4285,7 +4461,7 @@ namespace WOTRMultiplayer.Services
                 Main = new NetworkGameMainSettings
                 {
                     LootInCombat = false,
-                    QuickMovement = false
+                    QuickMovement = true
                 },
                 Autopause = new NetworkAutopauseSettings
                 {
@@ -4595,6 +4771,8 @@ namespace WOTRMultiplayer.Services
                 CueName = cueName,
                 Suggestions = Mapper.Map<List<Networking.Messages.Contracts.NetworkDialogAnswerSuggestion>>(suggestions),
                 VoteRoundId = Game.DialogState.VoteRoundId,
+                CanContinue = Game.DialogState.HasSystemAnswer
+                    && GetPlayersWhoHaveNotSeenCueYet(cueName).Count == 0,
             };
             Send(cueAnswerSuggested);
         }

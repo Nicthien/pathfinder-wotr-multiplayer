@@ -304,7 +304,12 @@ namespace WOTRMultiplayer.Services
                 _mainThreadAccessor.Post(() =>
                 {
                     lock (ActionLock)
-                        if (Authorized()) FailNativeCheckpointReceive("native-reference-verification-failed");
+                        if (Authorized())
+                        {
+                            var detail = error.Message ?? error.GetType().Name;
+                            if (detail.Length > 120) detail = detail.Substring(0, 120);
+                            FailNativeCheckpointReceive("native-reference-verification-failed:" + detail);
+                        }
                 });
             }
         }
@@ -313,12 +318,16 @@ namespace WOTRMultiplayer.Services
         {
             _nativeCommitPending = true;
             var operation = _nativeLoadOperation;
+            var referenceRequest = _nativeReferenceRequest;
             bool Authorized() => IsCurrentNativeReceive() && !_nativeReceiveFailed
                 && ReferenceEquals(_nativeLoadOperation, operation) && operation?.IsLoaded == true
+                && ReferenceEquals(_nativeReferenceRequest, referenceRequest)
                 && _nativeReferenceVerifiedHash == request.CanonicalStateHash;
+            bool IsSameAttempt() => ReferenceEquals(_nativeLoadOperation, operation)
+                && ReferenceEquals(_nativeReferenceRequest, referenceRequest);
             try
             {
-                var reference = Mapper.Map<NetworkCombatState>(RealTimeNativeReferenceCodec.Decode(_nativeReferenceRequest.ReferenceStateBytes));
+                var reference = Mapper.Map<NetworkCombatState>(RealTimeNativeReferenceCodec.Decode(referenceRequest.ReferenceStateBytes));
                 var receipt = operation?.Receipt;
                 var committed = receipt != null && await CombatInteraction.TryCommitNativeReferenceStateAsync(
                     receipt.World, receipt.RepairObligation, reference, Authorized);
@@ -326,8 +335,8 @@ namespace WOTRMultiplayer.Services
                 {
                     lock (ActionLock)
                     {
-                        if (!Authorized()) return;
-                        _nativeCommitPending = false;
+                        if (IsSameAttempt()) _nativeCommitPending = false;
+                        if (!Authorized()) { TryAcknowledgeNativeAbort(); return; }
                         if (!committed) { FailNativeCheckpointReceive("native-commit-not-confirmed"); return; }
                         _nativeCommitted = true;
                         _localCriticalFaultState = null;
@@ -342,8 +351,11 @@ namespace WOTRMultiplayer.Services
             catch (Exception error)
             {
                 Logger.LogError(error, "Native reconstruction Commit refused. No resume authorized.");
-                _mainThreadAccessor.Post(() => { lock (ActionLock) { _nativeCommitPending = false;
-                    if (Authorized()) FailNativeCheckpointReceive("native-commit-failed"); } });
+                _mainThreadAccessor.Post(() => { lock (ActionLock) {
+                    if (IsSameAttempt()) _nativeCommitPending = false;
+                    if (Authorized()) FailNativeCheckpointReceive("native-commit-failed");
+                    else TryAcknowledgeNativeAbort();
+                } });
             }
         }
 
@@ -407,6 +419,8 @@ namespace WOTRMultiplayer.Services
         {
             if (!IsCurrentNativeReceive()) return;
             _nativeReceiveFailed = true; _nativeReceiveDeadline = DateTime.MaxValue;
+            Game.RealTimeCombat.RecoveryStatus = "stopped";
+            Game.RealTimeCombat.RecoveryFailure ??= reason;
             _nativeReceiver?.Dispose(); _nativeReceivedSource?.Dispose(); _nativeReceivedSource = null;
             if (notify && _nativeAbortRequest == null)
                 SendNativeCheckpointAck(frame ?? _nativeReceiveManifest ?? _nativeReceivePrepare, RealTimeNativeCheckpointAckStage.Failed);

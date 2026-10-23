@@ -916,6 +916,11 @@ namespace WOTRMultiplayer.UI
             // misc
             yield return new SettingsEntityHeaderVM(new LocalizedString { Key = WellKnownKeys.Settings.Miscellaneous.Title.Key });
             yield return CreateBoolSetting(
+                WellKnownKeys.Settings.Miscellaneous.RegroupDistantPlayersOnCombatStart.Title.Key,
+                WellKnownKeys.Settings.Miscellaneous.RegroupDistantPlayersOnCombatStart.Tooltip.Key,
+                WellKnownSettings.Miscellaneous.RegroupDistantPlayersOnCombatStart,
+                isMultiplayerOff);
+            yield return CreateBoolSetting(
                 WellKnownKeys.Settings.Miscellaneous.HideServerAddress.Title.Key,
                 WellKnownKeys.Settings.Miscellaneous.HideServerAddress.Tooltip.Key,
                 WellKnownSettings.Miscellaneous.HideServerAddress,

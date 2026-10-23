@@ -27,6 +27,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var error = RealTimeBuffContextChain.Validate(states);
             if (error != null || states == null)
                 throw new InvalidOperationException(error ?? "missing-buff-context-chain");
+            if (states.Count == 0) return null;
             var nodes = new List<MechanicsContext>();
             foreach (var state in states)
             {

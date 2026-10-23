@@ -28,6 +28,7 @@ using Kingmaker.Utility;
 using Kingmaker.Visual.Animation.Kingmaker;
 using Kingmaker.Visual.Animation.Kingmaker.Actions;
 using Kingmaker.View.Animation;
+using Kingmaker.View;
 using WOTRMultiplayer.Networking.Messages.Game;
 using Microsoft.Extensions.Logging;
 using TurnBased.Controllers;
@@ -45,6 +46,7 @@ using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Entities.Units.Parts;
 using WOTRMultiplayer.Extensions;
 using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.CombatSaving;
 
 namespace WOTRMultiplayer.Services.GameInteraction
 {
@@ -157,11 +159,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 {
                     if (!canPresent()) { completion.TrySetResult(null); return; }
                     if (!RealTimeAuthoritativePresentation.IsSupported(authoritativeEvent))
-                    { completion.TrySetResult(false); return; }
+                    {
+                        LogRejectedPresentation(authoritativeEvent, "unsupported-envelope");
+                        completion.TrySetResult(false); return;
+                    }
                     if (authoritativeEvent.UnitResult != null)
                     {
                         var target = _gameStateLookupService.GetUnitEntity(authoritativeEvent.UnitId);
-                        if (target == null) { completion.TrySetResult(false); return; }
+                        if (target == null)
+                        {
+                            LogRejectedPresentation(authoritativeEvent, "unit-result-target-missing");
+                            completion.TrySetResult(false); return;
+                        }
                         var result = _mapper.Map<NetworkUnitDescriptor>(authoritativeEvent.UnitResult.State);
                         var error = RealTimeUnitResultState.Validate(result, RealTimeUnitResultReplication.Capture(target));
                         if (error != null) throw new InvalidOperationException(error);
@@ -175,7 +184,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         var projectile = _mapper.Map<NetworkProjectileState>(authoritativeEvent.Projectile.State);
                         if ((authoritativeEvent.Projectile.Stage == 3) != projectile.IsHit)
-                        { completion.TrySetResult(false); return; }
+                        {
+                            LogRejectedPresentation(authoritativeEvent, "projectile-stage-hit-mismatch");
+                            completion.TrySetResult(false); return;
+                        }
                         _projectileReplica.Apply(projectile);
                         completion.TrySetResult(true);
                         return;
@@ -216,33 +228,67 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         || presentation.SpeedScale <= 0 || presentation.SpeedScale > 20
                         || float.IsNaN(presentation.TargetDistance) || float.IsInfinity(presentation.TargetDistance)
                         || presentation.TargetDistance < 0)
-                    { completion.TrySetResult(false); return; }
+                    {
+                        LogRejectedPresentation(authoritativeEvent, "invalid-action-start");
+                        completion.TrySetResult(false); return;
+                    }
                     var unit = _gameStateLookupService.GetUnitEntity(authoritativeEvent.UnitId);
                     var manager = unit?.View?.AnimationManager;
                     var type = (UnitAnimationType)presentation.AnimationType;
                     if (manager == null || (ability != null ? type != UnitAnimationType.CastSpell
                         : type != UnitAnimationType.MainHandAttack
                             && type != UnitAnimationType.OffHandAttack && type != UnitAnimationType.SpecialAttack))
-                    { completion.TrySetResult(false); return; }
+                    {
+                        _logger.LogWarning(
+                            "Omitting unavailable host action visual. UnitId={UnitId}, ActionId={ActionId}, Kind={Kind}, Reason={Reason}",
+                            authoritativeEvent.UnitId, authoritativeEvent.ActionId, authoritativeEvent.Kind,
+                            manager == null ? "animation-manager-unavailable" : "animation-type-unsupported");
+                        completion.TrySetResult(true);
+                        return;
+                    }
                     var spell = ability == null ? null : ResourcesLibrary.TryGetBlueprint<BlueprintAbility>(ability.BlueprintId);
                     if (ability != null && spell == null)
-                    { completion.TrySetResult(false); return; }
+                    {
+                        _logger.LogWarning(
+                            "Omitting unavailable host ability visual. UnitId={UnitId}, ActionId={ActionId}, BlueprintId={BlueprintId}",
+                            authoritativeEvent.UnitId, authoritativeEvent.ActionId, ability.BlueprintId);
+                        completion.TrySetResult(true);
+                        return;
+                    }
                     var lifetime = new RealTimePresentationLifetime(Game.Instance.TimeController.GameTime,
                         ability?.CastingTime ?? 0, presentation.SpeedScale);
                     UnitAnimationActionHandle handle;
                     if (type == UnitAnimationType.SpecialAttack)
                     {
                         if (!Enum.IsDefined(typeof(UnitAnimationSpecialAttackType), presentation.SpecialAttackType))
-                        { completion.TrySetResult(false); return; }
+                        {
+                            LogRejectedPresentation(authoritativeEvent, "invalid-special-attack-type");
+                            completion.TrySetResult(false); return;
+                        }
                         handle = manager.CreateSpecialAttackHandle((UnitAnimationSpecialAttackType)presentation.SpecialAttackType);
                     }
                     else handle = manager.CreateHandle(type);
-                    if (handle == null) { completion.TrySetResult(false); return; }
+                    if (handle == null)
+                    {
+                        _logger.LogWarning(
+                            "Omitting host action visual without a native handle. UnitId={UnitId}, ActionId={ActionId}",
+                            authoritativeEvent.UnitId, authoritativeEvent.ActionId);
+                        completion.TrySetResult(true);
+                        return;
+                    }
                     createdHandle = handle;
                     handle.AttackWeaponStyle = (WeaponAnimationStyle)presentation.WeaponStyle;
                     // Sequence/custom clips are not reconstructed by the A0 prototype.
                     if (ability == null && (presentation.Variant < 0 || presentation.Variant >= handle.VariantsCount))
-                    { handle.Release(0f); completion.TrySetResult(false); return; }
+                    {
+                        handle.Release(0f);
+                        createdHandle = null;
+                        _logger.LogWarning(
+                            "Omitting host action visual with an unavailable variant. UnitId={UnitId}, ActionId={ActionId}, Variant={Variant}, VariantsCount={VariantsCount}",
+                            authoritativeEvent.UnitId, authoritativeEvent.ActionId, presentation.Variant, handle.VariantsCount);
+                        completion.TrySetResult(true);
+                        return;
+                    }
                     handle.Variant = presentation.Variant;
                     handle.SpeedScale = presentation.SpeedScale;
                     handle.AttackTargetDistance = presentation.TargetDistance;
@@ -274,6 +320,21 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
+        private void LogRejectedPresentation(NotifyRealTimeAuthoritativeEvent frame, string reason)
+        {
+            var attack = frame?.Attack;
+            var ability = frame?.Ability;
+            var projectile = frame?.Projectile;
+            _logger.LogWarning(
+                "Rejected host presentation. Reason={Reason}, Epoch={Epoch}, Sequence={Sequence}, Kind={Kind}, ActionId={ActionId}, UnitId={UnitId}, TargetUnitId={TargetUnitId}, AttackStage={AttackStage}, AbilityStage={AbilityStage}, ProjectileStage={ProjectileStage}, AnimationType={AnimationType}, WeaponStyle={WeaponStyle}, SpecialAttackType={SpecialAttackType}, SpeedScale={SpeedScale}, TargetDistance={TargetDistance}, AbilityBlueprintId={AbilityBlueprintId}, ProjectileId={ProjectileId}",
+                reason, frame?.Epoch, frame?.Sequence, frame?.Kind, frame?.ActionId, frame?.UnitId,
+                frame?.TargetUnitId, attack?.Stage, ability?.Stage, projectile?.Stage,
+                attack?.AnimationType ?? ability?.AnimationType, attack?.WeaponStyle ?? ability?.WeaponStyle,
+                attack?.SpecialAttackType, attack?.SpeedScale ?? ability?.SpeedScale,
+                attack?.TargetDistance ?? ability?.TargetDistance, ability?.BlueprintId,
+                projectile?.State?.Id);
+        }
+
         public CombatInteractionService(
             ILogger<CombatInteractionService> logger,
             IGameStateLookupService gameStateLookupService,
@@ -286,9 +347,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
             _gameStateLookupService = gameStateLookupService;
             _projectileReplica = new RealTimeProjectileReplica(state =>
             {
-                var visual = new RealTimeProjectileVisual(state, view => _projectileVisuals.Remove(view));
-                _projectileVisuals.Add(visual);
-                return visual;
+                try
+                {
+                    var visual = new RealTimeProjectileVisual(state, view => _projectileVisuals.Remove(view));
+                    _projectileVisuals.Add(visual);
+                    return visual;
+                }
+                catch (Exception failure) when (RealTimeProjectileVisual.CanSafelyOmit(failure))
+                {
+                    _logger.LogWarning(failure,
+                        "Skipping unsafe or unavailable remote projectile visual {ProjectileId} ({BlueprintId})",
+                        state.Id, state.BlueprintId);
+                    return new RealTimeOmittedProjectileVisual(state);
+                }
             });
             _mainThreadAccessor = mainThreadAccessor;
             _playerNotificationService = playerNotificationService;
@@ -592,12 +663,22 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
+                    using var identities = new RealTimeBuffIdentityReconciliation();
+                    foreach (var remote in networkCombatState.Units)
+                    {
+                        var local = _gameStateLookupService.GetUnitEntity(remote.Id);
+                        // The normal snapshot validation reports missing entities as
+                        // one complete diagnostic before any state is applied.
+                        if (local == null) continue;
+                        identities.Align(local, remote.BuffCollection, _buffInteractionService.GetUnitBuffs(local));
+                    }
                     using (var restoration = new RealTimeBuffRestoreTransaction())
                     {
                         ApplyRealTimeCombatState(networkCombatState, restoration);
                         if (restoration.HasChanges)
                             restoration.VerifyAndCommit(networkCombatState, GetRealTimeCombatState());
                     }
+                    identities.Commit();
                     completion.TrySetResult(true);
                 }
                 catch (Exception ex)
@@ -643,7 +724,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                             throw new InvalidOperationException("transition-buff-unit-missing");
                         foreach (var pair in units)
                         {
-                            _buffInteractionService.UpdateUnitBuffs(pair.Local, pair.Remote.BuffCollection);
+                            _buffInteractionService.ReconcileUnitBuffsForModeTransition(
+                                pair.Local, pair.Remote.BuffCollection);
                             identities.Align(pair.Local, pair.Remote.BuffCollection,
                                 _buffInteractionService.GetUnitBuffs(pair.Local));
                         }
@@ -668,17 +750,63 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
-        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState, RealTimeBuffRestoreTransaction restoration,
-            bool requireNativeEntities = false)
+        public Task<NetworkCombatState> TryApplyCombatSaveStateAsync(
+            NetworkCombatState savedState, Func<bool> canApply)
+        {
+            if (canApply == null) throw new ArgumentNullException(nameof(canApply));
+            var completion = new TaskCompletionSource<NetworkCombatState>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    if (!canApply()) { completion.TrySetResult(null); return; }
+                    using var projection = new CombatSaveDigestScope();
+                    _logger.LogInformation("[CombatSave] Mechanical restore phase: capture-loaded-world");
+                    var expected = CombatSaveRestoreHasher.PrepareLoadedWorldApplication(
+                        savedState, GetRealTimeCombatState());
+                    _logger.LogInformation("[CombatSave] Mechanical restore phase: apply-authoritative-world. Units={Units}, Areas={Areas}",
+                        expected.Units.Count, expected.AreaEffects.Count);
+                    NetworkCombatState applied;
+                    using (var restoration = new RealTimeBuffRestoreTransaction())
+                    {
+                        ApplyRealTimeCombatStateCore(expected, restoration, false,
+                            RealTimePresentationRuntime.IsClientActive);
+                        _logger.LogInformation("[CombatSave] Mechanical restore phase: capture-applied-world");
+                        applied = GetRealTimeCombatState();
+                        _logger.LogInformation("[CombatSave] Mechanical restore phase: verify-applied-world");
+                        restoration.VerifyAndCommit(expected, applied);
+                    }
+                    if (!canApply()) { completion.TrySetResult(null); return; }
+                    _logger.LogInformation("[CombatSave] Mechanical restore phase: complete");
+                    completion.TrySetResult(applied);
+                }
+                catch (Exception error)
+                {
+                    _logger.LogError(error, "Unable to restore combat-save mechanical state");
+                    completion.TrySetException(error);
+                }
+            });
+            return completion.Task;
+        }
+
+        private void ApplyRealTimeCombatState(NetworkCombatState networkCombatState,
+            RealTimeBuffRestoreTransaction restoration, bool requireNativeEntities = false)
+            => ApplyRealTimeCombatStateCore(networkCombatState, restoration,
+                requireNativeEntities, RealTimePresentationRuntime.Enabled);
+
+        private void ApplyRealTimeCombatStateCore(NetworkCombatState networkCombatState,
+            RealTimeBuffRestoreTransaction restoration, bool requireNativeEntities, bool presentationOnly)
         {
             using var capture = new RealTimeCaptureScope();
+            _logger.LogInformation("[CombatSave] Mechanical apply phase: preflight");
             var projectileStates = networkCombatState.ProjectilesCaptured
                 ? RealTimeProjectileReplica.ValidateAndCopy(networkCombatState.Projectiles) : null;
             var missing = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
                 id => _gameStateLookupService.GetUnitEntity(id) != null,
                 area => _gameStateLookupService.GetAreaEffect(area) != null,
                 area => _gameStateLookupService.GetAreaEffect(area)?.View != null
-                    || RealTimePresentationRuntime.Enabled && RealTimeAreaReplicaFactory.IsReplica(
+                    || presentationOnly && RealTimeAreaReplicaFactory.IsReplica(
                         _gameStateLookupService.GetAreaEffect(area)),
                 id => _gameStateLookupService.GetUnitEntity(id)?.Blueprint?.AssetGuid.ToString(),
                 area => _gameStateLookupService.GetAreaEffect(area)?.Blueprint?.AssetGuid.ToString(),
@@ -686,54 +814,79 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 area => _gameStateLookupService.GetAreaEffect(area)?.HoldingState?.SceneName,
                 getLocalBuffs: id => _buffInteractionService.GetUnitBuffs(
                     _gameStateLookupService.GetUnitEntity(id)).Buffs,
-                canRecreateBuff: buff => !requireNativeEntities && (RealTimePresentationRuntime.Enabled
+                canRecreateBuff: buff => !requireNativeEntities && (presentationOnly
                     ? buff?.ContextChain != null && RealTimeBuffContextChain.Validate(buff.ContextChain) == null
                     : _buffInteractionService.CanRecreateBuff(buff)),
                 getLocalArea: area => _mapper.Map<NetworkAreaEffect>(
                     _gameStateLookupService.GetAreaEffect(area)),
-                canRecreateArea: !requireNativeEntities && RealTimePresentationRuntime.Enabled ? _ => true : null);
+                canRecreateArea: !requireNativeEntities && presentationOnly ? _ => true : null);
             if (missing != null)
                 throw new InvalidOperationException(missing);
 
             // Only enumerate live combat entities after basic validation. This also keeps
             // missing-entity failures independent of an initialized game world.
             var localCombatState = GetRealTimeCombatState();
+            _logger.LogInformation("[CombatSave] Mechanical apply phase: local-world-captured");
             var extra = RealTimeCombatEntityPreflight.FindMissing(networkCombatState,
                 id => _gameStateLookupService.GetUnitEntity(id) != null,
                 area => _gameStateLookupService.GetAreaEffect(area) != null,
                 localCombatUnitIds: localCombatState.Units.Select(unit => unit.Id),
                 localAreaIds: localCombatState.AreaEffects.Select(area => area.Id),
-                canRecreateArea: !requireNativeEntities && RealTimePresentationRuntime.Enabled ? _ => true : null,
-                canRemoveArea: !requireNativeEntities && RealTimePresentationRuntime.Enabled
+                canRecreateArea: !requireNativeEntities && presentationOnly ? _ => true : null,
+                canRemoveArea: !requireNativeEntities && presentationOnly
                     ? id => CanRemovePresentationArea(_gameStateLookupService.GetAreaEffect(
                         new NetworkAreaEffect { Id = id })) : null);
             if (extra != null)
                 throw new InvalidOperationException(extra);
 
-            if (RealTimePresentationRuntime.Enabled && !requireNativeEntities)
+            if (presentationOnly && !requireNativeEntities)
                 StageAreaPresentation(networkCombatState.AreaEffects, restoration);
 
-            if (RealTimePresentationRuntime.Enabled)
+            if (presentationOnly)
                 foreach (var area in networkCombatState.AreaEffects)
                 {
                     var areaError = RealTimeAreaReplication.Validate(_gameStateLookupService.GetAreaEffect(area), area);
                     if (areaError != null) throw new InvalidOperationException($"area:{area.Id}:{areaError}");
                 }
 
-            if (RealTimePresentationRuntime.Enabled && !requireNativeEntities)
+            if (presentationOnly && !requireNativeEntities)
                 foreach (var networkUnit in networkCombatState.Units)
                     _buffInteractionService.StageMissingUnitBuffsPresentation(
                         _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection, restoration);
 
+            // A protected native reconstruction can legitimately rebuild an
+            // existing buff with a shorter MechanicsContext parent chain. This
+            // also happens immediately after the reconstruction lease has been
+            // committed, while the ordinary presentation checkpoint is being
+            // applied. Normalize every existing context transactionally before
+            // validation, not only checkpoints that still require native entities.
+            if (RealTimePresentationRuntime.IsClientActive)
+                foreach (var networkUnit in networkCombatState.Units)
+                    _buffInteractionService.NormalizeNativeBuffTargetsForCheckpoint(
+                        _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection, restoration);
+
+            // Units can join the encounter after a native repair has resumed.
+            // Their same-area PostLoad spellbooks may still contain only the
+            // capacity slots even though the host has prepared spells. Repair
+            // that direct-field topology before validating/applying this
+            // authoritative presentation checkpoint; the transaction will
+            // roll it back if any later proof fails.
+            if (RealTimePresentationRuntime.IsClientActive)
+                foreach (var networkUnit in networkCombatState.Units.Where(unit =>
+                             unit?.Descriptor?.SpellbooksCaptured == true))
+                    RealTimeSpellbookReplication.NormalizeNativeLoadTopology(
+                        _gameStateLookupService.GetUnitEntity(networkUnit.Id),
+                        networkUnit.Descriptor.Spellbooks, restoration);
+
             foreach (var networkUnit in networkCombatState.Units)
             {
-                if (RealTimePresentationRuntime.Enabled)
+                if (presentationOnly)
                 {
                     var buffError = _buffInteractionService.ValidateUnitBuffsPresentation(
                         _gameStateLookupService.GetUnitEntity(networkUnit.Id), networkUnit.BuffCollection);
                     if (buffError != null) throw new InvalidOperationException($"unit:{networkUnit.Id}:{buffError}");
                 }
-                if (RealTimePresentationRuntime.Enabled)
+                if (presentationOnly)
                 {
                     var resultError = RealTimeUnitResultState.Validate(networkUnit.Descriptor,
                         RealTimeUnitResultReplication.Capture(_gameStateLookupService.GetUnitEntity(networkUnit.Id)));
@@ -755,11 +908,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
 
             // Unsupported visual assets must fail before health/buffs are changed.
+            _logger.LogInformation("[CombatSave] Mechanical apply phase: validated");
             if (projectileStates != null) _projectileReplica.Restore(projectileStates);
-            UpdateCombatState(networkCombatState, requiresFullUpdate: false, presentationOnly: RealTimePresentationRuntime.Enabled);
+            UpdateCombatState(networkCombatState, requiresFullUpdate: false, presentationOnly: presentationOnly);
+            _logger.LogInformation("[CombatSave] Mechanical apply phase: combat-state-updated");
             foreach (var networkUnit in networkCombatState.Units)
             {
-                if (RealTimePresentationRuntime.Enabled)
+                if (presentationOnly)
                 {
                     var participant = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
                     RealTimeEncounterParticipants<UnitEntityData>.For(Main.Multiplayer?.RealTimeCombatIdentity)
@@ -778,7 +933,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 }
                 if (networkUnit.Descriptor?.State?.IsFinallyDead != true)
                     continue;
-                if (RealTimePresentationRuntime.Enabled) continue; // Already applied without death mechanics.
+                if (presentationOnly) continue; // Already applied without death mechanics.
                 var localUnit = _gameStateLookupService.GetUnitEntity(networkUnit.Id);
                 if (localUnit != null && !localUnit.State.IsFinallyDead)
                 {
@@ -819,9 +974,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     prepared.Add((existing, existing.HoldingState, state, replacement, false));
                     continue;
                 }
-                var scene = Game.Instance.State.LoadedAreaState.GetAllSceneStates()
-                    .SingleOrDefault(value => value.SceneName == state.SceneName)
-                    ?? throw new InvalidOperationException("area-reconstruction-scene-missing:" + state.SceneName);
+                // Persistent auras may live in Player.CrossSceneState. That
+                // state is deliberately outside LoadedAreaState's ordinary
+                // scene enumeration, but it is still the native owner that a
+                // reconstructed presentation entity must retain.
+                var crossScene = Game.Instance.Player?.CrossSceneState;
+                var scene = crossScene != null
+                    && string.Equals(crossScene.SceneName, state.SceneName, StringComparison.Ordinal)
+                        ? crossScene
+                        : Game.Instance.State.LoadedAreaState.GetAllSceneStates()
+                            .SingleOrDefault(value => value.SceneName == state.SceneName);
+                if (scene == null)
+                    throw new InvalidOperationException("area-reconstruction-scene-missing:" + state.SceneName);
                 var blueprint = ResourcesLibrary.TryGetBlueprint<BlueprintAbilityAreaEffect>(state.BlueprintId)
                     ?? throw new InvalidOperationException("area-reconstruction-blueprint-missing:" + state.BlueprintId);
                 var referencedUnits = state.ContextChain.SelectMany(node => new[] { node.CasterId, node.OwnerId })
@@ -1047,7 +1211,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             // Inspect every launcher, not only the party. A projectile still travelling
             // can deliver a delayed hit, rule event or area effect after a mode switch.
             return Game.Instance.ProjectileController.Projectiles.Any(projectile =>
-                projectile != null && !projectile.Destroyed && !projectile.Cleared);
+                projectile != null && projectile.OnTheWay);
         }
 
         public bool HasActiveRealTimeAtomicActions()
@@ -1161,7 +1325,21 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public bool IsCombatInitialized()
         {
-            return Game.Instance.TurnBasedCombatController.Initialized;
+            var turnBasedEnabled = Kingmaker.Settings.SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue();
+            var turnBasedInitialized = Game.Instance.TurnBasedCombatController.Initialized;
+            var nativeCombatUnits = turnBasedEnabled ? 0 : GetUnitsInCombat().Count;
+            return IsCombatInitializationReady(turnBasedEnabled, turnBasedInitialized, nativeCombatUnits);
+        }
+
+        internal static bool IsCombatInitializationReady(
+            bool turnBasedEnabled,
+            bool turnBasedInitialized,
+            int nativeCombatUnits)
+        {
+            // The turn-based controller is deliberately not initialized in RTwP. Waiting for it in that
+            // mode leaves the network handshake stuck in Finalizing forever and the client never receives
+            // NotifyCombatInitializationRequired. Native combat membership is the equivalent RTwP signal.
+            return turnBasedEnabled ? turnBasedInitialized : nativeCombatUnits > 0;
         }
 
         public Task ExcludeUnitsFromCombatAsync(List<string> units)
@@ -1637,6 +1815,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return taskCompletion.Task;
         }
 
+        public async Task WaitForTurnBasedModeStabilizationAsync()
+        {
+            // Enabling the native turn-based controller schedules its combat roster and
+            // dead-unit cleanup over the following frames.  Sampling immediately after
+            // the setting flips can therefore certify the pre-initialization roster and
+            // miss a late local combat end.  Let those native callbacks settle before
+            // the authoritative roster is applied and certified again.
+            await Task.Delay(TimeSpan.FromMilliseconds(1500));
+        }
+
         public void AddUnitsToCombat(List<string> units)
         {
             _mainThreadAccessor.Post(() =>
@@ -1659,6 +1847,102 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var party = _gameStateLookupService.GetActualParty();
             var units = GetUnitsState(party);
             return units;
+        }
+
+        public int RegroupDistantPlayersForCombat(IReadOnlyCollection<string> playerControlledUnitIds, float minimumDistance)
+        {
+            try
+            {
+                if (playerControlledUnitIds == null || playerControlledUnitIds.Count < 2 || minimumDistance <= 0f)
+                {
+                    return 0;
+                }
+
+                var controlledIds = new HashSet<string>(playerControlledUnitIds, StringComparer.OrdinalIgnoreCase);
+                var controlledUnits = controlledIds
+                    .Select(_gameStateLookupService.GetUnitEntity)
+                    .Where(unit => unit != null && unit.IsInGame && !unit.State.IsFinallyDead)
+                    .ToList();
+                if (controlledUnits.Count < 2)
+                {
+                    return 0;
+                }
+
+                var hostileUnits = Game.Instance.State.Units.InCombat()
+                    .Where(unit => unit != null && unit.IsInGame && !unit.State.IsFinallyDead
+                        && !unit.IsPlayerFaction && unit.IsPlayersEnemy)
+                    .ToList();
+                if (hostileUnits.Count == 0)
+                {
+                    _logger.LogWarning("Distant player combat regroup skipped because no hostile combatant is available");
+                    return 0;
+                }
+
+                var anchorCandidates = Game.Instance.Player.PartyAndPets
+                    .Where(unit => unit != null && unit.IsInGame && !unit.State.IsFinallyDead
+                        && (controlledIds.Contains(unit.UniqueId)
+                            || unit.Master != null && controlledIds.Contains(unit.Master.UniqueId)))
+                    .ToList();
+                var anchorId = CombatRegroupPlanner.FindAnchor(
+                    anchorCandidates.Select(unit => new CombatRegroupPlanner.Point(unit.UniqueId, unit.Position.x, unit.Position.z)).ToList(),
+                    hostileUnits.Select(unit => new CombatRegroupPlanner.Point(unit.UniqueId, unit.Position.x, unit.Position.z)).ToList());
+                var anchor = anchorCandidates.FirstOrDefault(unit => string.Equals(unit.UniqueId, anchorId, StringComparison.OrdinalIgnoreCase));
+                if (anchor == null)
+                {
+                    return 0;
+                }
+
+                var anchorScene = anchor.HoldingState?.SceneName;
+                var unitsToMove = controlledUnits
+                    .Where(unit => unit != anchor
+                        && string.Equals(unit.HoldingState?.SceneName, anchorScene, StringComparison.OrdinalIgnoreCase)
+                        && CombatRegroupPlanner.IsFartherThan(unit.Position, anchor.Position, minimumDistance))
+                    .Select(unit => unit.RiderPart?.SaddledUnit ?? unit)
+                    .Where(unit => unit != null && unit != anchor)
+                    .Distinct()
+                    .ToList();
+                if (unitsToMove.Count == 0)
+                {
+                    return 0;
+                }
+
+                var placementRadius = Math.Max(0.75f, unitsToMove.Max(unit => unit.Corpulence));
+                FreePlaceSelector.PlaceSpawnPlaces(unitsToMove.Count, placementRadius, anchor.Position);
+                for (var index = 0; index < unitsToMove.Count; index++)
+                {
+                    var unit = unitsToMove[index];
+                    var destination = FreePlaceSelector.GetRelaxedPosition(index, projectOnGround: true);
+                    var previousPosition = unit.Position;
+                    unit.Commands?.InterruptMove();
+                    unit.SaddledPart?.Rider?.Commands?.InterruptMove();
+                    UpdateUnitPosition(unit, destination.ToNetworkVector3());
+                    unit.Orientation = anchor.Orientation;
+                    if (!unit.IsInCombat)
+                    {
+                        AddUnitToCombat(unit);
+                    }
+
+                    var rider = unit.SaddledPart?.Rider;
+                    if (rider != null && !rider.IsInCombat)
+                    {
+                        AddUnitToCombat(rider);
+                    }
+
+                    _logger.LogInformation(
+                        "Regrouped distant player unit for combat. UnitId={UnitId}, AnchorUnitId={AnchorUnitId}, PreviousPosition={PreviousPosition}, NewPosition={NewPosition}",
+                        unit.UniqueId,
+                        anchor.UniqueId,
+                        previousPosition.ToString("F4"),
+                        unit.Position.ToString("F4"));
+                }
+
+                return unitsToMove.Count;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unable to regroup distant players for combat");
+                return 0;
+            }
         }
 
         public Task<bool> UpdateUnitsAsync(List<NetworkUnit> networkUnits, bool updatePosition)
@@ -2054,7 +2338,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
                     if (!requiresFullUpdate)
                     {
-                        if (presentationOnly) _buffInteractionService.UpdateUnitBuffsPresentation(unit, networkUnit.BuffCollection);
+                        if (presentationOnly)
+                        {
+                            _buffInteractionService.UpdateUnitBuffsPresentation(unit, networkUnit.BuffCollection);
+                        }
                         else _buffInteractionService.UpdateUnitBuffs(unit, networkUnit.BuffCollection);
                     }
 
@@ -2067,6 +2354,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 UpdateEngagements(unitsToUpdate);
 
                 UpdateAreaEffects(networkCombatState.AreaEffects, presentationOnly);
+
+                if (presentationOnly)
+                {
+                    // Updating any later unit's buffs (especially an aura) or an
+                    // area effect can synchronously recalculate the stats of units
+                    // already visited above.  Reapply every authoritative result
+                    // only after the complete checkpoint has finished changing
+                    // schedulers, so the sampled acknowledgement cannot observe a
+                    // half-updated health graph.
+                    foreach (var (networkUnit, unit) in unitsToUpdate)
+                        if (unit != null) UpdateUnitHealth(unit, networkUnit);
+                }
 
                 _logger.LogInformation("Combat state has been updated. RoundNumber={RoundNumber}, UnitsCount={UnitsCount}, IsFullUpdate={IsFullUpdate}", networkCombatState.RoundNumber, networkCombatState.Units.Count, requiresFullUpdate);
             }
@@ -2156,8 +2455,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             if (RealTimePresentationRuntime.Enabled && networkUnit.Descriptor.Vitals != null)
             {
-                RealTimeUnitResultReplication.ApplyVitals(unit, networkUnit.Descriptor.Vitals);
+                // Calculated-stat restoration may touch the same native vital
+                // containers.  Vitals are the final host certificate and must win.
                 RealTimeCalculatedStatReplication.Apply(unit.Stats.AllStats, networkUnit.Descriptor.CalculatedStats);
+                RealTimeUnitResultReplication.ApplyVitals(unit, networkUnit.Descriptor.Vitals);
                 return;
             }
             unit.Damage = networkUnit.Descriptor.Damage;

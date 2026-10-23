@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Runtime.CompilerServices;
 using AutoMapper;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Mechanics;
@@ -10,10 +11,37 @@ namespace WOTRMultiplayer.Services.GameInteraction
 {
     public static class RealTimeBuffContextCapture
     {
+        private sealed class ConfirmedAbility
+        {
+            public NetworkAbility Value { get; set; }
+        }
+
+        private static readonly ConditionalWeakTable<AbilityExecutionContext, ConfirmedAbility>
+            ConfirmedAbilities = new();
+
+        internal static void RememberAbility(AbilityExecutionContext context, NetworkAbility ability)
+        {
+            if (context == null || ability == null) return;
+            ConfirmedAbilities.GetOrCreateValue(context).Value = RealTimeBuffReplicaStore.CloneAbility(ability);
+        }
+
         public static NetworkAbility CaptureAbility(AbilityExecutionContext context, IRuntimeMapper mapper)
         {
             if (context == null) return null;
-            if (!CombatSaveDigestScope.Active) return mapper.Map<NetworkAbility>(context.Ability);
+            if (!CombatSaveDigestScope.Active)
+            {
+                if (ConfirmedAbilities.TryGetValue(context, out var confirmed) && confirmed.Value != null)
+                    return RealTimeBuffReplicaStore.CloneAbility(confirmed.Value);
+                var runtimeAbility = mapper.Map<NetworkAbility>(context.Ability);
+                if (!string.IsNullOrWhiteSpace(runtimeAbility?.BlueprintId)) return runtimeAbility;
+            }
+
+            // Native loads may legitimately restore an AbilityExecutionContext
+            // before its transient AbilityData reference. SourceAbility remains
+            // the authoritative blueprint in that window and is sufficient for
+            // rebuilding the detached presentation context. Treat it the same
+            // way as the save-digest projection instead of rejecting the whole
+            // combat snapshot and entering an endless repair loop.
             var blueprint = context.Ability?.Blueprint ?? context.SourceAbility;
             return blueprint == null ? null : new NetworkAbility { BlueprintId = blueprint.AssetGuid.ToString() };
         }

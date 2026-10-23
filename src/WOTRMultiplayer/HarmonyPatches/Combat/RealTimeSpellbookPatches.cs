@@ -29,8 +29,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         public static bool BeforeMutation(MethodBase __originalMethod)
         {
             if (!RealTimePresentationRuntime.IsClientActive) return true;
-            Main.Multiplayer.ReportRealTimeAIActionFault(null, null,
-                "autonomous-client-spell-slot:" + __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name);
+            // A blocked client callback did not mutate state. Host snapshots
+            // remain authoritative, so no recovery is required.
             return false;
         }
 
@@ -53,8 +53,6 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             // CanSpend uses this same helper with doSpend=false. Keep read-only
             // availability queries alive for targeting and the action bar.
             if (!doSpend || !RealTimePresentationRuntime.IsClientActive) return true;
-            Main.Multiplayer.ReportRealTimeAIActionFault(null, null,
-                "autonomous-client-spell-slot:Spellbook.SpendInternal");
             return false;
         }
 

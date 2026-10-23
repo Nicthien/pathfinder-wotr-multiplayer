@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using ProtoBuf;
 using WOTRMultiplayer.Networking.Messages.Contracts;
@@ -14,11 +15,18 @@ namespace WOTRMultiplayer.Networking.UnitTests
         {
             var state = new NetworkCombatState();
             state.Units.Add(new NetworkUnit { Id = "hero", UnitPartKineticist = new NetworkUnitPartKineticist { AcceptedBurn = 5 } });
+            state.NativeUnits.Add(new NetworkUnit
+            {
+                Id = "world-npc",
+                BuffCollection = new NetworkUnitBuffCollection()
+            });
             var bytes = RealTimeNativeReferenceCodec.Encode(state);
             state.Units[0].UnitPartKineticist.AcceptedBurn = 99;
+            state.NativeUnits[0].Id = "mutated";
             var restored = RealTimeNativeReferenceCodec.Decode(bytes);
             Assert.That(restored.Units[0].UnitPartKineticist.AcceptedBurn, Is.EqualTo(5));
             Assert.That(restored.Units[0].Id, Is.EqualTo("hero"));
+            Assert.That(restored.NativeUnits.Single().Id, Is.EqualTo("world-npc"));
         }
 
         [Test]
@@ -51,6 +59,14 @@ namespace WOTRMultiplayer.Networking.UnitTests
         {
             var state = new NetworkCombatState();
             for (var i = 0; i < 4097; i++) state.Units.Add(new NetworkUnit { Id = i.ToString() });
+            Assert.Throws<InvalidDataException>(() => RealTimeNativeReferenceCodec.Encode(state));
+        }
+
+        [Test]
+        public void TooManyNativeUnitInventoriesAreRejectedBeforeSerialization()
+        {
+            var state = new NetworkCombatState();
+            for (var i = 0; i < 32769; i++) state.NativeUnits.Add(new NetworkUnit { Id = i.ToString() });
             Assert.Throws<InvalidDataException>(() => RealTimeNativeReferenceCodec.Encode(state));
         }
 

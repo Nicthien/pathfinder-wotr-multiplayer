@@ -63,6 +63,12 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
             return Task.FromResult<NetworkCombatState>(null);
         }
 
+        public Task<NetworkCombatState> TryApplyCombatSaveStateAsync(
+            NetworkCombatState savedState, Func<bool> canApply)
+        {
+            return Task.FromResult<NetworkCombatState>(null);
+        }
+
         public void InitializeCrusadeArmyCombat()
         {
         }

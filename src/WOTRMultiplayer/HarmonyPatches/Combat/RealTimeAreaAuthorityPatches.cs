@@ -49,8 +49,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         public static bool BeforeCallback(MethodBase __originalMethod, AreaEffectEntityData __1)
         {
             if (!RealTimePresentationRuntime.IsClientActive) return true;
-            Main.Multiplayer.ReportRealTimeAIActionFault(null, null,
-                "autonomous-client-area-callback:" + __originalMethod.Name + ":" + __1?.UniqueId);
+            // The callback did not run, so the authoritative state is intact.
+            // Periodic host snapshots will update presentation state.
             return false;
         }
     }

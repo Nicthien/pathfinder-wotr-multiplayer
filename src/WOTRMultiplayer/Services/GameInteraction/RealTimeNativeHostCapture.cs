@@ -101,7 +101,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         var before = CaptureMechanicalStateForVerification(combat, turnBased);
                         var beforeHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = before });
                         RealTimeMemorySaver source;
-                        try { source = CaptureNow(game, checkpointId, freshFog, fogScene, () =>
+                        try { source = CaptureNow(game, checkpointId, freshFog, fogScene, SameWorld, () =>
                         {
                             if (!SameWorld()) throw new InvalidOperationException("native-checkpoint-world-identity-or-clock-changed");
                             var after = CaptureMechanicalStateForVerification(combat, turnBased);
@@ -165,18 +165,24 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 || string.IsNullOrWhiteSpace(campaignId) || !Guid.TryParseExact(checkpointId, "N", out _))
                 throw new InvalidOperationException("native-checkpoint-host-barrier-not-authorized");
             var game = Game.Instance;
-            if (game?.State?.LoadedAreaState == null || game.Player == null || !CombatSaving.CombatSavePauseLease.IsWorldPaused(game)
-                || game.Player.GameId != campaignId || game.Player.StartPreset?.Campaign?.DlcReward != null
-                || game.CurrentMode != GameModeType.Default && game.CurrentMode != GameModeType.Pause
-                || game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress
-                || game.EntityCreator.CreationQueue.Any()
-                || game.State.LoadedAreaState.AllEntityData.Concat(game.Player.CrossSceneState.AllEntityData)
-                    .Any(entity => entity == null || entity.DestroyMark || entity.ShouldFadeOutViewAndDestroy)
-                || game.State.LoadedAreaState.GetAdditionalSceneStates()
-                    .Any(scene => scene.IsSceneLoaded != scene.IsSceneLoadedThreadSafe)
-                || combat.IsInCrusadeTacticalCombat() || combat.HasActiveRealTimeProjectiles()
-                || combat.HasActiveRealTimeAtomicActions())
-                throw new InvalidOperationException("native-checkpoint-host-not-at-safe-point");
+            string refusal = null;
+            if (game?.State?.LoadedAreaState == null) refusal = "loaded-area-missing";
+            else if (game.Player == null) refusal = "player-missing";
+            else if (!CombatSaving.CombatSavePauseLease.IsWorldPaused(game)) refusal = "world-not-paused";
+            else if (game.Player.GameId != campaignId) refusal = "campaign-mismatch";
+            else if (game.Player.StartPreset?.Campaign?.DlcReward != null) refusal = "dlc-reward-world";
+            else if (game.CurrentMode != GameModeType.Default && game.CurrentMode != GameModeType.Pause) refusal = "game-mode";
+            else if (game.SaveManager.CurrentState != SaveManager.State.None || game.SaveManager.CommitInProgress) refusal = "save-manager-busy";
+            else if (game.EntityCreator.CreationQueue.Any()) refusal = "entity-creation-pending";
+            else if (game.State.LoadedAreaState.AllEntityData.Concat(game.Player.CrossSceneState.AllEntityData)
+                .Any(entity => entity == null || entity.DestroyMark || entity.ShouldFadeOutViewAndDestroy)) refusal = "entity-destruction-pending";
+            else if (game.State.LoadedAreaState.GetAdditionalSceneStates()
+                .Any(scene => scene.IsSceneLoaded != scene.IsSceneLoadedThreadSafe)) refusal = "scene-thread-state-mismatch";
+            else if (combat.IsInCrusadeTacticalCombat()) refusal = "crusade-tactical-combat";
+            else if (combat.HasActiveRealTimeProjectiles()) refusal = "projectile-active";
+            else if (combat.HasActiveRealTimeAtomicActions()) refusal = "atomic-action-active";
+            if (refusal != null)
+                throw new InvalidOperationException("native-checkpoint-host-not-at-safe-point:" + refusal);
             RealTimeNativeCharacterUiGuard.RequireIdle(game);
         }
 
@@ -233,7 +239,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
 
         private static RealTimeMemorySaver CaptureNow(Game game, string checkpointId, byte[] freshFog,
-            string fogScene, Func<bool> verify, string nativeTurn = null)
+            string fogScene, Func<bool> captureAuthorized, Func<bool> verify, string nativeTurn = null)
         {
             var player = game.Player;
             var area = game.State.LoadedAreaState;
@@ -251,7 +257,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (!player.IsTurnedOn || !area.Area.IsTurnedOn || scenes.Any(scene => !scene.IsTurnedOn))
                 throw new InvalidOperationException("native-checkpoint-host-lifecycle-not-ready");
             using var disabledLog = ContextData<GameLogDisabled>.Request();
-            using var combatSaveScope = nativeTurn != null ? new CombatSaving.CombatSaveCaptureScope(game) : null;
+            // The same native TurnOff/TurnOn lifecycle is used for RT repair
+            // checkpoints and turn-based combat saves. Keep combat-start buffs,
+            // derived facts and natural weapons stable for both; the explicit
+            // native barrier predicate is the RT authorization in lieu of a
+            // user-save pause lease.
+            using var combatSaveScope = new CombatSaving.CombatSaveCaptureScope(game, captureAuthorized);
+            var calculatedStats = game.State.Units.All.Where(unit => unit?.Stats?.AllStats != null)
+                .ToDictionary(unit => unit, unit => RealTimeCalculatedStatReplication.Capture(unit.Stats.AllStats));
+            void RestoreCalculatedStats()
+            {
+                foreach (var pair in calculatedStats)
+                    RealTimeCalculatedStatReplication.Apply(pair.Key.Stats.AllStats, pair.Value);
+            }
             var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             void Add(RealTimeMemorySaver source, string file, byte[] bytes)
             {
@@ -277,6 +295,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
             }
             return RealTimeNativeCaptureTransaction.Capture(transaction =>
             {
+                // Register first so this compensation runs last, after every
+                // native TurnOn callback. Owlcat's save lifecycle can refresh a
+                // stale HP/stat cache (observed as an unrelated +1 HP on an
+                // off-screen enemy); neither the volatile archive nor the host
+                // may publish that incidental mutation as gameplay.
+                transaction.Apply(() => { }, RestoreCalculatedStats);
                 transaction.Apply(() => game.SaveManager.CurrentState = SaveManager.State.Saving,
                     () => game.SaveManager.CurrentState = SaveManager.State.None);
                 transaction.Apply(() =>
@@ -301,6 +325,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 transaction.Apply(player.CrossSceneState.TurnOff, () => RestoreScene(player.CrossSceneState));
                 transaction.Apply(() => player.TurnOff(EntityDataBase.Reason.SaveGame), () => { if (!player.IsTurnedOn) player.TurnOn(); });
                 player.PreSave();
+                // The serialized off-state must contain the same caches as the
+                // authoritative live world, not values recalculated by TurnOff.
+                RestoreCalculatedStats();
                 if (scenes.Any(scene => scene.IsTurnedOn) || initiallyOn.Keys.Any(entity => entity.IsTurnedOn)
                     || game.EntityCreator.CreationQueue.Any())
                     throw new InvalidOperationException("native-checkpoint-host-not-fully-suspended");
@@ -367,7 +394,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     || area.ShouldLoad != originalShouldLoad || game.EntityCreator.CreationQueue.Any()
                     || game.SaveManager.CurrentState != SaveManager.State.None)
                     throw new InvalidOperationException("native-checkpoint-save-lifecycle-changed");
-                combatSaveScope?.VerifyWeaponsRestored();
+                combatSaveScope.VerifyWeaponsRestored();
                 return verify();
             });
         }

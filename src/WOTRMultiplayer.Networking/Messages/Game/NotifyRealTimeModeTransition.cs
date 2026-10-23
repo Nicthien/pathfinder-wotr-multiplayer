@@ -34,5 +34,9 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 
         [ProtoMember(5)]
         public NetworkCombatState State { get; set; }
+
+        [ProtoMember(6)]
+        [LogMe]
+        public bool CombatContinues { get; set; }
     }
 }

@@ -7,6 +7,7 @@ using HarmonyLib;
 using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Commands;
+using Kingmaker.UnitLogic.Parts;
 using WOTRMultiplayer.Networking;
 using WOTRMultiplayer.Networking.Messages.Contracts;
 
@@ -21,6 +22,27 @@ namespace WOTRMultiplayer.Services.GameInteraction
             ?? throw new MissingFieldException(typeof(EntityPartsManager).FullName, "m_Parts");
         private static readonly FieldInfo CommandsOwner = AccessTools.Field(typeof(UnitCommands), "m_Owner")
             ?? throw new MissingFieldException(typeof(UnitCommands).FullName, "m_Owner");
+        // UI inspection creates this cache lazily when a unit's buffs are viewed.
+        // Its presence therefore depends on which peer opened an inspect tooltip,
+        // not on authoritative combat mechanics, and must not invalidate a native
+        // combat checkpoint.
+        private static readonly HashSet<string> NonMechanicalPartTypes = new(StringComparer.Ordinal)
+        {
+            typeof(UnitPartInspectedBuffs).FullName
+        };
+
+        internal static bool ShouldCapturePart(EntityPart part)
+        {
+            if (part == null) return true;
+            if (NonMechanicalPartTypes.Contains(part.GetType().FullName)) return false;
+            // DamageGrace.OnTurnOff removes its last weapon entry but leaves the
+            // empty UnitPart attached. A native load correctly omits that inert
+            // shell because no active fact calls Ensure<UnitPartDamageGrace>.
+            // A populated part is mechanical and must still match exactly.
+            return part is not UnitPartDamageGrace damageGrace
+                || damageGrace.Weapons == null
+                || damageGrace.Weapons.Count != 0;
+        }
 
         internal static NetworkNativeTopology CaptureState(IEnumerable<UnitEntityData> units,
             IEnumerable<AreaEffectEntityData> areas, Func<bool> authorized)
@@ -49,7 +71,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 if (!authorized()) throw new InvalidOperationException("native-graph-authority-revoked");
                 var entry = new NetworkNativeEntityTopology { Id = entity.UniqueId, Kind = kind };
-                foreach (var part in (IList<EntityPart>)Parts.GetValue(entity.Parts)) entry.Parts.Add(part.GetType().FullName);
+                foreach (var part in (IList<EntityPart>)Parts.GetValue(entity.Parts))
+                {
+                    var partType = part.GetType().FullName;
+                    if (ShouldCapturePart(part)) entry.Parts.Add(partType);
+                }
                 foreach (var fact in entity.Facts.List)
                 {
                     if (fact.Blueprint == null) throw Invalid(entity.UniqueId, "fact-blueprint-missing");

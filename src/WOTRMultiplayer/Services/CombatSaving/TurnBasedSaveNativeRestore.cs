@@ -11,6 +11,15 @@ namespace WOTRMultiplayer.Services.CombatSaving
 {
     internal static class TurnBasedSaveNativeRestore
     {
+        internal static void RestoreSupplement(string json)
+        {
+            var game = Game.Instance;
+            if (game?.State == null || !CombatSavePauseLease.IsWorldPaused(game))
+                throw new InvalidOperationException("combat-save-supplement-restore-requires-pause");
+            GameInteraction.RealTimeNativeCheckpointLoadSource.ValidateJson(json, true);
+            CombatSaveNativeSupplement.Read(Newtonsoft.Json.Linq.JObject.Parse(json)).RestoreUnitActions();
+        }
+
         // Native ThreadedGameLoader ignores tbm.json. Rebind the saved turn to the
         // loaded entities without Start/Prepare (both reset mechanical state).
         internal static void Restore(string json, string expectedUnit, int expectedRound)

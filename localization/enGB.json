@@ -264,6 +264,10 @@
             },
             "miscellaneous": {
                 "title": "Miscellaneous",
+                "regroupDistantPlayersOnCombatStart": {
+                    "title": "Regroup distant players when combat starts",
+                    "tooltip": "When enabled, the host teleports player-controlled characters more than 30 metres away close to the party member who engaged the enemy. The host-authoritative combat initialization then synchronizes their positions for every player."
+                },
                 "hideServerAddress": {
                     "title": "Hide Server Address",
                     "tooltip": "Toggles whether the server IP address is shown in the UI. When enabled, the IP address is hidden to protect privacy"

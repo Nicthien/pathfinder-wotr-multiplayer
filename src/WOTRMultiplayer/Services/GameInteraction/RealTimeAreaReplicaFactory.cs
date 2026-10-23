@@ -55,7 +55,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 || string.IsNullOrWhiteSpace(state.Id) || !Same(blueprint.AssetGuid.ToString(), state.BlueprintId)
                 || state.Position == null || !Finite(state.Position.X) || !Finite(state.Position.Y) || !Finite(state.Position.Z)
                 || !Finite(state.Orientation)
-                || state.ContextChain == null || RealTimeBuffContextChain.Validate(state.ContextChain) != null
+                || state.ContextChain == null || state.ContextChain.Count == 0
+                || RealTimeBuffContextChain.Validate(state.ContextChain) != null
                 || !Same(state.ContextChain[0].BlueprintId, state.BlueprintId)
                 || !Same(context.m_CasterRef.Id, state.CasterUnitId)
                 || !Same(context.m_OwnerRef.Id, state.OwnerUnitId)

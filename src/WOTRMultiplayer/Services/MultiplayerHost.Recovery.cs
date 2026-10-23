@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Kingmaker;
+using Kingmaker.EntitySystem.Entities;
 using Microsoft.Extensions.Logging;
 using ProtoBuf;
 using WOTRMultiplayer.Entities.Combat.RealTime;
@@ -12,6 +14,7 @@ namespace WOTRMultiplayer.Services
     public partial class MultiplayerHost
     {
         private object _nativeRecoveryOwner;
+        internal string LastNativeRecoveryFailure { get; private set; }
         private bool _waitingForRealTimePeer;
         private readonly Dictionary<string, NotifyRealTimeAuthoritativeEvent> _activePresentationActions = new(StringComparer.Ordinal);
         private object _actionSession;
@@ -67,6 +70,7 @@ namespace WOTRMultiplayer.Services
             try
             {
                 if (!Owned()) return;
+                LastNativeRecoveryFailure = null;
                 state.RecoveryStatus = "rebuilding"; state.RecoveryFailure = null;
                 var manifest = await ReconstructCurrentNativeCheckpointAsync(Owned);
                 if (!Owned()) return;
@@ -77,6 +81,26 @@ namespace WOTRMultiplayer.Services
                     lock (ActionLock)
                     {
                         if (!Owned()) return;
+                        // A real native repair can follow an Owlcat world replacement, so
+                        // refresh the host-side encounter registry with entities from the
+                        // current world before Resume. Synthetic protocol tests replace only
+                        // the native archive boundary and deliberately have no Unity world.
+                        if (NativeCheckpointCapture == null)
+                        {
+                            var reference = _nativeTransfer?.Reference
+                                ?? throw new InvalidOperationException("native-recovery-reference-missing");
+                            var participants = RealTimeEncounterParticipants<UnitEntityData>.For(Game?.Combat)
+                                ?? throw new InvalidOperationException("native-recovery-encounter-missing");
+                            var nativeGame = Kingmaker.Game.Instance
+                                ?? throw new InvalidOperationException("native-recovery-world-missing");
+                            var nativeUnits = nativeGame.State.Units.All.ToDictionary(
+                                unit => unit.UniqueId, StringComparer.Ordinal);
+                            using (var rebound = participants.RebindCheckpoint(
+                                       reference.Units.Select(unit => unit?.Id),
+                                       id => nativeUnits.TryGetValue(id, out var unit) ? unit : null,
+                                       Owned))
+                                rebound.Commit();
+                        }
                         state.CanonicalStateHash = manifest.CanonicalStateHash;
                         state.RecoveryStatus = "committed";
                         _realTimeCriticalFaulted = false;
@@ -87,6 +111,7 @@ namespace WOTRMultiplayer.Services
             }
             catch (Exception error)
             {
+                LastNativeRecoveryFailure = error.ToString();
                 Logger.LogError(error, "Authoritative reconstruction stopped. Epoch={Epoch}; no unsafe fallback or save.", epoch);
                 if (Owned() && _nativeTransfer != null) await AbortCurrentNativeCheckpointAsync();
                 _mainThreadAccessor.Post(() =>
@@ -96,6 +121,8 @@ namespace WOTRMultiplayer.Services
                         if (!Owned()) return;
                         state.RecoveryStatus = "stopped";
                         state.RecoveryFailure = "native-reconstruction-not-committed";
+                        _nativeReconstructionRequiredForModeSwitch = false;
+                        _queuedCombatMode = null;
                         _realTimeRepairDeadline = default;
                         GameInteraction.SetPause(true);
                         Send(new NotifyRealTimeRepair { Epoch = state.Epoch, Stage = (int)RealTimeRepairStage.Stopped,

@@ -310,6 +310,14 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void PresentationClientNeverPublishesLegacyTurnBasedDeath()
+        {
+            Assert.That(MultiplayerActorBase.CanPublishLegacyTurnBasedDeath(NetworkConstants.HostPlayerId), Is.True);
+            Assert.That(MultiplayerActorBase.CanPublishLegacyTurnBasedDeath(42),
+                Is.EqualTo(!RealTimePresentationRuntime.Enabled));
+        }
+
+        [Test]
         public async Task TwoActors_UnappliedHostDeath_EntersProtectedFallback()
         {
             var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair(nativeRecovery: true);
@@ -744,7 +752,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(client.Game.RealTimeCombat.CanonicalStateHash, Is.EqualTo(settledHash));
             A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
                 A<NetworkCombatState>._, A<Func<bool>>._, A<bool>._))
-                .MustHaveHappenedTwiceExactly(); // One checkpoint for each legitimate mode commit.
+                .MustHaveHappened(RealTimePresentationRuntime.Enabled ? 3 : 2, Times.Exactly);
+            // Prototype: one per commit plus the post-initialization TB
+            // certificate. Stable build: one checkpoint per commit.
         }
 
         [Test]
@@ -951,7 +961,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 await PumpRecovery(queued, hostNetwork, clientNetwork, host, client);
                 AssertRecovered(host, client, clientCombat);
                 A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
-                    A<NetworkCombatState>._, A<Func<bool>>._, A<bool>._)).MustHaveHappenedOnceExactly();
+                    A<NetworkCombatState>._, A<Func<bool>>._, false)).MustHaveHappenedOnceExactly();
                 return;
             }
             Assert.That(calls, Is.EqualTo(1)); // Verify samples once; Apply+read is one guarded dispatch.
@@ -1011,6 +1021,10 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             var hostCombat = A.Fake<ICombatInteractionService>();
             var clientCombat = A.Fake<ICombatInteractionService>();
+            A.CallTo(() => clientCombat.WaitForTurnBasedModeStabilizationAsync())
+                .Returns(Task.CompletedTask);
+            A.CallTo(() => clientCombat.EnsureUnitsInCombatAsync(A<List<string>>._))
+                .Returns(new List<string>());
             A.CallTo(() => clientCombat.TryPauseAtProjectileSafePointAsync(
                     A<Func<bool>>._, A<Action>._))
                 .ReturnsLazily((Func<bool> canPause, Action pause) =>
@@ -1026,8 +1040,12 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
-            A.CallTo(() => hostCombat.GetRealTimeNativeReferenceState()).Returns(new NetworkCombatState
-            { NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology() });
+            A.CallTo(() => hostCombat.GetRealTimeNativeReferenceState()).ReturnsLazily(() =>
+            {
+                var reference = endState ?? new NetworkCombatState();
+                reference.NativeTopology ??= new Networking.Messages.Contracts.NetworkNativeTopology();
+                return reference;
+            });
             A.CallTo(() => hostCombat.GetRealTimeCombatStateAsync())
                 .ReturnsLazily(() => Task.FromResult(endState ?? new NetworkCombatState()));
             A.CallTo(() => hostCombat.ExecuteRealTimeCombatCommand(A<RealTimeCommandKind>._,
@@ -1052,7 +1070,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             var mainThread = A.Fake<IMainThreadAccessor>();
             A.CallTo(() => mainThread.Post(A<Action>._)).Invokes((Action action) =>
             {
-                if (mainThreadQueue != null) mainThreadQueue.Enqueue(action);
+                if (mainThreadQueue != null) { lock (mainThreadQueue) mainThreadQueue.Enqueue(action); }
                 else action();
             });
 

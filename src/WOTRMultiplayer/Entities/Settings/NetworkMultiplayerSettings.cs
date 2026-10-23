@@ -26,6 +26,8 @@ namespace WOTRMultiplayer.Entities.Settings
 
         public bool HideServerAddress { get; set; }
 
+        public bool RegroupDistantPlayersOnCombatStart { get; set; }
+
         public bool TrackConnectionHistory { get; set; }
 
         public int MaxConnectionHistoryRecords { get; set; }

@@ -70,6 +70,16 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void ExpectedIdentitySet_IsCaseInsensitiveAndRejectsMalformedAuthorityState()
+        {
+            var expected = new NetworkUnitBuffCollection { Buffs = { State("Effect-1"), State("effect-2") } };
+            var ids = RealTimeBuffState.ExpectedIds(expected);
+            Assert.That(ids.Contains("EFFECT-1"), Is.True);
+            expected.Buffs.Add(State("EFFECT-1"));
+            Assert.Throws<InvalidOperationException>(() => RealTimeBuffState.ExpectedIds(expected));
+        }
+
+        [Test]
         public void ConfirmedRankAndTimersApplyWithoutWorldBlueprintOwnerOrActivation()
         {
             // SetRank would consult the blueprint/reactivate components. None

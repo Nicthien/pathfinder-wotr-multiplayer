@@ -171,5 +171,33 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeCombatDiff.Summarize(host, client),
                 Is.EqualTo("duplicate-client-unit:hero,unit:hero:position"));
         }
+
+        [Test]
+        public void Summarize_ReportsExactVitalDifference()
+        {
+            static NetworkStatValues Stat(int value) => new()
+            {
+                BaseValue = value, ModifiedValue = value,
+                ModifiedValueRaw = value, PermanentValue = value
+            };
+            static NetworkUnit Unit(int hp, int group) => new()
+            {
+                Id = "enemy",
+                Descriptor = new NetworkUnitDescriptor
+                {
+                    Vitals = new NetworkUnitVitals
+                    {
+                        HitPoints = Stat(hp), TemporaryHitPoints = Stat(0), NonLethal = Stat(0),
+                        GroupCounterCaptured = true, GroupCombatCounter = group
+                    }
+                }
+            };
+
+            var result = RealTimeCombatDiff.Summarize(
+                new NetworkCombatState { Units = [Unit(12, 2)] },
+                new NetworkCombatState { Units = [Unit(0, 1)] });
+
+            Assert.That(result, Is.EqualTo("unit:enemy:vitals[hp,group=2/1]"));
+        }
     }
 }

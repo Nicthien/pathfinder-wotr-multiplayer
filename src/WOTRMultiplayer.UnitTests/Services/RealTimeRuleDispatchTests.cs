@@ -63,6 +63,24 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void AuthoritativePresentationStillSuppressesCallbacksWithoutReportingAFault()
+        {
+            var rule = new RuleAttackProbe();
+            var reports = 0;
+            Action<RuleAttackProbe> action = _ => throw new AssertionException("Presentation must not execute rules.");
+            using (RealTimePresentationRuntime.BeginAuthoritativePresentation())
+            {
+                Assert.That(RealTimeRuleDispatchPatches.BeforeCallback(rule, action, true, _ => reports++), Is.False);
+                Assert.That(RealTimePresentationRuntime.IsApplyingAuthoritativePresentation, Is.True);
+            }
+            Assert.That(reports, Is.Zero);
+            Assert.That(RealTimePresentationRuntime.IsApplyingAuthoritativePresentation, Is.False);
+            var holder = typeof(Rulebook).GetNestedType("EventHandler`1", BindingFlags.NonPublic)
+                .MakeGenericType(typeof(RuleAttackProbe));
+            Assert.DoesNotThrow(() => holder.GetMethod("CleanUp").Invoke(null, null));
+        }
+
+        [Test]
         public void MalformedCallback_FailsBeforeClaimingItWasSuppressed()
         {
             var reports = 0;

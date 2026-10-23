@@ -8,6 +8,7 @@ using Kingmaker.Designers.Mechanics.Facts;
 using Kingmaker.UnitLogic.FactLogic;
 using WOTRMultiplayer.HarmonyPatches.Combat;
 using WOTRMultiplayer.Services.CombatSaving;
+using WOTRMultiplayer.Entities.Units;
 
 namespace WOTRMultiplayer.UnitTests
 {
@@ -16,7 +17,9 @@ namespace WOTRMultiplayer.UnitTests
         internal static CombatSaveNativeSupplement Supplement() => new()
         {
             RoundNumber = 2, Initialized = true,
-            UnitActions = new() { new() { Unit = "unit", Move = 3, Standard = 6 } },
+            UnitActions = new() { new() { Unit = "unit", Move = 3, Standard = 6,
+                GroupCounterCaptured = true, GroupCombatCounter = 2,
+                Resources = new() { new NetworkAbilityResource { BlueprintId = "resource", Amount = 2, RetainCount = 1 } } } },
             UnitRelations = new() { new() { Unit = "unit", Engaged = new(), EngagedBy = new(),
                 DisengageTargets = System.Array.Empty<string>(), StartPosition = new float[] { 1, 2, 3 } } },
             UnitAi = new() { new() { Unit = "unit", Unreachable = System.Array.Empty<string>(), Hard = System.Array.Empty<string>(),
@@ -28,7 +31,10 @@ namespace WOTRMultiplayer.UnitTests
         {
             var native = new JObject(); var supplement = Supplement();
             supplement.AddTo(native);
-            Assert.That(CombatSaveNativeSupplement.Read(native).UnitActions.Single().Standard, Is.EqualTo(6));
+            var restored = CombatSaveNativeSupplement.Read(native).UnitActions.Single();
+            Assert.That(restored.Standard, Is.EqualTo(6));
+            Assert.That(restored.GroupCombatCounter, Is.EqualTo(2));
+            Assert.That(restored.Resources.Single().Amount, Is.EqualTo(2));
             native["MultiplayerControllerState"]["Mount"] = "missing-mount";
             Assert.Throws<System.IO.InvalidDataException>(() => CombatSaveNativeSupplement.Read(native));
             supplement.AddTo(native);
@@ -90,6 +96,21 @@ namespace WOTRMultiplayer.UnitTests
         }
 
         [Test]
+        public void FinalSupplementRestoreReappliesMovementLimitAfterNativeLoaderDefaults()
+        {
+            var controller = Kingmaker.EntitySystem.Persistence.JsonUtility.OwlcatJsonConvert
+                .DeserializeObject<CombatController>("{\"m_CurrentTurn\":{}}");
+            var supplement = Supplement();
+            supplement.MovementLimit = (TurnController.MovementLimit)1;
+            controller.CurrentTurn.CurrentMovementLimit = (TurnController.MovementLimit)0;
+
+            supplement.Restore(controller, controller.CurrentTurn);
+
+            Assert.That(controller.CurrentTurn.CurrentMovementLimit,
+                Is.EqualTo(supplement.MovementLimit));
+        }
+
+        [Test]
         public void DeserializedNavmeshUpdateShellsAreClearedBeforeFirstRestoredTurnChange()
         {
             var saved = Kingmaker.EntitySystem.Persistence.JsonUtility.OwlcatJsonConvert
@@ -111,7 +132,8 @@ namespace WOTRMultiplayer.UnitTests
         public void MotionBaselineSurvivesSupplementSerializationAndRejectsNonFiniteValues()
         {
             var actions = new CombatSaveUnitActions { Unit = "saved-unit", PreviousPositionX = -51.9744f,
-                PreviousPositionY = 40.20021f, PreviousPositionZ = -33.92917f, Move = 3, Standard = 6 };
+                PreviousPositionY = 40.20021f, PreviousPositionZ = -33.92917f, Move = 3, Standard = 6,
+                Resources = new() { new NetworkAbilityResource { BlueprintId = "resource", Amount = 0, RetainCount = 1 } } };
             var restored = JObject.FromObject(actions).ToObject<CombatSaveUnitActions>();
             Assert.That(restored.PreviousPositionX, Is.EqualTo(actions.PreviousPositionX));
             Assert.That(restored.PreviousPositionY, Is.EqualTo(actions.PreviousPositionY));
@@ -121,6 +143,9 @@ namespace WOTRMultiplayer.UnitTests
             Assert.That(restored.IsValid(), Is.True);
             var incomplete = JObject.FromObject(actions);
             incomplete.Remove(nameof(CombatSaveUnitActions.PreviousPositionX));
+            Assert.Throws<Newtonsoft.Json.JsonSerializationException>(() => incomplete.ToObject<CombatSaveUnitActions>());
+            incomplete = JObject.FromObject(actions);
+            incomplete.Remove(nameof(CombatSaveUnitActions.Resources));
             Assert.Throws<Newtonsoft.Json.JsonSerializationException>(() => incomplete.ToObject<CombatSaveUnitActions>());
             restored.PreviousPositionX = float.NaN;
             Assert.That(restored.IsValid(), Is.False);
@@ -144,7 +169,7 @@ namespace WOTRMultiplayer.UnitTests
             var actions = new CombatSaveUnitActions
             {
                 Unit = "unit", PreviousPositionX = 29.05f,
-                PreviousPositionY = 35.12f, PreviousPositionZ = -63.69f
+                PreviousPositionY = 35.12f, PreviousPositionZ = -63.69f, Resources = new()
             };
 
             Assert.That(actions.SavedIdlePosition(),

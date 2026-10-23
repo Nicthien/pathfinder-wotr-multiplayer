@@ -169,6 +169,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 throw new InvalidOperationException("native-area-retirement-ownership-changed");
         }
         public void Commit() { ValidateForCommit(); _committed = true; }
+        internal void ResolveAfterVerifiedNativeGraphRebuild()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(RealTimeNativeAreaRetirement));
+            if (!_committed) throw new InvalidOperationException("native-area-retirement-not-committed");
+            // A caller may resolve this external obligation only after the
+            // complete replacement graph has passed its authoritative topology
+            // and temporal verification. Until then the retired area's native
+            // subscribers remain deliberately inert and saving stays blocked.
+            ValidateForCommit();
+            RealTimeAreaReplicaFactory.ReleaseNativeInert(_area, _marker);
+            RealTimeNativeGraphRepair.Remove(_world, _marker);
+        }
         internal void KeepSuspendedAfterRollbackFailure() => _rollbackUnsafe = true;
         public void Dispose()
         {

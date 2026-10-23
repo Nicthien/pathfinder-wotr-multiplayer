@@ -18,6 +18,12 @@ namespace WOTRMultiplayer.Entities.Combat
         public Networking.Messages.Contracts.NetworkNativeTopology NativeTopology { get; set; }
         public Networking.Messages.Contracts.NetworkAcceptedOrderReference AcceptedOrderReference { get; set; }
 
+        // Native checkpoint only: minimal authoritative buff inventories for
+        // every unit in the loaded world, including non-combatants. These are
+        // reconstruction material, not encounter participants, and therefore
+        // are deliberately excluded from the regular RT temporal hash.
+        public List<NetworkUnit> NativeUnits { get; set; } = [];
+
         public List<RealTime.NetworkProjectileState> Projectiles { get; set; } = [];
     }
 }

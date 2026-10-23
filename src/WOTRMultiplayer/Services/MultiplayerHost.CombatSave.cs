@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using ProtoBuf;
 using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Networking.Messages.Game;
 using WOTRMultiplayer.Services.CombatSaving;
@@ -68,7 +69,9 @@ namespace WOTRMultiplayer.Services
             private readonly NetworkGame _session;
             private NotifyCombatSave _header;
             private readonly HashSet<long> _peers = new();
+            private readonly HashSet<long> _aligned = new();
             private readonly Dictionary<long, CombatSaveAcknowledgement> _acks = new();
+            private TaskCompletionSource<bool> _alignmentReady;
             private TaskCompletionSource<IReadOnlyCollection<CombatSaveAcknowledgement>> _ready;
             private CombatSavePauseLease _pause;
             private bool _finished;
@@ -86,7 +89,10 @@ namespace WOTRMultiplayer.Services
             {
                 _header = new NotifyCombatSave { SessionId = _session.Id, SessionSeed = _session.SessionSeed,
                     LoadedSaveSeed = _session.LoadedSaveSeed, Epoch = _session.RealTimeCombat.Epoch,
-                    Operation = Guid.NewGuid().ToString("N"), Stage = "Prepare" };
+                    Operation = Guid.NewGuid().ToString("N"), Stage = "Prepare",
+                    Round = _session.Combat.Round, UnitId = _session.Combat.Turn.UnitId,
+                    TurnSeed = _session.Combat.Turn.Seed
+                        ?? throw new InvalidOperationException("combat-save-turn-seed-missing") };
                 _peers.UnionWith(ConnectedPeers);
                 _host.Logger.LogInformation("[CombatSave] Preparing. Operation={Operation}, Round={Round}, Unit={Unit}",
                     _header.Operation, _session.Combat.Round, _session.Combat.Turn.UnitId);
@@ -154,6 +160,22 @@ namespace WOTRMultiplayer.Services
             {
                 await OnMainThreadAsync(() =>
                 {
+                    _alignmentReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _header.State = _host.Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(
+                        _host.CombatInteraction.GetRealTimeCombatState());
+                    _header.NativeTurnState = TurnBasedSaveNativeState.Capture();
+                    var alignment = Serializer.DeepClone(_header); alignment.Stage = "Align";
+                    foreach (var peer in _peers) _host.Send(peer, alignment);
+                    if (_peers.Count == 0) _alignmentReady.TrySetResult(true);
+                    return true;
+                });
+                using (cancellation.Register(() => _alignmentReady.TrySetCanceled()))
+                    await _alignmentReady.Task;
+                cancellation.ThrowIfCancellationRequested();
+                await OnMainThreadAsync(() =>
+                {
+                    if (!IsCurrent(identity) || !_peers.SetEquals(ConnectedPeers))
+                        throw new CombatSaveRefusedException("session-changed");
                     _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
                     foreach (var peer in _peers) _host.Send(peer, _header);
                     if (_peers.Count == 0) _ready.TrySetResult(Array.Empty<CombatSaveAcknowledgement>());
@@ -164,8 +186,25 @@ namespace WOTRMultiplayer.Services
             internal void Accept(long peer, ClientCombatSaveAck frame)
             {
                 if (_finished || _header == null || !_peers.Contains(peer) || _host.GetPlayer(peer) == null
-                    || !_host.IsCurrentCombatSave(frame.Identity) || frame.Identity.Stage != "Prepare"
-                    || frame.Identity.Operation != _header.Operation || _ready == null || _ready.Task.IsCompleted) return;
+                    || !_host.IsCurrentCombatSave(frame.Identity)
+                    || frame.Identity.Operation != _header.Operation) return;
+                if (frame.Identity.Stage == "Align")
+                {
+                    if (_alignmentReady == null || _alignmentReady.Task.IsCompleted
+                        || frame.Identity.Round != _header.Round || frame.Identity.UnitId != _header.UnitId
+                        || frame.Identity.TurnSeed != _header.TurnSeed) return;
+                    if (frame.Refusal != null)
+                    {
+                        _host.Logger.LogInformation("[CombatSave] Peer refused turn alignment. Peer={Peer}, Reason={Reason}", peer, frame.Refusal);
+                        _alignmentReady.TrySetException(new CombatSaveRefusedException(frame.Refusal)); return;
+                    }
+                    if (!_aligned.Add(peer)) return;
+                    _host.Logger.LogInformation("[CombatSave] Peer aligned to authoritative turn. Operation={Operation}, Peer={Peer}, Round={Round}, Unit={Unit}",
+                        _header.Operation, peer, _header.Round, _header.UnitId);
+                    if (_aligned.Count == _peers.Count) _alignmentReady.TrySetResult(true);
+                    return;
+                }
+                if (frame.Identity.Stage != "Prepare" || _ready == null || _ready.Task.IsCompleted) return;
                 if (frame.Refusal != null)
                 {
                     _host.Logger.LogInformation("[CombatSave] Peer refused preparation. Peer={Peer}, Reason={Reason}", peer, frame.Refusal);
@@ -177,6 +216,33 @@ namespace WOTRMultiplayer.Services
                 _host.Logger.LogInformation("[CombatSave] Peer prepared. Operation={Operation}, Peer={Peer}, Digest={Digest}", _header.Operation, peer, frame.Digest);
                 if (_acks.Count == _peers.Count) _ready.TrySetResult(_acks.Values.ToArray());
             }
+
+            internal bool ConfirmTurnAlignment(long peer, ClientCombatTurnStarted started)
+            {
+                if (_finished || _header == null || _alignmentReady == null || _alignmentReady.Task.IsCompleted
+                    || !_peers.Contains(peer) || _host.GetPlayer(peer) == null) return false;
+                if (started == null || started.Round != _header.Round
+                    || !string.Equals(started.UnitId, _header.UnitId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _host.Logger.LogWarning("[CombatSave] Peer announced the wrong turn during alignment. Peer={Peer}, Round={Round}, Unit={Unit}",
+                        peer, started?.Round, started?.UnitId);
+                    _host.Send(peer, _host.TurnRecoveryMessage(_header.UnitId));
+                    return true;
+                }
+                if (!_host.IsCurrentCombatSave(_header) || _host.Game.Combat?.Stage != Entities.Combat.NetworkCombatStage.Running
+                    || _host.Game.Combat.Round != _header.Round || _host.Game.Combat.Turn?.Stage != Entities.Combat.NetworkCombatTurnStage.Playing
+                    || !string.Equals(_host.Game.Combat.Turn.UnitId, _header.UnitId, StringComparison.OrdinalIgnoreCase)
+                    || _host.Game.Combat.Turn.Seed != _header.TurnSeed)
+                {
+                    _alignmentReady.TrySetException(new CombatSaveRefusedException("host-turn-changed"));
+                    return true;
+                }
+                _host.Send(peer, new NotifyCombatTurnStarted
+                {
+                    Round = _header.Round, UnitId = _header.UnitId, Seed = _header.TurnSeed
+                });
+                return true;
+            }
             public async Task<string> WriteNewSaveAsync(CombatSaveIdentity identity, string digest, CancellationToken cancellation)
             {
                 var metadata = await OnMainThreadAsync(() =>
@@ -185,6 +251,13 @@ namespace WOTRMultiplayer.Services
                     var generator = _host.ValueGenerator as DeterministicValueGenerator
                         ?? throw new NotSupportedException("combat-save-generator-unsupported");
                     var content = _host.GetInstalledContent();
+                    NetworkCombatState mechanicalState;
+                    using (var projection = new CombatSaveDigestScope())
+                        // Persist the native combat graph which the archive will
+                        // actually reload.  The broader live projection also
+                        // contains dormant scene units that Owlcat intentionally
+                        // does not instantiate during a same-area combat load.
+                        mechanicalState = _host.CombatInteraction.GetRealTimeNativeReferenceState();
                     return new CombatSaveManifest
                     {
                         Protocol = NetworkRealTimeCombatState.ProtocolVersion, BuildFingerprint = content.RealTimeBuildFingerprint,
@@ -195,7 +268,9 @@ namespace WOTRMultiplayer.Services
                         Owners = _session.Characters.Where(c => c.Owner != null).ToDictionary(c => c.UnitId, c => c.Owner.Id),
                         OwnerIsHost = _session.Characters.Where(c => c.Owner != null).ToDictionary(c => c.UnitId, c => c.Owner.IsHost),
                         NetworkCombatJson = JsonConvert.SerializeObject(_session.Combat),
+                        MechanicalState = mechanicalState,
                         NativeSupplement = CombatSaveNativeSupplement.Capture(Kingmaker.Game.Instance.TurnBasedCombatController),
+                        RecoveryCheckpoint = _recovering,
                         Seeds = _host.CaptureCombatSaveSeeds()
                     };
                 });
@@ -250,7 +325,12 @@ namespace WOTRMultiplayer.Services
                 _host._turnEndSynchronizationFailed = true;
                 CombatSaveLoadState.Owner = _host;
                 CombatSaveLoadState.BindLoadedWorld(Kingmaker.Game.Instance.State);
-                _host.Logger.LogError("[CombatSave] Divergence detected; no save written. Operation={Operation}", _header.Operation);
+                var current = CaptureDigest();
+                _host.Logger.LogError(
+                    "[CombatSave] Divergence detected; no save written. Operation={Operation}, HostDigest={HostDigest}, CurrentDigest={CurrentDigest}, PeerDigests={PeerDigests}",
+                    _header.Operation, _initialDigest, current,
+                    string.Join(",", _acks.OrderBy(pair => pair.Key)
+                        .Select(pair => pair.Key + ":" + pair.Value.Digest)));
             }
             public void Finished(CombatSaveIdentity identity, string result, string path)
             {

@@ -39,7 +39,6 @@ namespace WOTRMultiplayer.UnitTests.Services
         [TestCase("metamagic")]
         [TestCase("opposition")]
         [TestCase("level")]
-        [TestCase("index")]
         [TestCase("type")]
         public void ChangedSlotIdentity_IsRejectedBeforeApplyingCounts(string changed)
         {
@@ -51,11 +50,54 @@ namespace WOTRMultiplayer.UnitTests.Services
                 case "metamagic": slot.Metamagic = 1; break;
                 case "opposition": slot.IsOpposition = true; break;
                 case "level": slot.Level++; break;
-                case "index": slot.Index++; break;
                 case "type": slot.Type++; break;
             }
             Assert.That(RealTimeSpellbookState.Validate([Book()], [client]),
                 Is.EqualTo("spellbook-slot-identity:wizard"));
+        }
+
+        [TestCase("cost")]
+        [TestCase("heighten")]
+        public void ChangedMetamagicShape_IsRejectedBeforeApplyingCounts(string changed)
+        {
+            var host = Book();
+            host.PreparedSlots[0].Metamagic = 8;
+            host.PreparedSlots[0].MetamagicSpellLevelCost = 1;
+            var client = Book();
+            client.PreparedSlots[0].Metamagic = 8;
+            client.PreparedSlots[0].MetamagicSpellLevelCost = changed == "cost" ? 2 : 1;
+            client.PreparedSlots[0].MetamagicHeightenLevel = changed == "heighten" ? 1 : 0;
+            Assert.That(RealTimeSpellbookState.Validate([host], [client]),
+                Is.EqualTo("spellbook-slot-identity:wizard"));
+        }
+
+        [Test]
+        public void SlotOrderingIndex_IsNotTreatedAsSpellIdentity()
+        {
+            var host = Book();
+            host.PreparedSlots.Add(new NetworkPreparedSpellState
+            {
+                Level = 1, Index = 1, Type = 0, SpellBlueprintId = "shield", Available = false
+            });
+            var client = Book();
+            client.PreparedSlots[0].Index = 1;
+            client.PreparedSlots.Add(new NetworkPreparedSpellState
+            {
+                Level = 1, Index = 0, Type = 0, SpellBlueprintId = "shield", Available = true
+            });
+            Assert.That(RealTimeSpellbookState.Validate([host], [client]), Is.Null);
+        }
+
+        [Test]
+        public void EmptyPreparedCapacitySlots_AreNotCombatState()
+        {
+            var client = Book();
+            client.PreparedSlots.Add(new NetworkPreparedSpellState
+            {
+                Level = 4, Index = 12, Type = 0, SpellBlueprintId = null, Available = false
+            });
+
+            Assert.That(RealTimeSpellbookState.Validate([Book()], [client]), Is.Null);
         }
 
         [Test]
@@ -68,7 +110,8 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(RealTimeSpellbookState.Validate([Book()], [client]), Is.EqualTo("spellbook-levels:wizard"));
             client = Book();
             client.PreparedSlots.Clear();
-            Assert.That(RealTimeSpellbookState.Validate([Book()], [client]), Is.EqualTo("spellbook-slots:wizard"));
+            Assert.That(RealTimeSpellbookState.Validate([Book()], [client]),
+                Does.StartWith("spellbook-slots:wizard:expected=1;actual=0"));
         }
 
         [Test]
@@ -92,7 +135,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             var mapper = new MapperConfiguration(configuration =>
                 configuration.AddProfile<NetworkMessagesProfile>()).CreateMapper();
             var source = new NetworkUnitDescriptor { SpellbooksCaptured = true };
-            if (populated) source.Spellbooks.Add(Book());
+            if (populated)
+            {
+                var book = Book();
+                book.PreparedSlots[0].Metamagic = 8;
+                book.PreparedSlots[0].MetamagicSpellLevelCost = 1;
+                book.PreparedSlots[0].MetamagicHeightenLevel = 2;
+                source.Spellbooks.Add(book);
+            }
             var restored = mapper.Map<NetworkUnitDescriptor>(ProtoBuf.Serializer.DeepClone(
                 mapper.Map<Networking.Messages.Contracts.NetworkUnitDescriptor>(source)));
             Assert.That(restored.SpellbooksCaptured, Is.True);
@@ -101,6 +151,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(restored.Spellbooks[0].SpontaneousSlots, Is.EqualTo(new[] { 0, 3, 2 }));
             Assert.That(restored.Spellbooks[0].PreparedSlots[0].SpellBlueprintId, Is.EqualTo("magic-missile"));
             Assert.That(restored.Spellbooks[0].PreparedSlots[0].Available, Is.True);
+            Assert.That(restored.Spellbooks[0].PreparedSlots[0].Metamagic, Is.EqualTo(8));
+            Assert.That(restored.Spellbooks[0].PreparedSlots[0].MetamagicSpellLevelCost, Is.EqualTo(1));
+            Assert.That(restored.Spellbooks[0].PreparedSlots[0].MetamagicHeightenLevel, Is.EqualTo(2));
         }
 
         [Test]
@@ -156,6 +209,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             bookType.GetField("m_SpontaneousSlots", flags).SetValue(book, counts);
             bookType.GetField("m_MemorizedSpells", flags).SetValue(book, slots);
             var state = Book();
+            state.PreparedSlots[0].SpellBlueprintId = null;
             state.PreparedSlots[0].Available = available;
             var apply = typeof(RealTimeSpellbookReplication).GetMethod("ApplyBookAvailability",
                 BindingFlags.NonPublic | BindingFlags.Static);

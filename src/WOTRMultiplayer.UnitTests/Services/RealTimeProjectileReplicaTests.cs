@@ -227,6 +227,34 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void UnsupportedPresentation_CanBeOmittedWithoutLosingAuthoritativeProjectileState()
+        {
+            var replica = new RealTimeProjectileReplica(state => new RealTimeOmittedProjectileVisual(state));
+            replica.Apply(State());
+            replica.Apply(State(x: 8, hit: true));
+
+            Assert.That(replica.Snapshot().Single().Position.X, Is.EqualTo(8));
+            Assert.That(replica.Snapshot().Single().IsHit, Is.True);
+            Assert.Throws<InvalidOperationException>(() => replica.Apply(State(x: 9)));
+            Assert.That(replica.Snapshot().Single().IsHit, Is.True);
+            Assert.DoesNotThrow(() => replica.Clear());
+        }
+
+        [Test]
+        public void OnlyKnownPresentationCapabilityFailures_AreSafeToOmit()
+        {
+            Assert.That(RealTimeProjectileVisual.CanSafelyOmit(
+                new InvalidOperationException("projectile-blueprint-missing:id")), Is.True);
+            Assert.That(RealTimeProjectileVisual.CanSafelyOmit(
+                new InvalidOperationException("projectile-prefab-missing:id")), Is.True);
+            Assert.That(RealTimeProjectileVisual.CanSafelyOmit(
+                new InvalidOperationException("projectile-prefab-unverified-scripts:id")), Is.True);
+            Assert.That(RealTimeProjectileVisual.CanSafelyOmit(
+                new InvalidOperationException("invalid-projectile-state")), Is.False);
+            Assert.That(RealTimeProjectileVisual.CanSafelyOmit(new Exception("unexpected")), Is.False);
+        }
+
+        [Test]
         public void ReferenceBaselineAndDelayedImpact_ResumeAtFirstUnincludedEvent()
         {
             var mapper = new MapperConfiguration(config => config.AddProfile<NetworkMessagesProfile>()).CreateMapper();

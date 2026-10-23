@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services.Random;
 
@@ -15,7 +16,7 @@ namespace WOTRMultiplayer.Services.CombatSaving
 {
     internal sealed class CombatSaveManifest
     {
-        public int Schema { get; set; } = 1;
+        public int Schema { get; set; } = 2;
         public int Protocol { get; set; }
         public string BuildFingerprint { get; set; }
         public string GameVersion { get; set; }
@@ -27,7 +28,9 @@ namespace WOTRMultiplayer.Services.CombatSaving
         public Dictionary<string, long> Owners { get; set; } = new();
         public Dictionary<string, bool> OwnerIsHost { get; set; } = new();
         public string NetworkCombatJson { get; set; }
+        public NetworkCombatState MechanicalState { get; set; }
         public CombatSaveNativeSupplement NativeSupplement { get; set; }
+        public bool RecoveryCheckpoint { get; set; }
         public Dictionary<string, int> Seeds { get; set; } = new();
         public DeterministicGeneratorCheckpoint Generators { get; set; }
         public Dictionary<string, string> Files { get; set; } = new();
@@ -55,13 +58,21 @@ namespace WOTRMultiplayer.Services.CombatSaving
 
         private static void ValidateManifest(CombatSaveManifest manifest)
         {
-            if (manifest?.Schema != 1 || manifest.Protocol < 1 || manifest.Round < 0
+            if (manifest == null || manifest.Schema != 1 && manifest.Schema != 2
+                || manifest.Protocol < 1 || manifest.Round < 0
                 || string.IsNullOrWhiteSpace(manifest.Campaign) || string.IsNullOrWhiteSpace(manifest.Unit)
                 || string.IsNullOrWhiteSpace(manifest.GameVersion) || !IsHash(manifest.BuildFingerprint)
                 || !IsHash(manifest.CanonicalDigest) || !IsHash(manifest.RestoreDigest)
                 || manifest.Generators?.Version != 1
-                || manifest.Owners == null || manifest.Seeds == null || manifest.Files == null)
+                || manifest.Schema == 2 && (manifest.MechanicalState?.Units == null
+                    || manifest.MechanicalState.AreaEffects == null || manifest.NativeSupplement == null)
+                || manifest.Owners == null
+                || manifest.Seeds == null || manifest.Files == null)
                 throw new InvalidDataException("combat-save-metadata-invalid");
+            if (manifest.Schema == 2)
+                try { _ = CombatSaveRestoreHasher.Compute(manifest.MechanicalState); }
+                catch (Exception error)
+                { throw new InvalidDataException("combat-save-mechanical-state-invalid", error); }
         }
 
         private static bool IsHash(string value) => value?.Length == 64 && value.All(Uri.IsHexDigit);

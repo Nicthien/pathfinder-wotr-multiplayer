@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using WOTRMultiplayer.Entities.Combat;
@@ -19,6 +20,9 @@ namespace WOTRMultiplayer.Services
         private bool _combatSaveGameLoaded;
         private bool _combatSaveSupplementFinalized;
         private DateTime _combatSaveSupplementFinalizedAt;
+        private Task<NetworkCombatState> _combatSaveMechanicalRestore;
+        private CombatSaveManifest _combatSaveMechanicalManifest;
+        private object _combatSaveMechanicalWorld;
 
         private protected bool IsCombatSaveRestoreReady => PendingCombatSave != null
             && _combatSaveGameLoaded
@@ -41,6 +45,9 @@ namespace WOTRMultiplayer.Services
             _combatSaveGameLoaded = false;
             _combatSaveSupplementFinalized = false;
             _combatSaveSupplementFinalizedAt = DateTime.MinValue;
+            _combatSaveMechanicalRestore = null;
+            _combatSaveMechanicalManifest = null;
+            _combatSaveMechanicalWorld = null;
             if (!File.Exists(path) || !CombatSaveArchive.ContainsManifest(path))
             { PendingCombatSave = null; _pendingCombatSaveTurn = null; _combatSaveSemanticSeeds = null;
                 if (ReferenceEquals(CombatSaveLoadState.Owner, this)) CombatSaveLoadState.Owner = null; return; }
@@ -73,12 +80,56 @@ namespace WOTRMultiplayer.Services
                     TurnBased.Controllers.CombatController.IsInTurnBasedCombat())
                 || !TurnBasedSaveNativeState.IsRestoreCaptureReady(PendingCombatSave.Unit))
                 return false;
-            CombatSaveNativeSupplement.Read(Newtonsoft.Json.Linq.JObject.Parse(_pendingCombatSaveTurn))
-                .RestoreUnitActions(restoreSavedPositions: true);
+            var manifest = PendingCombatSave;
+            var world = Kingmaker.Game.Instance.State;
+            if (manifest.MechanicalState == null)
+            {
+                RestoreFinalCombatSaveSupplement();
+                _combatSaveSupplementFinalized = true;
+                _combatSaveSupplementFinalizedAt = DateTime.UtcNow;
+                Logger.LogInformation("[CombatSave] Legacy post-load native finalization settled under the restoration barrier.");
+                return true;
+            }
+            if (_combatSaveMechanicalRestore == null)
+            {
+                RestoreFinalCombatSaveSupplement();
+                _combatSaveMechanicalManifest = manifest;
+                _combatSaveMechanicalWorld = world;
+                bool Current() => ReferenceEquals(PendingCombatSave, manifest)
+                    && ReferenceEquals(Kingmaker.Game.Instance?.State, world)
+                    && CombatSaveLoadState.HoldsWorld(world);
+                _combatSaveMechanicalRestore = CombatInteraction.TryApplyCombatSaveStateAsync(
+                    manifest.MechanicalState, Current);
+                Logger.LogInformation("[CombatSave] Restoring saved combat mechanics after native load.");
+                return false;
+            }
+            if (!_combatSaveMechanicalRestore.IsCompleted) return false;
+            if (!ReferenceEquals(_combatSaveMechanicalManifest, manifest)
+                || !ReferenceEquals(_combatSaveMechanicalWorld, world)
+                || !CombatSaveLoadState.HoldsWorld(world)
+                || _combatSaveMechanicalRestore.GetAwaiter().GetResult() == null)
+                throw new InvalidOperationException("combat-save-mechanical-restore-obsolete");
+            RestoreFinalCombatSaveSupplement();
             _combatSaveSupplementFinalized = true;
             _combatSaveSupplementFinalizedAt = DateTime.UtcNow;
             Logger.LogInformation("[CombatSave] Post-load native finalization settled; omitted combat fields reapplied under the restoration barrier.");
             return true;
+        }
+
+        private void RestoreFinalCombatSaveSupplement()
+        {
+            var supplement = CombatSaveNativeSupplement.Read(
+                Newtonsoft.Json.Linq.JObject.Parse(_pendingCombatSaveTurn));
+            var controller = Kingmaker.Game.Instance.TurnBasedCombatController;
+            var turn = controller?.CurrentTurn;
+            if (turn?.Rider?.UniqueId != PendingCombatSave?.Unit)
+                throw new InvalidDataException("combat-save-final-turn-mismatch");
+            // Owlcat continues assigning controller defaults after OnAreaLoaded.
+            // Reapply both the controller/turn fields and the unit supplement at
+            // the final idle boundary; restoring unit actions alone loses values
+            // such as CurrentMovementLimit on a subsequent save/load cycle.
+            supplement.Restore(controller, turn);
+            supplement.RestoreUnitActions(restoreSavedPositions: true);
         }
 
         private protected bool RestoreCombatSaveAfterAreaLoaded()
@@ -157,6 +208,8 @@ namespace WOTRMultiplayer.Services
             PendingCombatSave = null; _pendingCombatSaveTurn = null;
             _combatSaveGameLoaded = false; _combatSaveSupplementFinalized = false;
             _combatSaveSupplementFinalizedAt = DateTime.MinValue;
+            _combatSaveMechanicalRestore = null; _combatSaveMechanicalManifest = null;
+            _combatSaveMechanicalWorld = null;
             Game.ForcedPause = null;
             GameInteraction.SetPause(false); // Turn-based mode remains deterministic; release the load hold without consuming End Turn.
             Logger.LogInformation("[CombatSave] Both worlds verified; restoration barrier released and combat resumed.");

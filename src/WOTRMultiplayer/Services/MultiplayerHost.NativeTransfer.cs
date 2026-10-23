@@ -75,6 +75,7 @@ namespace WOTRMultiplayer.Services
                 return IsCurrentNativeTransfer(owner) ? RealTimeNativeCheckpointLimits.Copy(owner.Manifest) : null;
         }
         private NativeTransfer _nativeTransfer;
+        internal string LastNativeTransferFailure { get; private set; }
 
         private async Task<bool> CommitCurrentNativeCheckpointAsync(NotifyRealTimeNativeCheckpoint manifest, Func<bool> barrierOwned)
         {
@@ -169,6 +170,7 @@ namespace WOTRMultiplayer.Services
         internal async Task<NotifyRealTimeNativeCheckpoint> TransferCurrentNativeCheckpointAsync(Func<bool> barrierOwned)
         {
             if (barrierOwned == null) throw new ArgumentNullException(nameof(barrierOwned));
+            LastNativeTransferFailure = null;
             NativeTransfer transfer = null;
             var started = new TaskCompletionSource<NativeTransfer>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
@@ -227,7 +229,20 @@ namespace WOTRMultiplayer.Services
             try
             {
                 transfer = await started.Task;
-                if (!await transfer.Prepared.Task) return null;
+                if (!await transfer.Prepared.Task)
+                {
+                    LastNativeTransferFailure = "native-transfer-prepare-not-acknowledged";
+                    return null;
+                }
+                // The peer's Prepare receipt is asynchronous. A native command
+                // accepted before the repair barrier can enter its running phase
+                // during that network round-trip even though the world was safe
+                // when Prepare was published. Re-check and, when necessary,
+                // briefly resume only that already accepted work before capture.
+                if (!await PauseAtRealTimeRepairSafePointAsync(
+                        transfer.Session, transfer.State, transfer.Prepare.Epoch,
+                        () => IsCurrentNativeTransfer(transfer)))
+                    throw new InvalidOperationException("native-transfer-post-prepare-safe-point-unavailable");
                 bool Authorized() { lock (ActionLock) return IsCurrentNativeTransfer(transfer); }
                 using var source = await CaptureCurrentNativeCheckpointAsync(transfer.Prepare.CheckpointId, Authorized);
                 var archive = await Task.Run(() => RealTimeNativeCheckpointCodec.Encode(source));
@@ -243,9 +258,13 @@ namespace WOTRMultiplayer.Services
                             RealTimeAcceptedOrderLedger.RequireUnchanged(transfer.State, transfer.Reference.AcceptedOrderReference,
                                 transfer.Session.Id, transfer.Session.LoadedSaveSeed);
                             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current });
-                            if (hash != transfer.Prepare.CanonicalStateHash || RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current) != null
-                                || RealTimeNativeTopologyComparison.Difference(transfer.Reference.NativeTopology, current.NativeTopology) != null)
-                                throw new InvalidOperationException("native-transfer-host-changed-after-prepare");
+                            var temporalDifference = RealTimeCombatTemporalDiff.Summarize(transfer.Reference, current);
+                            var topologyDifference = RealTimeNativeTopologyComparison.Difference(
+                                transfer.Reference.NativeTopology, current.NativeTopology);
+                            if (hash != transfer.Prepare.CanonicalStateHash || temporalDifference != null || topologyDifference != null)
+                                throw new InvalidOperationException("native-transfer-host-changed-after-prepare:"
+                                    + $"hash={transfer.Prepare.CanonicalStateHash:X16}->{hash:X16};"
+                                    + $"temporal={temporalDifference ?? "none"};topology={topologyDifference ?? "none"}");
                             var manifest = RealTimeNativeCheckpointLimits.Copy(transfer.Prepare);
                             manifest.Stage = (int)RealTimeNativeCheckpointStage.Manifest;
                             manifest.ArchiveBytes = archive.Length; manifest.ArchiveHash = RealTimeNativeCheckpointLimits.Hash(archive);
@@ -259,11 +278,16 @@ namespace WOTRMultiplayer.Services
                         catch (Exception error) { installed.TrySetException(error); }
                     }
                 });
-                if (!await installed.Task || !await transfer.Transferred.Task) return null;
+                if (!await installed.Task || !await transfer.Transferred.Task)
+                {
+                    LastNativeTransferFailure = "native-transfer-archive-not-installed-or-received";
+                    return null;
+                }
                 return RealTimeNativeCheckpointLimits.Copy(transfer.Manifest);
             }
             catch (Exception error)
             {
+                LastNativeTransferFailure = error.ToString();
                 Logger.LogError(error, "Native checkpoint transfer failed before mechanical reconstruction.");
                 _mainThreadAccessor.Post(() => { lock (ActionLock) FailNativeCheckpointTransfer(transfer, "native-transfer-capture-or-send-failed"); });
                 return null;
@@ -389,6 +413,11 @@ namespace WOTRMultiplayer.Services
         {
             if (transfer == null || !ReferenceEquals(_nativeTransfer, transfer)) return;
             if (transfer.Abort != null) return; // Never renew a lost abort's retry budget.
+            if (ReferenceEquals(Game?.RealTimeCombat, transfer.State))
+            {
+                transfer.State.RecoveryStatus = "stopped";
+                transfer.State.RecoveryFailure = reason;
+            }
             transfer.Sender?.Dispose(); transfer.Sender = null;
             transfer.Reference = null; transfer.ReferenceBytes = null; transfer.ReferenceHash = null;
             transfer.Prepared.TrySetResult(false); transfer.Transferred.TrySetResult(false);

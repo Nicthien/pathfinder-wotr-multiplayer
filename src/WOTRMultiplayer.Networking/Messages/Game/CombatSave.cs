@@ -1,4 +1,5 @@
 using ProtoBuf;
+using WOTRMultiplayer.Logging.Attributes;
 namespace WOTRMultiplayer.Networking.Messages.Game
 {
     [ProtoContract, MessageType((int)MessageTypes.Game.NotifyCombatSave)]
@@ -11,6 +12,15 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(5)] public string Operation { get; set; }
         [ProtoMember(6)] public string Stage { get; set; }
         [ProtoMember(7)] public string Result { get; set; }
+        [ProtoMember(8), LogMe] public int Round { get; set; }
+        [ProtoMember(9), LogMe] public string UnitId { get; set; }
+        [ProtoMember(10), LogMe] public int TurnSeed { get; set; }
+        // The save barrier is also the last authoritative TB checkpoint.  RTwP
+        // intentionally prevents the client from simulating native controller
+        // counters and area effects, so those values must be rebound from the
+        // host before both peers calculate the publication digest.
+        [ProtoMember(11)] public Contracts.NetworkCombatState State { get; set; }
+        [ProtoMember(12)] public string NativeTurnState { get; set; }
     }
     [ProtoContract, MessageType((int)MessageTypes.Game.ClientCombatSaveAck)]
     public sealed class ClientCombatSaveAck

@@ -54,6 +54,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     var root = RealTimeNativeStashPaths.ValidateRoot(AreaDataStash.Folder,
                         Kingmaker.Utility.ApplicationPaths.persistentDataPath, Process.GetCurrentProcess().Id);
                     var previousPlayer = game.Player;
+                    var previousState = game.State;
+                    var previousAreaState = game.State.LoadedAreaState;
                     bool Authorized() => authorized() && ReferenceEquals(Game.Instance, game);
                     lease = RealTimeNativeLoadLease.Begin(owner, info, Authorized, (name, bytes) =>
                     {
@@ -80,7 +82,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     // Direct LoadArea avoids ForceLoadGame/TransferSaveGame and
                     // their session reset. Its exact SaveInfo is admitted once.
                     game.LoadArea(info.Area, null, AutoSaveMode.None, false, info, lease.MarkNativeCallback);
-                    CoroutineRunner.Start(WaitForLoad(game, previousPlayer, lease, campaignId, completion));
+                    CoroutineRunner.Start(WaitForLoad(game, previousPlayer, previousState, previousAreaState,
+                        lease, campaignId, completion));
                 }
                 catch (Exception error)
                 {
@@ -90,7 +93,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         // A native scheduling exception may leave work queued.
                         // Keep ownership until that work drains, never revoke
                         // the stash writer underneath native worker threads.
-                        CoroutineRunner.Start(WaitForLoad(Game.Instance, null, lease, campaignId, completion));
+                        CoroutineRunner.Start(WaitForLoad(Game.Instance, null, null, null, lease, campaignId, completion));
                     }
                     else info?.Saver?.Dispose();
                     completion.TrySetException(error);
@@ -99,11 +102,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
-        private static IEnumerator WaitForLoad(Game game, Player previousPlayer, RealTimeNativeLoadLease lease,
-            string campaignId, TaskCompletionSource<RealTimeNativeWorldLoadResult> completion)
+        private static IEnumerator WaitForLoad(Game game, Player previousPlayer, object previousState,
+            object previousAreaState, RealTimeNativeLoadLease lease, string campaignId,
+            TaskCompletionSource<RealTimeNativeWorldLoadResult> completion)
         {
             var timer = Stopwatch.StartNew();
             var drained = false;
+            TimeSpan? drainedAt = null;
             try
             {
                 while (true)
@@ -117,19 +122,48 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         if (!lease.IsAuthorized) lease.Fail("native-load-context-revoked");
                         pending = LoadingProcess.Instance.IsLoadingInProcess;
                         observed = true;
-                        if (timer.Elapsed > TimeSpan.FromMinutes(2)) lease.Fail("native-load-deadline-exceeded");
+                        // A same-area native reload can legitimately take longer than two minutes on
+                        // slower disks or when two isolated game instances contend for CPU and I/O.
+                        // The repair barrier remains closed for the whole operation, so allowing the
+                        // native workers more time cannot authorize play or saving prematurely.
+                        if (timer.Elapsed > TimeSpan.FromMinutes(5)) lease.Fail("native-load-deadline-exceeded");
                         if (lease.Fault != null) completion.TrySetException(new InvalidOperationException(lease.Fault));
                         if (!pending)
                         {
-                            drained = true;
-                            lease.MarkWorkersDrained();
-                            if (!lease.NativeCallbackCompleted || lease.Fault != null || game?.Player?.GameId != campaignId
-                                || previousPlayer == null || ReferenceEquals(game.Player, previousPlayer)
+                            if (!drained)
+                            {
+                                drained = true;
+                                drainedAt = timer.Elapsed;
+                                lease.MarkWorkersDrained();
+                            }
+                            var worldReplaced = previousPlayer != null && previousState != null && previousAreaState != null
+                                && (!ReferenceEquals(game?.Player, previousPlayer)
+                                    || !ReferenceEquals(game?.State, previousState)
+                                    || !ReferenceEquals(game?.State?.LoadedAreaState, previousAreaState));
+                            var pauseConfirmed = game != null && (game.IsPaused || game.m_WillBePaused);
+                            if (!pauseConfirmed && timer.Elapsed - drainedAt.GetValueOrDefault() < TimeSpan.FromSeconds(10))
+                            {
+                                // IsPaused is deliberately ignored by Owlcat while a loading
+                                // screen/non-default mode is being retired.  Queue its own
+                                // two-tick post-load pause and wait for positive confirmation.
+                                game?.PauseAfterLoad();
+                                pending = true;
+                            }
+                            else
+                            {
+                                if (!lease.NativeCallbackCompleted || lease.Fault != null || game?.Player?.GameId != campaignId
+                                || !worldReplaced
                                 || game.State?.LoadedAreaState == null || game.CurrentlyLoadedArea != lease.Info.Area
-                                || game.SaveManager.CurrentState != SaveManager.State.None || !game.IsPaused)
-                                throw new InvalidOperationException(lease.Fault ?? "native-load-world-not-confirmed");
-                            completion.TrySetResult(new RealTimeNativeWorldLoadResult { World = game.State, RepairObligation = lease });
-                            break;
+                                || game.SaveManager.CurrentState != SaveManager.State.None || !pauseConfirmed)
+                                    throw new InvalidOperationException(lease.Fault ?? string.Format(
+                                        "native-load-world-not-confirmed:callback={0};campaign={1};world-replaced={2};area-state={3};area={4};save-manager={5};paused={6};mode={7};pause-pending={8}",
+                                        lease.NativeCallbackCompleted, game?.Player?.GameId == campaignId, worldReplaced,
+                                        game?.State?.LoadedAreaState != null, game?.CurrentlyLoadedArea == lease.Info.Area,
+                                        game?.SaveManager?.CurrentState == SaveManager.State.None, pauseConfirmed,
+                                        game?.CurrentMode, game?.PauseOnLoadPendingTicks));
+                                completion.TrySetResult(new RealTimeNativeWorldLoadResult { World = game.State, RepairObligation = lease });
+                                break;
+                            }
                         }
                     }
                     catch (Exception error)
@@ -149,7 +183,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 // future verified barrier may remove it and resume/save.
                 if (game?.State != null) RealTimeNativeGraphRepair.Add(game.State, lease);
                 if (drained) lease.Dispose();
-                else CoroutineRunner.Start(WaitForLoad(game, null, lease, campaignId, completion));
+                else CoroutineRunner.Start(WaitForLoad(game, null, null, null, lease, campaignId, completion));
             }
         }
     }

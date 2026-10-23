@@ -119,6 +119,40 @@ namespace WOTRMultiplayer.UnitTests.Services
 
         [TestCase(false)]
         [TestCase(true)]
+        public void NativeStateMutationRollsBackUnlessCheckpointCommits(bool commit)
+        {
+            var value = 2;
+            using (var transaction = new RealTimeBuffRestoreTransaction())
+            {
+                value = 7;
+                transaction.TrackNativeState(
+                    () =>
+                    {
+                        if (value != 7) throw new InvalidOperationException("changed");
+                    },
+                    () => value = 2);
+                if (commit) transaction.VerifyAndCommit(new(), new());
+            }
+            Assert.That(value, Is.EqualTo(commit ? 7 : 2));
+        }
+
+        [Test]
+        public void NativeStateValidationFailureStillRollsBack()
+        {
+            var value = 3;
+            using (var transaction = new RealTimeBuffRestoreTransaction())
+            {
+                value = 9;
+                transaction.TrackNativeState(
+                    () => throw new InvalidOperationException("changed"),
+                    () => value = 3);
+                Assert.Throws<InvalidOperationException>(() => transaction.VerifyAndCommit(new(), new()));
+            }
+            Assert.That(value, Is.EqualTo(3));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
         public void AuthoritativeRemovalIsRetainedOnlyAfterVerification(bool verified)
         {
             var manager = Manager(); var buff = Replica();
@@ -168,6 +202,18 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(plan.Single(), Is.SameAs(missing));
             Assert.That(local.Buffs.Count, Is.EqualTo(1));
             Assert.That(expected.Buffs.Count, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void RestorePlanAcceptsContextlessNativeBuffEncodedAsEmptyRepeatedField()
+        {
+            var missing = State("contextless");
+            missing.ContextChain = [];
+            var expected = new NetworkUnitBuffCollection { Buffs = [missing] };
+            var local = new NetworkUnitBuffCollection();
+
+            Assert.That(RealTimeBuffState.MissingForPresentationRestore(expected, local),
+                Is.EqualTo(new[] { missing }));
         }
 
         [TestCase("extra")]

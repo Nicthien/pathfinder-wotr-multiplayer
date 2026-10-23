@@ -39,7 +39,11 @@ namespace WOTRMultiplayer.Services
         public static string Validate(IReadOnlyList<NetworkBuffContextState> chain)
         {
             if (chain == null) return null; // Old/default checkpoints contain no presentation context.
-            if (chain.Count == 0 || chain.Count > MaximumDepth) return "invalid-buff-context-depth";
+            // protobuf-net materializes an omitted/null repeated field as an empty list.
+            // Native-reference projections use that representation when detailed context
+            // capture is disabled and retain the legacy caster/source fields separately.
+            if (chain.Count == 0) return null;
+            if (chain.Count > MaximumDepth) return "invalid-buff-context-depth";
             foreach (var node in chain)
             {
                 if (node == null || string.IsNullOrWhiteSpace(node.BlueprintId) || node.Params == null

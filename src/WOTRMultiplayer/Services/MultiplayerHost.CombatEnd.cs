@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
@@ -21,6 +22,7 @@ namespace WOTRMultiplayer.Services
         private NotifyRealTimeCombatEnd _endFrame;
         private RealTimeCombatEndBarrier _endBarrier;
         private long[] _endPeers;
+        private bool _endNativeReconstructionQueued;
 
         protected override bool TryDeferRealTimeCombatEnd()
         {
@@ -46,6 +48,7 @@ namespace WOTRMultiplayer.Services
                 _endPeers = GetSyncedPlayers().Where(player => player.Id != Game.LocalPlayerId)
                     .Select(player => player.Id).ToArray();
                 _endCaptureQueued = false; _endFailed = false; _endFrame = null; _endBarrier = null;
+                _endNativeReconstructionQueued = false;
                 _endDeadline = DateTime.UtcNow.AddSeconds(30);
             }
             Game.RealTimeCombat.CombatEndPending = true;
@@ -63,7 +66,28 @@ namespace WOTRMultiplayer.Services
         {
             if (!RealTimePresentationRuntime.Enabled || !IsCurrentEnd()) return;
             if (Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
-            { _endDeadline = DateTime.UtcNow.AddSeconds(30); return; }
+            {
+                // The otherwise-unused Commit stage owns a native reconstruction
+                // barrier. Its own transport has bounded deadlines; do not
+                // retransmit Commit or expire the outer checkpoint while a new
+                // client world is being loaded and certified.
+                if (_endNativeReconstructionQueued
+                    && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing) return;
+                if (_endFrame?.Stage == (int)RealTimeCombatEndStage.Finalize
+                    && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing)
+                {
+                    if (_endFailed)
+                    {
+                        if (DateTime.UtcNow >= _endNextSend) SendCombatEndFrame();
+                        return;
+                    }
+                    if (DateTime.UtcNow >= _endDeadline) { FailCombatEnd("finalize-timeout"); return; }
+                    if (DateTime.UtcNow >= _endNextSend) SendCombatEndFrame();
+                    return;
+                }
+                _endDeadline = DateTime.UtcNow.AddSeconds(30);
+                return;
+            }
             if (_endFailed)
             {
                 if (_endFrame != null && DateTime.UtcNow >= _endNextSend) SendCombatEndFrame();
@@ -161,10 +185,24 @@ namespace WOTRMultiplayer.Services
             if (_endBarrier.Complete)
             {
                 var state = Game.RealTimeCombat;
+                state.Phase = CombatSynchronizationPhase.Stable;
+                state.RecoveryStatus = null;
                 CompleteCombatEnd();
                 state.CombatEndPending = false;
                 GameInteraction.SetPause(state.IsManualPauseActive || Game.ForcedPause != null);
                 Logger.LogInformation("Final combat checkpoint confirmed by all peers. EndId={EndId}, Hash={Hash}", _endFrame.EndId, _endFrame.CanonicalStateHash);
+                return;
+            }
+            if (ack.Stage == (int)RealTimeCombatEndStage.Commit
+                && _endBarrier.Stage == RealTimeCombatEndStage.Finalize
+                && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause)
+            {
+                Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Repairing;
+                Game.RealTimeCombat.RecoveryStatus = "rebuilding";
+                _endNativeReconstructionQueued = true;
+                _endDeadline = DateTime.UtcNow.AddMinutes(5);
+                _ = RunCombatEndNativeReconstructionAsync(_endFrame.EndId, _endFrame.Epoch,
+                    _endFrame.CanonicalStateHash);
                 return;
             }
             _endFrame = new NotifyRealTimeCombatEnd
@@ -174,6 +212,62 @@ namespace WOTRMultiplayer.Services
             };
             _endDeadline = DateTime.UtcNow.AddSeconds(30);
             SendCombatEndFrame();
+        }
+
+        private bool OwnsCombatEndNativeReconstruction(string endId, long epoch)
+            => _endNativeReconstructionQueued && IsCurrentEnd() && !_endFailed
+            && _endBarrier?.Stage == RealTimeCombatEndStage.Finalize
+            && _endFrame?.EndId == endId && _endFrame.Epoch == epoch
+            && Game.RealTimeCombat.Epoch == epoch
+            && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Repairing
+            && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause;
+
+        private async Task RunCombatEndNativeReconstructionAsync(string endId, long epoch, ulong finalHash)
+        {
+            bool Owned() { lock (ActionLock) return OwnsCombatEndNativeReconstruction(endId, epoch); }
+            try
+            {
+                var manifest = await ReconstructCurrentNativeCheckpointAsync(Owned);
+                if (!Owned() || manifest == null || manifest.CanonicalStateHash != finalHash
+                    || !await CommitCurrentNativeCheckpointAsync(manifest, Owned))
+                    throw new InvalidOperationException("combat-end-native-reconstruction-not-committed");
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                    {
+                        if (!Owned()) return;
+                        ResetNativeCheckpointTransfer();
+                        Game.RealTimeCombat.CanonicalStateHash = finalHash;
+                        Game.RealTimeCombat.RecoveryStatus = "committed";
+                        _endNativeReconstructionQueued = false;
+                        _endFrame = new NotifyRealTimeCombatEnd
+                        {
+                            SessionId = Game.Id, LoadedSaveSeed = _endSaveSeed, Epoch = epoch,
+                            EndId = endId, Stage = (int)RealTimeCombatEndStage.Finalize,
+                            CanonicalStateHash = finalHash
+                        };
+                        _endDeadline = DateTime.UtcNow.AddSeconds(30);
+                        SendCombatEndFrame();
+                    }
+                });
+            }
+            catch (Exception failure)
+            {
+                Logger.LogError(failure,
+                    "Final combat checkpoint native reconstruction failed. EndId={EndId}", endId);
+                if (Owned() && _nativeTransfer != null) await AbortCurrentNativeCheckpointAsync();
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                    {
+                        if (!IsCurrentEnd() || _endFrame?.EndId != endId || _endFrame.Epoch != epoch) return;
+                        _endNativeReconstructionQueued = false;
+                        Game.RealTimeCombat.RecoveryStatus = "stopped";
+                        Game.RealTimeCombat.RecoveryFailure ??= "combat-end-native-reconstruction-not-committed";
+                        FailCombatEnd("final-native-reconstruction-failed");
+                    }
+                });
+            }
         }
 
         private void FailCombatEnd(string reason)

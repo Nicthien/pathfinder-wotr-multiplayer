@@ -23,21 +23,55 @@ namespace WOTRMultiplayer.Services
                 var right = client[id];
                 if (left.SpontaneousSlots.Count != right.SpontaneousSlots.Count)
                     return "spellbook-levels:" + id;
-                var slots = right.PreparedSlots.ToDictionary(Key);
-                if (left.PreparedSlots.Count != slots.Count) return "spellbook-slots:" + id;
-                foreach (var slot in left.PreparedSlots)
+                // Native PostLoad may pad m_MemorizedSpells with empty capacity
+                // slots. They contain no spell and no spendable availability, so
+                // their count is not combat state and is not stable across peers.
+                var leftPrepared = left.PreparedSlots.Where(HasSpell).ToList();
+                var rightPrepared = right.PreparedSlots.Where(HasSpell).ToList();
+                if (leftPrepared.Count != rightPrepared.Count)
                 {
-                    if (!slots.TryGetValue(Key(slot), out var local)
-                        || !string.Equals(slot.SpellBlueprintId, local.SpellBlueprintId, StringComparison.OrdinalIgnoreCase)
-                        || slot.Metamagic != local.Metamagic || slot.IsOpposition != local.IsOpposition)
-                        return "spellbook-slot-identity:" + id;
+                    var remaining = rightPrepared.Select(StableKey).ToList();
+                    var missing = new List<(int Level, int Type, string Spell, int Metamagic,
+                        int SpellLevelCost, int HeightenLevel, bool Opposition)>();
+                    foreach (var key in leftPrepared.Select(StableKey))
+                    {
+                        var match = remaining.FindIndex(value => value == key);
+                        if (match < 0) missing.Add(key); else remaining.RemoveAt(match);
+                    }
+                    string Describe((int Level, int Type, string Spell, int Metamagic,
+                        int SpellLevelCost, int HeightenLevel, bool Opposition) key) =>
+                        key.Level + "/" + key.Type + "/" + key.Spell + "/" + key.Metamagic
+                        + "/" + key.SpellLevelCost + "/" + key.HeightenLevel + "/" + key.Opposition;
+                    return "spellbook-slots:" + id + ":expected=" + leftPrepared.Count
+                        + ";actual=" + rightPrepared.Count
+                        + ";missing=" + string.Join(",", missing.Take(4).Select(Describe))
+                        + ";extra=" + string.Join(",", remaining.Take(4).Select(Describe));
                 }
+                // Slot indices are UI ordering, not a stable multiplayer identity. Two
+                // peers can legitimately enumerate the same prepared spells at different
+                // indices after load/level-up. Compare the per-level spell multiset instead.
+                var leftSlots = leftPrepared.GroupBy(StableKey)
+                    .ToDictionary(group => group.Key, group => group.Count());
+                var rightSlots = rightPrepared.GroupBy(StableKey)
+                    .ToDictionary(group => group.Key, group => group.Count());
+                if (leftSlots.Count != rightSlots.Count || leftSlots.Any(group =>
+                    !rightSlots.TryGetValue(group.Key, out var count) || count != group.Value))
+                    return "spellbook-slot-identity:" + id;
             }
             return null;
         }
 
         public static (int Level, int Index, int Type) Key(NetworkPreparedSpellState slot) =>
             (slot.Level, slot.Index, slot.Type);
+
+        public static (int Level, int Type, string Spell, int Metamagic,
+            int SpellLevelCost, int HeightenLevel, bool Opposition) StableKey(
+            NetworkPreparedSpellState slot) =>
+            (slot.Level, slot.Type, slot.SpellBlueprintId?.ToUpperInvariant(), slot.Metamagic,
+                slot.MetamagicSpellLevelCost, slot.MetamagicHeightenLevel, slot.IsOpposition);
+
+        private static bool HasSpell(NetworkPreparedSpellState slot) =>
+            !string.IsNullOrWhiteSpace(slot?.SpellBlueprintId);
 
         private static Dictionary<string, NetworkSpellbookState> Index(IEnumerable<NetworkSpellbookState> books)
         {

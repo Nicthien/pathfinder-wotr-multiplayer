@@ -155,7 +155,7 @@ namespace WOTRMultiplayer.Services
                 causes.Add("damage");
             if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor { Vitals = expected.Descriptor?.Vitals } }] },
                 new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor { Vitals = actual.Descriptor?.Vitals } }] }))
-                causes.Add("vitals");
+                causes.Add("vitals[" + DescribeVitals(expected.Descriptor?.Vitals, actual.Descriptor?.Vitals) + "]");
             if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
                     { CalculatedStats = expected.Descriptor?.CalculatedStats } }] },
                 new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
@@ -170,6 +170,11 @@ namespace WOTRMultiplayer.Services
                 causes.Add("resources");
             if (!SameBuffs(expected.BuffCollection?.Buffs, actual.BuffCollection?.Buffs))
                 causes.Add("buffs");
+            else if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit
+                     { BuffCollection = expected.BuffCollection }] },
+                     new NetworkCombatState { Units = [new NetworkUnit
+                     { BuffCollection = actual.BuffCollection }] }))
+                causes.Add("buff-details");
             if (!SameHash(new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
                 { SpellbooksCaptured = expected.Descriptor?.SpellbooksCaptured ?? false, Spellbooks = expected.Descriptor?.Spellbooks } }] },
                 new NetworkCombatState { Units = [new NetworkUnit { Descriptor = new NetworkUnitDescriptor
@@ -182,6 +187,17 @@ namespace WOTRMultiplayer.Services
             {
                 causes.Add("prone");
             }
+            if ((expected.Descriptor?.State?.IsCharging ?? false)
+                != (actual.Descriptor?.State?.IsCharging ?? false)
+                || (expected.Descriptor?.State?.IsFinallyDead ?? false)
+                != (actual.Descriptor?.State?.IsFinallyDead ?? false))
+                causes.Add("state");
+            if ((expected.CombatState?.NotSurprised ?? false)
+                != (actual.CombatState?.NotSurprised ?? false))
+                causes.Add("surprise");
+            if ((expected.UnitPartKineticist?.AcceptedBurn ?? 0)
+                != (actual.UnitPartKineticist?.AcceptedBurn ?? 0))
+                causes.Add("kineticist");
             if (!SameEngagements(expected.CombatState?.EngagedUnits, actual.CombatState?.EngagedUnits)
                 || !SameEngagements(expected.CombatState?.EngagedBy, actual.CombatState?.EngagedBy))
             {
@@ -189,6 +205,29 @@ namespace WOTRMultiplayer.Services
             }
             return causes.Count == 0 ? $"unit:{id}" : $"unit:{id}:{string.Join("+", causes)}";
         }
+
+        internal static string DescribeVitals(NetworkUnitVitals expected, NetworkUnitVitals actual)
+        {
+            if (expected == null || actual == null) return "missing";
+            var fields = new List<string>();
+            if (expected.Damage != actual.Damage) fields.Add($"damage={expected.Damage}/{actual.Damage}");
+            if (expected.LifeState != actual.LifeState) fields.Add($"life={expected.LifeState}/{actual.LifeState}");
+            if (expected.IsFinallyDead != actual.IsFinallyDead) fields.Add($"dead={expected.IsFinallyDead}/{actual.IsFinallyDead}");
+            if (!SameStat(expected.HitPoints, actual.HitPoints)) fields.Add("hp");
+            if (!SameStat(expected.TemporaryHitPoints, actual.TemporaryHitPoints)) fields.Add("temp-hp");
+            if (!SameStat(expected.NonLethal, actual.NonLethal)) fields.Add("nonlethal");
+            if (expected.IsInCombat != actual.IsInCombat) fields.Add($"combat={expected.IsInCombat}/{actual.IsInCombat}");
+            if (expected.GroupCounterCaptured != actual.GroupCounterCaptured)
+                fields.Add($"group-captured={expected.GroupCounterCaptured}/{actual.GroupCounterCaptured}");
+            else if (expected.GroupCounterCaptured && expected.GroupCombatCounter != actual.GroupCombatCounter)
+                fields.Add($"group={expected.GroupCombatCounter}/{actual.GroupCombatCounter}");
+            return fields.Count == 0 ? "unclassified" : string.Join(",", fields);
+        }
+
+        private static bool SameStat(NetworkStatValues left, NetworkStatValues right) =>
+            left != null && right != null
+            && left.BaseValue == right.BaseValue && left.ModifiedValue == right.ModifiedValue
+            && left.ModifiedValueRaw == right.ModifiedValueRaw && left.PermanentValue == right.PermanentValue;
 
         private static bool SameEngagements(IEnumerable<NetworkUnitEngagement> expected,
             IEnumerable<NetworkUnitEngagement> actual)

@@ -10,6 +10,7 @@ using Kingmaker.EntitySystem.Stats;
 using Kingmaker.UnitLogic;
 using Kingmaker.UnitLogic.Buffs;
 using Kingmaker.UnitLogic.Commands;
+using Kingmaker.UnitLogic.Parts;
 using NUnit.Framework;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Networking;
@@ -89,7 +90,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(reference.Entities[0].Facts[0].BlueprintId, Is.EqualTo(fact.Blueprint.AssetGuid.ToString()));
             fact.Components.Clear();
             var restored = RealTimeNativeGraphInspection.CaptureState(new[] { unit }, new[] { area }, () => true);
-            Assert.That(RealTimeNativeTopologyComparison.Difference(reference, restored), Does.Contain("components-count"));
+            Assert.That(RealTimeNativeTopologyComparison.Difference(reference, restored), Does.Contain("facts-inventory"));
             Assert.That(unit.IsTurnedOn, Is.False);
         }
 
@@ -103,6 +104,34 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(unit.Commands, Is.SameAs(commands)); Assert.That(unit.CombatState, Is.SameAs(combat));
             Assert.That(component.Fact, Is.SameAs(fact)); Assert.That(part.Owner, Is.SameAs(area));
             Assert.That(unit.IsTurnedOn || area.IsTurnedOn || fact.IsTurnedOn || part.IsTurnedOn, Is.False);
+        }
+
+        [Test]
+        public void CaptureIgnoresThePeerLocalInspectedBuffsUiCache()
+        {
+            var unit = Unit(); var area = Area();
+            var inspectedBuffs = Bare<UnitPartInspectedBuffs>();
+            Field(inspectedBuffs, "<Owner>k__BackingField", unit);
+            Field(inspectedBuffs, "<IsPostLoadExecuted>k__BackingField", true);
+            Parts(unit).Add(inspectedBuffs);
+
+            var topology = RealTimeNativeGraphInspection.CaptureState(
+                new[] { unit }, new[] { area }, () => true);
+
+            Assert.That(topology.Entities.Single(entity => entity.Id == "unit").Parts,
+                Does.Not.Contain(typeof(UnitPartInspectedBuffs).FullName));
+            Assert.That(Parts(unit), Does.Contain(inspectedBuffs));
+        }
+
+        [Test]
+        public void CaptureIgnoresOnlyAnEmptyDamageGraceShell()
+        {
+            var empty = new UnitPartDamageGrace();
+            var active = new UnitPartDamageGrace();
+            active.Weapons.Add(new UnitPartDamageGrace.DamageGraceEntry());
+
+            Assert.That(RealTimeNativeGraphInspection.ShouldCapturePart(empty), Is.False);
+            Assert.That(RealTimeNativeGraphInspection.ShouldCapturePart(active), Is.True);
         }
 
         [TestCase("descriptor")]

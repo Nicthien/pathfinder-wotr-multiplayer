@@ -9,6 +9,14 @@ namespace WOTRMultiplayer.Services
     // different casters, durations and ranks. Never match by blueprint alone.
     public static class RealTimeBuffState
     {
+        public static HashSet<string> ExpectedIds(NetworkUnitBuffCollection expected)
+        {
+            if (expected?.Buffs == null) throw new InvalidOperationException("missing-buff-collection");
+            var error = ValidateCollection(expected, expected);
+            if (error != null) throw new InvalidOperationException(error);
+            return new HashSet<string>(expected.Buffs.Select(buff => buff.Id), StringComparer.OrdinalIgnoreCase);
+        }
+
         public static List<NetworkBuff> MissingForPresentationRestore(NetworkUnitBuffCollection expected,
             NetworkUnitBuffCollection local)
         {
@@ -25,8 +33,9 @@ namespace WOTRMultiplayer.Services
             });
             if (error != null) throw new InvalidOperationException(error);
             foreach (var buff in missing)
-                if (buff.ContextChain == null || !string.Equals(buff.ContextChain[0].BlueprintId,
-                    buff.BlueprintId, StringComparison.OrdinalIgnoreCase))
+                if (buff.ContextChain == null || buff.ContextChain.Count > 0
+                    && !string.Equals(buff.ContextChain[0].BlueprintId,
+                        buff.BlueprintId, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("missing-or-mismatched-buff-restoration-context:" + buff.Id);
             return missing;
         }

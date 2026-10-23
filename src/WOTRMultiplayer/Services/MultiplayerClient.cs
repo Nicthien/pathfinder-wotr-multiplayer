@@ -1118,6 +1118,15 @@ namespace WOTRMultiplayer.Services
         {
             SetPauseCooldown();
 
+            if (Game.Combat == null && SettingsService.GetSettings().RegroupDistantPlayersOnCombatStart)
+            {
+                var unavailable = await CombatInteraction.EnsureUnitsInCombatAsync(message.InitialUnits);
+                Logger.LogInformation(
+                    "Started host-initiated combat locally after distant-player regroup. RequestedUnits={RequestedUnits}, UnavailableUnits={UnavailableUnits}",
+                    message.InitialUnits.Count,
+                    unavailable);
+            }
+
             var isInCombat = await WaitWhileTrue(() => Game.Combat == null, "Waiting for combat to be initiated", TimeSpan.FromSeconds(30));
             if (!isInCombat)
             {
@@ -1898,7 +1907,9 @@ namespace WOTRMultiplayer.Services
                         && state.Phase == CombatSynchronizationPhase.PreparingModeSwitch
                         && state.PendingMode == mode)
                     {
-                        SendRealTimeModeAck(message, true, 0);
+                        SendRealTimeModeAck(message, true, 0,
+                            mode == CombatMode.TurnBased
+                            && GameInteraction.RequiresRealTimeMechanicalReconstruction());
                         return;
                     }
                     if (message.Epoch <= state.Epoch || state.Phase != CombatSynchronizationPhase.Stable)
@@ -1915,7 +1926,9 @@ namespace WOTRMultiplayer.Services
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
                         return;
-                    SendRealTimeModeAck(message, paused, 0);
+                    SendRealTimeModeAck(message, paused, 0,
+                        paused && mode == CombatMode.TurnBased
+                        && GameInteraction.RequiresRealTimeMechanicalReconstruction());
                     return;
                 }
 
@@ -1963,6 +1976,17 @@ namespace WOTRMultiplayer.Services
                             () => IsCurrentRealTimeMessage(session, state, message.Epoch)
                                 && state.Phase == CombatSynchronizationPhase.PreparingModeSwitch))
                         return;
+                    if (mode == CombatMode.TurnBased && RealTimePresentationRuntime.Enabled)
+                    {
+                        actualHash = await StabilizeTurnBasedModeSnapshotAsync(message.State,
+                            session, state, message.Epoch, CombatSynchronizationPhase.PreparingModeSwitch);
+                        if (!actualHash.HasValue || actualHash.Value != message.CanonicalStateHash)
+                        {
+                            if (actualHash.HasValue)
+                                SendRealTimeModeAck(message, false, actualHash.Value);
+                            return;
+                        }
+                    }
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.PreparingModeSwitch)
                         return;
@@ -1995,6 +2019,13 @@ namespace WOTRMultiplayer.Services
                             () => IsCurrentRealTimeMessage(session, state, message.Epoch)
                                 && state.Phase == CombatSynchronizationPhase.Repairing))
                         return;
+                    if (mode == CombatMode.TurnBased && RealTimePresentationRuntime.Enabled)
+                    {
+                        actualHash = await StabilizeTurnBasedModeSnapshotAsync(message.State,
+                            session, state, message.Epoch, CombatSynchronizationPhase.Repairing);
+                        if (!actualHash.HasValue)
+                            return;
+                    }
                     if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
                         || state.Phase != CombatSynchronizationPhase.Repairing)
                         return;
@@ -2022,6 +2053,13 @@ namespace WOTRMultiplayer.Services
                     {
                         _disconnectedDuringRealTimeCombat = false;
                         _localCriticalFaultState = null;
+                        if (message.CombatContinues && ReferenceEquals(Game.Combat, _deferredEndCombat))
+                        {
+                            // Completion is tied to the current epoch and canonical
+                            // checkpoint. This explicit host certificate distinguishes a
+                            // native reconstruction callback from a real encounter end.
+                            _deferredEndCombat = null;
+                        }
                     }
                     SendRealTimeModeAck(message, true, state.CanonicalStateHash);
                     GameInteraction.SetPause(state.CombatEndPending || state.IsManualPauseActive || Game.ForcedPause != null);
@@ -2063,7 +2101,50 @@ namespace WOTRMultiplayer.Services
             var temporalMismatch = RealTimeCombatTemporalDiff.Summarize(expected, appliedState);
             if (temporalMismatch != null)
                 throw new InvalidOperationException($"Temporal combat checkpoint differs: {temporalMismatch}");
-            return RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = appliedState });
+            var expectedHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = expected });
+            var actualHash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = appliedState });
+            if (expectedHash != actualHash)
+            {
+                Logger.LogWarning("Applied real-time checkpoint differs. Epoch={Epoch}, ExpectedHash={ExpectedHash}, ActualHash={ActualHash}, Difference={Difference}",
+                    epoch, expectedHash, actualHash, RealTimeCombatDiff.Summarize(expected, appliedState));
+                if (CombatSaving.CombatSaveActivation.Enabled)
+                {
+                    try
+                    {
+                        var root = Kingmaker.Utility.ApplicationPaths.persistentDataPath;
+                        System.IO.File.WriteAllText(System.IO.Path.Combine(root, "rtwp-mode-expected.json"),
+                            Newtonsoft.Json.JsonConvert.SerializeObject(expected, Newtonsoft.Json.Formatting.Indented));
+                        System.IO.File.WriteAllText(System.IO.Path.Combine(root, "rtwp-mode-applied.json"),
+                            Newtonsoft.Json.JsonConvert.SerializeObject(appliedState, Newtonsoft.Json.Formatting.Indented));
+                    }
+                    catch (System.IO.IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+            }
+            return actualHash;
+        }
+
+        private async Task<ulong?> StabilizeTurnBasedModeSnapshotAsync(
+            Networking.Messages.Contracts.NetworkCombatState snapshot,
+            NetworkGame session, NetworkRealTimeCombatState state, long epoch,
+            CombatSynchronizationPhase phase)
+        {
+            await CombatInteraction.WaitForTurnBasedModeStabilizationAsync();
+            if (!IsCurrentRealTimeMessage(session, state, epoch) || state.Phase != phase)
+                return null;
+            var expected = Mapper.Map<NetworkCombatState>(snapshot);
+            var participants = expected.Units
+                .Where(unit => unit?.Descriptor?.Vitals?.IsInCombat == true)
+                .Select(unit => unit.Id)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var unavailable = await CombatInteraction.EnsureUnitsInCombatAsync(participants);
+            if (unavailable.Count > 0)
+                throw new InvalidOperationException($"turn-based-roster-unavailable:{string.Join(",", unavailable.OrderBy(id => id, StringComparer.OrdinalIgnoreCase))}");
+            if (!IsCurrentRealTimeMessage(session, state, epoch) || state.Phase != phase)
+                return null;
+            return await ApplyRealTimeModeSnapshotAsync(snapshot, session, state, epoch, phase);
         }
 
         private bool IsCurrentRealTimeMessage(NetworkGame session, NetworkRealTimeCombatState state, long epoch)
@@ -2071,6 +2152,18 @@ namespace WOTRMultiplayer.Services
             return ReferenceEquals(Game, session)
                 && ReferenceEquals(session.RealTimeCombat, state)
                 && state.Epoch == epoch;
+        }
+
+        internal static List<string> SelectLivingCombatParticipants(NetworkCombatState reference)
+        {
+            return (reference?.Units ?? [])
+                .Where(unit => unit?.Id != null
+                    && (unit.Descriptor?.Vitals == null
+                        || unit.Descriptor.Vitals.IsInCombat
+                            && !unit.Descriptor.Vitals.IsFinallyDead))
+                .Select(unit => unit.Id)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
         }
 
         private async Task<bool> PauseClientAtProjectileSafePointAsync(
@@ -2095,7 +2188,8 @@ namespace WOTRMultiplayer.Services
             return false;
         }
 
-        private void SendRealTimeModeAck(NotifyRealTimeModeTransition message, bool applied, ulong hash)
+        private void SendRealTimeModeAck(NotifyRealTimeModeTransition message, bool applied, ulong hash,
+            bool requiresNativeReconstruction = false)
         {
             Send(new ClientRealTimeModeTransitionAck
             {
@@ -2103,7 +2197,8 @@ namespace WOTRMultiplayer.Services
                 Stage = message.Stage,
                 PlayerId = Game.LocalPlayerId,
                 CanonicalStateHash = hash,
-                Applied = applied
+                Applied = applied,
+                RequiresNativeReconstruction = requiresNativeReconstruction
             });
         }
 
@@ -2124,6 +2219,7 @@ namespace WOTRMultiplayer.Services
                 session = Game;
                 state = session.RealTimeCombat;
                 var stage = (RealTimeRepairStage)message.Stage;
+                var nativeResume = false;
                 if (RealTimePresentationRuntime.Enabled
                     && (message.SessionId != session.Id || message.LoadedSaveSeed != session.LoadedSaveSeed)) return;
                 // The native barrier owns this epoch. A queued legacy Apply or
@@ -2143,7 +2239,12 @@ namespace WOTRMultiplayer.Services
                     if (stage != RealTimeRepairStage.Resume || !_nativeCommitted || _nativeReceiveFailed
                         || message.Mode != (int)CombatMode.RealTimeWithPause
                         || message.CanonicalStateHash != _nativeReferenceVerifiedHash) return;
-                    ResetNativeCheckpointReceive();
+                    // Keep the verified reference alive until the replacement
+                    // world's native combat roster has been re-established and
+                    // sampled.  A same-area LoadArea can restore every entity and
+                    // mechanical fact while leaving UnitEntityData.IsInCombat
+                    // false for the first post-load frames.
+                    nativeResume = true;
                 }
                 if (stage == RealTimeRepairStage.Prepare)
                 {
@@ -2251,6 +2352,68 @@ namespace WOTRMultiplayer.Services
                         && ReferenceEquals(_localCriticalFaultState, state)
                         && _localCriticalFaultEpoch == message.Epoch)
                         return;
+                    if (nativeResume)
+                    {
+                        var referenceRequest = _nativeReferenceRequest;
+                        if (referenceRequest?.ReferenceStateBytes == null)
+                        {
+                            SendRealTimeRepairAck(message, false, 0);
+                            return;
+                        }
+                        var reference = Mapper.Map<NetworkCombatState>(
+                            RealTimeNativeReferenceCodec.Decode(referenceRequest.ReferenceStateBytes));
+                        // The native checkpoint can contain every unit still
+                        // represented by the area, including corpses and
+                        // living bystanders. Neither can (or should) be forced
+                        // into the replacement combat.
+                        var participantIds = SelectLivingCombatParticipants(reference);
+                        var unavailable = await CombatInteraction.EnsureUnitsInCombatAsync(participantIds);
+                        if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                            || state.Phase != CombatSynchronizationPhase.Repairing
+                            || !ReferenceEquals(referenceRequest, _nativeReferenceRequest))
+                            return;
+                        if (unavailable == null || unavailable.Count != 0)
+                        {
+                            Logger.LogError(
+                                "Native repair cannot resume because combat participants did not rejoin. Epoch={Epoch}, Units={Units}",
+                                message.Epoch, string.Join(",", unavailable ?? participantIds));
+                            SendRealTimeRepairAck(message, false, 0);
+                            return;
+                        }
+                        // Rejoining an already loaded combat can update native combat-group
+                        // counters on the following main-thread pass.  Re-apply the verified
+                        // host reference after the roster operation, then read it back in the
+                        // same guarded dispatch.  This is still fail-closed: Resume is only
+                        // acknowledged when the resulting mechanics have the exact host hash.
+                        var local = await CombatInteraction.TryApplyAndReadRealTimeCombatStateAsync(
+                            reference,
+                            () => IsCurrentRealTimeMessage(session, state, message.Epoch)
+                                && state.Phase == CombatSynchronizationPhase.Repairing
+                                && ReferenceEquals(referenceRequest, _nativeReferenceRequest),
+                            reconcileTurnBasedBuffs: false);
+                        if (!IsCurrentRealTimeMessage(session, state, message.Epoch)
+                            || state.Phase != CombatSynchronizationPhase.Repairing
+                            || !ReferenceEquals(referenceRequest, _nativeReferenceRequest))
+                            return;
+                        if (local == null)
+                        {
+                            SendRealTimeRepairAck(message, false, 0);
+                            return;
+                        }
+                        var resumedHash = RealTimeCombatHasher.Compute(
+                            new RealTimeCombatSnapshot { Combat = local });
+                        if (resumedHash != message.CanonicalStateHash)
+                        {
+                            Logger.LogError(
+                                "Native repair combat roster differs before Resume. Epoch={Epoch}, Temporal={Temporal}, Structural={Structural}, HostHash={HostHash}, ClientHash={ClientHash}",
+                                message.Epoch, RealTimeCombatTemporalDiff.Summarize(reference, local),
+                                RealTimeCombatDiff.Summarize(reference, local),
+                                message.CanonicalStateHash, resumedHash);
+                            SendRealTimeRepairAck(message, false, resumedHash, temporalMismatch: true);
+                            return;
+                        }
+                        ResetNativeCheckpointReceive();
+                    }
                     state.Mode = (CombatMode)message.Mode;
                     state.CanonicalStateHash = message.CanonicalStateHash;
                     state.Phase = CombatSynchronizationPhase.Stable;
@@ -3022,8 +3185,7 @@ namespace WOTRMultiplayer.Services
                 && Game.Id == message.SessionId && Game.LoadedSaveSeed == message.LoadedSaveSeed
                 && combat.Seed == message.CombatSeed && combat.Round == message.Round
                 && Game.RealTimeCombat.Mode == CombatMode.TurnBased
-                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
-                && (combat.Turn == null || combat.Turn.Stage == NetworkCombatTurnStage.Starting);
+                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
             if (!Current()) return;
             _mainThreadAccessor.Post(() =>
             {
@@ -3149,6 +3311,18 @@ namespace WOTRMultiplayer.Services
                 Logger.LogWarning("Starting turn with different Round number. LocalRound={LocalRound}, HostRound={HostRound}", Game.Combat.Round, message.Round);
             }
 
+            if (playerId == NetworkConstants.HostPlayerId
+                && Game.Combat.Stage == NetworkCombatStage.Running
+                && Game.RealTimeCombat?.Mode == CombatMode.TurnBased
+                && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
+                && string.Equals(message.UnitId, Game.Combat.Turn.UnitId, StringComparison.OrdinalIgnoreCase)
+                && Game.Combat.Round == message.Round)
+            {
+                // A native mode rebuild can briefly report a local combat end. A matching
+                // host-started turn is authoritative proof that this encounter continues.
+                _deferredEndCombat = null;
+            }
+
             Game.Combat.Turn.Seed = message.Seed;
 
             var delay = GetTurnStartDelay();
@@ -3165,6 +3339,7 @@ namespace WOTRMultiplayer.Services
                 Game.Combat.Turn = null;
                 Logger.LogWarning("Turn has been reset because the turn could not be started. UnitId={UnitId}", message.UnitId);
             });
+            TryAcknowledgeCombatSaveTurnAlignment();
         }
 
         private async void OnNotifyCombatInitializationRequired(long playerId, NotifyCombatInitializationRequired message)
@@ -3259,6 +3434,8 @@ namespace WOTRMultiplayer.Services
             var suggestions = Mapper.Map<List<NetworkDialogAnswerSuggestion>>(message.Suggestions);
             var players = GetSyncedPlayers();
             DialogInteraction.MarkSuggestedCueAnswers(players, suggestions);
+            if (Game.DialogState.HasSystemAnswer)
+                DialogInteraction.SetDialogContinueButtonState(message.CanContinue);
         }
 
         private void OnNotifyPartyAreaTransitioned(long playerId, NotifyPartyAreaTransitioned partyLeftArea)

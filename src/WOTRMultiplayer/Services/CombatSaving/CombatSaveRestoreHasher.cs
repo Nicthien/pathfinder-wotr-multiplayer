@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 using WOTRMultiplayer.Entities;
@@ -34,7 +35,7 @@ namespace WOTRMultiplayer.Services.CombatSaving
                 if (unit.BuffCollection?.Buffs == null) continue;
 
                 unit.BuffCollection.Buffs = unit.BuffCollection.Buffs
-                    .Where(buff => !IsAreaDerived(buff, areas))
+                    .Where(buff => !IsAreaDerived(buff, areas) && !IsNativeLoadDerived(buff))
                     .Select(buff =>
                     {
                         if (buff == null) return null;
@@ -81,7 +82,45 @@ namespace WOTRMultiplayer.Services.CombatSaving
             return projected;
         }
 
-        private static bool IsAreaDerived(Entities.Units.NetworkBuff buff,
+        // A native load recreates attached areas and their derived buffs with
+        // fresh runtime ids.  Reapply the saved mechanical state while retaining
+        // only those freshly derived objects from the loaded world.  Everything
+        // else (damage, resources, temporary buffs, engagements and position)
+        // remains authoritative from the save manifest.
+        internal static NetworkCombatState PrepareLoadedWorldApplication(
+            NetworkCombatState saved, NetworkCombatState loaded)
+        {
+            if (saved?.Units == null || saved.AreaEffects == null
+                || loaded?.Units == null || loaded.AreaEffects == null)
+                throw new ArgumentNullException(saved == null ? nameof(saved) : nameof(loaded));
+            var expected = JsonConvert.DeserializeObject<NetworkCombatState>(
+                JsonConvert.SerializeObject(saved))
+                ?? throw new InvalidOperationException("combat-save-loaded-application-clone-failed");
+            var loadedById = loaded.Units.Where(unit => unit != null)
+                .ToDictionary(unit => unit.Id, StringComparer.OrdinalIgnoreCase);
+            foreach (var unit in expected.Units.Where(unit => unit != null))
+            {
+                if (!loadedById.TryGetValue(unit.Id, out var current))
+                    throw new InvalidOperationException("combat-save-loaded-unit-missing:" + unit.Id);
+                var savedBuffs = unit.BuffCollection?.Buffs ?? [];
+                var derived = (current.BuffCollection?.Buffs ?? [])
+                    .Where(buff => IsAreaDerived(buff, loaded.AreaEffects) || IsNativeLoadDerived(buff));
+                if (unit.BuffCollection != null)
+                    unit.BuffCollection.Buffs = savedBuffs
+                        .Where(buff => !IsAreaDerived(buff, saved.AreaEffects) && !IsNativeLoadDerived(buff))
+                        .Concat(derived)
+                        .GroupBy(buff => buff?.Id ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.First()).ToList();
+            }
+            expected.AreaEffects = JsonConvert.DeserializeObject<List<Entities.AreaEffects.NetworkAreaEffect>>(
+                JsonConvert.SerializeObject(loaded.AreaEffects)) ?? [];
+            expected.ProjectilesCaptured = loaded.ProjectilesCaptured;
+            expected.Projectiles = JsonConvert.DeserializeObject<List<NetworkProjectileState>>(
+                JsonConvert.SerializeObject(loaded.Projectiles)) ?? [];
+            return expected;
+        }
+
+        internal static bool IsAreaDerived(Entities.Units.NetworkBuff buff,
             System.Collections.Generic.IEnumerable<Entities.AreaEffects.NetworkAreaEffect> areas)
         {
             if (buff?.ContextChain == null || string.IsNullOrWhiteSpace(buff.CasterId)) return false;
@@ -89,6 +128,21 @@ namespace WOTRMultiplayer.Services.CombatSaving
                 && string.Equals(area.CasterUnitId, buff.CasterId, StringComparison.Ordinal)
                 && buff.ContextChain.Any(context => context != null
                     && string.Equals(context.BlueprintId, area.BlueprintId, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        internal static bool IsNativeLoadDerived(Entities.Units.NetworkBuff buff)
+        {
+            // Owlcat rebuilds this hidden AI/group countdown from combat-group
+            // state instead of serializing the fact itself. Its presence before
+            // save and absence during the paused post-load barrier are therefore
+            // two representations of the same native mechanics.
+            return string.Equals(buff?.BlueprintId, "46b39651560c13f41a1f5deebb9caa1a",
+                       StringComparison.OrdinalIgnoreCase)
+                // Toggle marker for the inspired-rage aura. Native loading may
+                // recreate it on party members immediately and on NPCs only
+                // after the held world resumes; the aura itself stays protected.
+                || string.Equals(buff?.BlueprintId, "9fd2dd27d838f0049ab56e9da3508b25",
+                    StringComparison.OrdinalIgnoreCase);
         }
 
         private static string StableJson<T>(T value) => JsonConvert.SerializeObject(value, Formatting.None);

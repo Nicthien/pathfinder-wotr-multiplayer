@@ -28,5 +28,8 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         // Only populated for the native reconstruction reference, not frequent snapshots.
         [ProtoMember(7)] public NetworkNativeTopology NativeTopology { get; set; }
         [ProtoMember(8)] public NetworkAcceptedOrderReference AcceptedOrderReference { get; set; }
+        // Native checkpoint only. Entries contain an ID and buff collection;
+        // they are not additional encounter participants.
+        [ProtoMember(9)] public List<NetworkUnit> NativeUnits { get; set; } = [];
     }
 }

@@ -63,7 +63,24 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
-        public void CombatSaveProjectionSurvivesMissingRuntimeAbilityReference()
+        public void NativeCheckpointCanNormalizeAConfirmedPointTargetBeforeValidation()
+        {
+            var context = (MechanicsContext)Activator.CreateInstance(typeof(MechanicsContext),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, new object[] { default(JsonConstructorMark) }, null);
+            var state = State();
+            state.MainTarget = new(new(1, 2, 3), 45, null);
+
+            RealTimeBuffContextReplication.ApplyConfirmedTargets(context, new[] { state }, _ => null);
+
+            Assert.That(context.MainTarget.Point.x, Is.EqualTo(1));
+            Assert.That(context.MainTarget.Point.y, Is.EqualTo(2));
+            Assert.That(context.MainTarget.Point.z, Is.EqualTo(3));
+            Assert.That(context.MainTarget.Orientation, Is.EqualTo(45));
+        }
+
+        [Test]
+        public void CaptureSurvivesMissingTransientRuntimeAbilityReference()
         {
             var context = (AbilityExecutionContext)Activator.CreateInstance(typeof(AbilityExecutionContext),
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
@@ -75,7 +92,10 @@ namespace WOTRMultiplayer.UnitTests.Services
             var mapper = A.Fake<IRuntimeMapper>();
             A.CallTo(() => mapper.Map<NetworkAbilityParams>(A<object>._)).Returns(new NetworkAbilityParams());
 
-            Assert.Throws<InvalidOperationException>(() => RealTimeBuffContextCapture.Capture(context, mapper));
+            var runtimeCapture = RealTimeBuffContextCapture.Capture(context, mapper);
+            Assert.That(runtimeCapture.Single().SourceAbility.BlueprintId,
+                Is.EqualTo("22222222222222222222222222222222"));
+            Assert.That(runtimeCapture.Single().SourceAbility.Id, Is.Null);
             using (new CombatSaveDigestScope())
             {
                 var captured = RealTimeBuffContextCapture.Capture(context, mapper);
@@ -83,6 +103,58 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Is.EqualTo("22222222222222222222222222222222"));
                 Assert.That(captured.Single().SourceAbility.Id, Is.Null);
             }
+        }
+
+        [Test]
+        public void AppliedHostAbilityProjectionSurvivesMissingTransientRuntimeAbilityReference()
+        {
+            var context = (AbilityExecutionContext)Activator.CreateInstance(typeof(AbilityExecutionContext),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, new object[] { default(JsonConstructorMark) }, null);
+            var blueprint = (BlueprintAbility)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(BlueprintAbility));
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("44444444444444444444444444444444");
+            typeof(MechanicsContext).GetField("AssociatedBlueprint").SetValue(context, blueprint);
+            var mapper = A.Fake<IRuntimeMapper>();
+            A.CallTo(() => mapper.Map<NetworkAbilityParams>(A<object>._)).Returns(new NetworkAbilityParams());
+            var expected = RealTimeBuffContextCapture.Capture(context, mapper);
+            expected.Single().SourceAbility = new WOTRMultiplayer.Entities.Combat.NetworkAbility
+            {
+                Id = "host-action", Name = "SunderAction",
+                BlueprintId = blueprint.AssetGuid.ToString(), SpellLevel = 2
+            };
+            var parameters = (AbilityParams)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(AbilityParams));
+
+            RealTimeBuffContextReplication.Apply(context, expected, _ => parameters);
+            expected.Single().SourceAbility.Id = "caller-mutated";
+            var captured = RealTimeBuffContextCapture.Capture(context, mapper).Single().SourceAbility;
+
+            Assert.That(captured.Id, Is.EqualTo("host-action"));
+            Assert.That(captured.Name, Is.EqualTo("SunderAction"));
+            Assert.That(captured.SpellLevel, Is.EqualTo(2));
+            Assert.That(captured.BlueprintId, Is.EqualTo(blueprint.AssetGuid.ToString()));
+        }
+
+        [Test]
+        public void RuntimeAndCombatSaveValidationUseSourceBlueprintWithoutRuntimeAbilityReference()
+        {
+            var context = (AbilityExecutionContext)Activator.CreateInstance(typeof(AbilityExecutionContext),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, new object[] { default(JsonConstructorMark) }, null);
+            var blueprint = (BlueprintAbility)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(BlueprintAbility));
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("33333333333333333333333333333333");
+            typeof(MechanicsContext).GetField("AssociatedBlueprint").SetValue(context, blueprint);
+            var mapper = A.Fake<IRuntimeMapper>();
+            A.CallTo(() => mapper.Map<NetworkAbilityParams>(A<object>._)).Returns(new NetworkAbilityParams());
+            List<NetworkBuffContextState> expected;
+            using (new CombatSaveDigestScope())
+                expected = RealTimeBuffContextCapture.Capture(context, mapper);
+
+            Assert.That(RealTimeBuffContextReplication.Validate(context, expected), Is.Null);
+            using (new CombatSaveDigestScope())
+                Assert.That(RealTimeBuffContextReplication.Validate(context, expected), Is.Null);
         }
 
         [Test]
@@ -96,6 +168,17 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.Throws<InvalidOperationException>(() => RealTimeBuffContextChain.Capture(child, node => node.Parent,
                 node => { calls++; return State(); }));
             Assert.That(calls, Is.Zero);
+        }
+
+        [Test]
+        public void EmptyWireChainRepresentsAContextlessNativeBuff()
+        {
+            var states = new List<NetworkBuffContextState>();
+            Assert.That(RealTimeBuffContextChain.Validate(states), Is.Null);
+            Assert.That(RealTimeBuffContextFactory.Create(states, _ => null, _ => null, _ => null,
+                _ => null, _ => null), Is.Null);
+            Assert.That(RealTimeBuffContextReplication.Validate(null, states), Is.Null);
+            Assert.DoesNotThrow(() => RealTimeBuffContextReplication.Apply(null, states, _ => null));
         }
 
         [Test]

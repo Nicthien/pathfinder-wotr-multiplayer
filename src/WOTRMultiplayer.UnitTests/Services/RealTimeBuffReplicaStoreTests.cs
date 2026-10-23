@@ -8,6 +8,7 @@ using Kingmaker.UnitLogic.Buffs.Blueprints;
 using Kingmaker.UnitLogic.Mechanics;
 using NUnit.Framework;
 using WOTRMultiplayer.Entities.Units;
+using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.UnitTests.Services
@@ -96,6 +97,43 @@ namespace WOTRMultiplayer.UnitTests.Services
             var blueprint = Bare<BlueprintBuff>();
             Assert.Throws<InvalidOperationException>(() => RealTimeBuffReplicaStore.CreateDetached(blueprint,
                 Bare<MechanicsContext>(), new NetworkBuff { Id = "id", BlueprintId = "different" }, TimeSpan.Zero));
+        }
+
+        [Test]
+        public void ConfirmedProjectionKeepsHostAbilityIdentityAndIsMutationIsolated()
+        {
+            var blueprint = Bare<BlueprintBuff>();
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("11111111111111111111111111111111");
+            var host = new NetworkBuff
+            {
+                Id = "host-buff", BlueprintId = blueprint.AssetGuid.ToString(), Rank = 1,
+                TimeLeft = TimeSpan.FromSeconds(12), NextTickTime = TimeSpan.MaxValue,
+                NextResourceSpendingTime = TimeSpan.MaxValue,
+                ContextChain = [new NetworkBuffContextState
+                {
+                    BlueprintId = "context-blueprint", Params = new NetworkAbilityParams(),
+                    SourceAbility = new NetworkAbility { Id = "host-ability", BlueprintId = "ability-blueprint" }
+                }]
+            };
+            var buff = RealTimeBuffReplicaStore.CreateDetached(blueprint, Bare<MechanicsContext>(), host,
+                TimeSpan.FromSeconds(100));
+            host.ContextChain[0].SourceAbility.Id = "caller-mutated";
+            var projected = RealTimeBuffReplicaStore.ProjectConfirmed(buff, new NetworkBuff
+            {
+                Id = "host-buff", BlueprintId = blueprint.AssetGuid.ToString(), TimeLeft = TimeSpan.FromSeconds(9),
+                NextTickTime = TimeSpan.FromSeconds(3), NextResourceSpendingTime = TimeSpan.FromSeconds(4),
+                ContextChain = [new NetworkBuffContextState
+                {
+                    Params = new NetworkAbilityParams(),
+                    SourceAbility = new NetworkAbility { Id = "client-ability" }
+                }]
+            });
+
+            Assert.That(projected.ContextChain[0].SourceAbility.Id, Is.EqualTo("host-ability"));
+            Assert.That(projected.TimeLeft, Is.EqualTo(TimeSpan.FromSeconds(9)));
+            projected.ContextChain[0].SourceAbility.Id = "projection-mutated";
+            Assert.That(RealTimeBuffReplicaStore.ProjectConfirmed(buff, projected)
+                .ContextChain[0].SourceAbility.Id, Is.EqualTo("host-ability"));
         }
     }
 }

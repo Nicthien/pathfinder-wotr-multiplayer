@@ -133,7 +133,9 @@
         "P2P": { "port": { "title": "Port", "tooltip": "Port des connexions pair à pair. Laissez 0 pour choisir automatiquement le premier port disponible." } }
       },
       "miscellaneous": {
-        "title": "Divers", "hideServerAddress": { "title": "Masquer l'adresse du serveur", "tooltip": "Masque l'adresse IP dans l'interface pour protéger votre vie privée." },
+        "title": "Divers",
+        "regroupDistantPlayersOnCombatStart": { "title": "Regrouper les joueurs éloignés au début du combat", "tooltip": "Si cette option est activée, l'hôte téléporte les personnages contrôlés par les joueurs situés à plus de 30 mètres près du membre du groupe qui a engagé l'ennemi. L'initialisation autoritaire du combat synchronise ensuite leur position chez tous les joueurs." },
+        "hideServerAddress": { "title": "Masquer l'adresse du serveur", "tooltip": "Masque l'adresse IP dans l'interface pour protéger votre vie privée." },
         "trackConnectionHistory": { "title": "Conserver l'historique des connexions", "tooltip": "Permet de rejoindre rapidement les parties déjà rejointes avec succès." },
         "maxConnectionHistoryRecords": { "title": "Nombre maximal de connexions conservées", "tooltip": "Limite le nombre d'entrées enregistrées dans l'historique." }
       },

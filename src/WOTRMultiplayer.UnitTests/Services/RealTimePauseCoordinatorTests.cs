@@ -10,6 +10,12 @@ namespace WOTRMultiplayer.UnitTests.Services
         private static readonly long[] Players = [-1, 42];
 
         [Test]
+        public void NewCombat_DefaultsToFreeResume()
+        {
+            Assert.That(new NetworkRealTimeCombatState().PausePolicy, Is.EqualTo(PausePolicy.AnyoneFreeResume));
+        }
+
+        [Test]
         public void HostOnly_RejectsClientPauseAndResume()
         {
             var state = Create(PausePolicy.HostOnly);

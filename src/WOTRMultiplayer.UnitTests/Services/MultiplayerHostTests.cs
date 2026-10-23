@@ -53,6 +53,22 @@ namespace WOTRMultiplayer.UnitTests.Services
         private IMapper _mapper;
         private IMainThreadAccessor _mainThreadAccessor;
 
+        [TestCase(false, false, false, true)]
+        [TestCase(false, true, false, false)]
+        [TestCase(false, false, true, false)]
+        [TestCase(true, true, true, false)]
+        public void RepairCheckpointRequiresAcceptedActionsToDrainEvenWhenPaused(
+            bool alreadyPaused,
+            bool activeProjectiles,
+            bool activeAtomicActions,
+            bool expected)
+        {
+            Assert.That(MultiplayerHost.CanCaptureRepairCheckpoint(
+                alreadyPaused,
+                activeProjectiles,
+                activeAtomicActions), Is.EqualTo(expected));
+        }
+
         [Test]
         public void RealTimeSynchronizationBarrier_BlocksSaving()
         {
@@ -538,6 +554,29 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => _gameInteractionService.SetPause(true)).MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
                 x.Stage == (int)RealTimeModeTransitionStage.Prepare))).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public async Task CombatModeSwitch_PeerRequiresNativeReconstruction_AbortsBeforeCommit()
+        {
+            PrepareRealTimeRepairTest();
+            A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(false, A<Func<bool>>._))
+                .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
+            Assert.That(await _multiplayerHost.RequestRealTimeCombatModeAsync(CombatMode.TurnBased), Is.True);
+
+            FakeUtils.GetNetworkReceiverHandler<ClientRealTimeModeTransitionAck>(_networkServer)(42,
+                new ClientRealTimeModeTransitionAck
+                {
+                    Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Prepare,
+                    Applied = true, RequiresNativeReconstruction = true
+                });
+
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Abort))).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeModeTransition>.That.Matches(x =>
+                x.Stage == (int)RealTimeModeTransitionStage.Commit))).MustNotHaveHappened();
         }
 
         [Test]
@@ -1084,6 +1123,28 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(accepted, Is.True);
             A.CallTo(() => _combatInteractionService.MoveUnit(A<NetworkUnitMoveTo>._)).MustNotHaveHappened();
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatCommandAccepted>.That.Matches(x => x.PlayerId == NetworkConstants.HostPlayerId && x.AuthoritativeSequence == 1)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void LocalHostRealTimeCommand_ForNativeUnassignedCombatant_IsBroadcast()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            var hostPlayer = new NetworkPlayer(NetworkConstants.HostPlayerId);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Combat = new NetworkCombat { Stage = NetworkCombatStage.Running },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.RealTimeWithPause, Epoch = 3 }
+            };
+            _multiplayerHost.Game.Players.Add(hostPlayer);
+
+            var accepted = _multiplayerHost.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.Attack,
+                attack: new NetworkUnitAttack { InitiatorUnitId = "native-enemy", TargetUnitId = "host-unit" });
+
+            Assert.That(accepted, Is.True);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeCombatCommandAccepted>.That.Matches(x =>
+                    x.PlayerId == NetworkConstants.HostPlayerId && x.Attack.InitiatorUnitId == "native-enemy")))
                 .MustHaveHappenedOnceExactly();
         }
 

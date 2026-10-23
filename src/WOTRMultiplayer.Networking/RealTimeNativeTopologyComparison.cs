@@ -45,24 +45,53 @@ namespace WOTRMultiplayer.Networking
             RequireValid(expected); RequireValid(actual);
             var left = expected.Entities.OrderBy(entity => entity.Id, StringComparer.Ordinal).ToArray();
             var right = actual.Entities.OrderBy(entity => entity.Id, StringComparer.Ordinal).ToArray();
-            if (left.Length != right.Length) return "entities-count";
+            if (left.Length != right.Length)
+            {
+                var leftIds = new HashSet<string>(left.Select(entity => entity.Id), StringComparer.Ordinal);
+                var rightIds = new HashSet<string>(right.Select(entity => entity.Id), StringComparer.Ordinal);
+                var missing = leftIds.Except(rightIds, StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).Take(8);
+                var extra = rightIds.Except(leftIds, StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).Take(8);
+                return $"entities-count:expected={left.Length};actual={right.Length};missing={string.Join(",", missing)};extra={string.Join(",", extra)}";
+            }
             for (var index = 0; index < left.Length; index++)
             {
                 var a = left[index]; var b = right[index]; var prefix = a.Id + ":";
                 if (a.Id != b.Id) return prefix + "entity-id";
                 if (a.Kind != b.Kind) return prefix + "entity-kind";
-                if (!a.Parts.SequenceEqual(b.Parts, StringComparer.Ordinal)) return prefix + "parts-order-or-types";
-                if (a.Facts.Count != b.Facts.Count) return prefix + "facts-count";
-                for (var factIndex = 0; factIndex < a.Facts.Count; factIndex++)
+                // EntityPartsManager may rebuild its internal list during the native
+                // PreSave/PostSave lifecycle.  Lookup is type based, so the list order is
+                // not part of the native topology; the types and their multiplicities are.
+                var expectedParts = a.Parts.OrderBy(part => part, StringComparer.Ordinal).ToList();
+                var actualParts = b.Parts.OrderBy(part => part, StringComparer.Ordinal).ToList();
+                if (!expectedParts.SequenceEqual(actualParts, StringComparer.Ordinal))
                 {
-                    var x = a.Facts[factIndex]; var y = b.Facts[factIndex]; var factPrefix = prefix + x.Id + ":";
-                    if (x.Id != y.Id || x.RuntimeType != y.RuntimeType || x.BlueprintId != y.BlueprintId)
-                        return factPrefix + "fact-order-type-or-blueprint";
-                    if (x.Components.Count != y.Components.Count) return factPrefix + "components-count";
-                    for (var component = 0; component < x.Components.Count; component++)
-                        if (x.Components[component].RuntimeType != y.Components[component].RuntimeType
-                            || x.Components[component].SourceName != y.Components[component].SourceName)
-                            return factPrefix + "component-order-type-or-source:" + component;
+                    var unmatched = new List<string>(actualParts);
+                    var missingParts = new List<string>();
+                    foreach (var part in expectedParts)
+                    {
+                        var match = unmatched.FindIndex(value => string.Equals(value, part, StringComparison.Ordinal));
+                        if (match < 0) missingParts.Add(part); else unmatched.RemoveAt(match);
+                    }
+                    return prefix + "parts-types:missing=" + string.Join(",", missingParts.Take(8))
+                        + ";extra=" + string.Join(",", unmatched.Take(8));
+                }
+                string ComponentSignature(NetworkNativeComponentTopology component) =>
+                    component.RuntimeType + "@" + component.SourceName;
+                string FactSignature(NetworkNativeFactTopology fact) => fact.RuntimeType + "@" + fact.BlueprintId
+                    + "[" + string.Join("|", fact.Components.Select(ComponentSignature)
+                        .OrderBy(value => value, StringComparer.Ordinal)) + "]";
+                var expectedFacts = a.Facts.Select(FactSignature).OrderBy(value => value, StringComparer.Ordinal).ToList();
+                var actualFacts = b.Facts.Select(FactSignature).OrderBy(value => value, StringComparer.Ordinal).ToList();
+                if (!expectedFacts.SequenceEqual(actualFacts, StringComparer.Ordinal))
+                {
+                    var unmatchedFacts = new List<string>(actualFacts);
+                    var missingFacts = new List<string>();
+                    foreach (var fact in expectedFacts)
+                    {
+                        var match = unmatchedFacts.FindIndex(value => string.Equals(value, fact, StringComparison.Ordinal));
+                        if (match < 0) missingFacts.Add(fact); else unmatchedFacts.RemoveAt(match);
+                    }
+                    return prefix + $"facts-inventory:expected={expectedFacts.Count};actual={actualFacts.Count};missing={string.Join(",", missingFacts.Take(4))};extra={string.Join(",", unmatchedFacts.Take(4))}";
                 }
             }
             return null;
