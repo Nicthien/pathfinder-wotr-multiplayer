@@ -152,6 +152,43 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(client.IsSavingBlockedByCombatSync, Is.False);
         }
 
+        [Test]
+        public void FinalCheckpointRetriesTransientNativeCombatMembershipWithoutFreezingIt()
+        {
+            var finalState = new NetworkCombatState
+            {
+                Units =
+                [
+                    new()
+                    {
+                        Id = "settling-enemy",
+                        Descriptor = new()
+                        {
+                            Vitals = new() { IsInCombat = true, IsFinallyDead = true, LifeState = 2 }
+                        }
+                    }
+                ]
+            };
+            var mainThread = new Queue<Action>();
+            var (host, _, _, _, queued, _) = CreatePair(finalState, mainThread, nativeRecovery: true);
+            host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.CombatEnded();
+            if (!RealTimePresentationRuntime.Enabled) return;
+
+            host.PublishRealTimeCombatSnapshot();
+            mainThread.Dequeue()();
+
+            Assert.That(queued, Is.Empty);
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+
+            finalState.Units[0].Descriptor.Vitals.IsInCombat = false;
+            host.PublishRealTimeCombatSnapshot();
+            mainThread.Dequeue()();
+
+            Assert.That(queued.Dequeue(), Is.TypeOf<NotifyRealTimeCombatEnd>());
+        }
+
         [TestCase("apply")]
         [TestCase("hash")]
         [TestCase("peer")]
@@ -225,6 +262,21 @@ namespace WOTRMultiplayer.UnitTests.Services
             await PumpCombatEnd(null, queued, hostNetwork, clientNetwork, host, client);
             Assert.That(host.Game.Combat, Is.Null);
             Assert.That(client.Game.Combat, Is.Null);
+        }
+
+        [Test]
+        public async Task ManualSynchronizationRetriesAnEndCaptureThatFailedBeforePublication()
+        {
+            var (host, _, _, _, queued, _) = CreatePair(nativeRecovery: true);
+            host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
+            host.CombatEnded();
+            if (!RealTimePresentationRuntime.Enabled) return;
+            typeof(MultiplayerHost).GetField("_endFailed", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(host, true);
+
+            Assert.That(await host.ForceCombatSynchronizationAsync(), Is.True);
+            Assert.That(queued.Dequeue(), Is.TypeOf<NotifyRealTimeCombatEnd>());
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
         }
 
         private static async Task PumpCombatEnd(Queue<Action> mainThread, Queue<object> queued,

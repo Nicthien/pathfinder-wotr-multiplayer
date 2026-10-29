@@ -27,7 +27,7 @@ namespace WOTRMultiplayer.Services
                 Game.Combat.Stage, state.Mode, state.Phase, Game.Combat.Turn?.Stage, Game.Combat.Turn?.UnitId);
             try
             {
-                if (state.CombatEndPending) { TickRealTimeCombatEnd(); return true; }
+                if (state.CombatEndPending) return RetryRealTimeCombatEnd();
                 if (state.Phase != CombatSynchronizationPhase.Stable)
                 {
                     // A transition owns its checkpoint: do not start a concurrent repair.
@@ -41,8 +41,7 @@ namespace WOTRMultiplayer.Services
                 {
                     if (state.Phase != CombatSynchronizationPhase.Stable
                         && state.Phase != CombatSynchronizationPhase.Repairing) return false;
-                    await BeginRealTimeRepairAsync();
-                    return true;
+                    return await TryBeginRealTimeRepairAsync();
                 }
                 if (Game.Combat.Stage != NetworkCombatStage.Running) return false;
                 var turn = Game.Combat.Turn;

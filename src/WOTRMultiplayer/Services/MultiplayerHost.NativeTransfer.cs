@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,7 @@ namespace WOTRMultiplayer.Services
             public bool LoadRequested;
             public bool VerificationRequested;
             public bool CommitRequested;
+            public IReadOnlyCollection<string> RetainedCombatUnitIds;
             public Func<bool> VerificationOwned;
             public NetworkCombatState Reference;
             public byte[] ReferenceBytes;
@@ -46,9 +48,11 @@ namespace WOTRMultiplayer.Services
         // Enclosing reconstruction barrier must subsequently restore/verify its
         // reference state and explicitly Commit or Abort. This receipt never
         // changes the combat phase, clears graph obligations or resumes play.
-        internal async Task<NotifyRealTimeNativeCheckpoint> ReconstructCurrentNativeCheckpointAsync(Func<bool> barrierOwned)
+        internal async Task<NotifyRealTimeNativeCheckpoint> ReconstructCurrentNativeCheckpointAsync(
+            Func<bool> barrierOwned, IReadOnlyCollection<string> retainedCombatUnitIds = null)
         {
-            var manifest = await TransferCurrentNativeCheckpointAsync(barrierOwned);
+            var manifest = await TransferCurrentNativeCheckpointAsync(barrierOwned,
+                retainedCombatUnitIds);
             if (manifest == null) return null;
             var requested = new TaskCompletionSource<NativeTransfer>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
@@ -121,7 +125,7 @@ namespace WOTRMultiplayer.Services
                         if (transfer.ReferenceBytes == null || transfer.Reference == null
                             || RealTimeNativeCheckpointLimits.Hash(transfer.ReferenceBytes) != transfer.ReferenceHash)
                             throw new InvalidOperationException("native-reference-host-source-invalid");
-                        var current = CombatInteraction.GetRealTimeNativeReferenceState();
+                        var current = GetCurrentNativeReference(transfer.RetainedCombatUnitIds);
                         RealTimeAcceptedOrderLedger.RequireUnchanged(transfer.State, transfer.Reference.AcceptedOrderReference,
                             transfer.Session.Id, transfer.Session.LoadedSaveSeed);
                         if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current }) != manifest.CanonicalStateHash
@@ -164,14 +168,75 @@ namespace WOTRMultiplayer.Services
             && transfer.State.Mode == CombatMode.RealTimeWithPause && transfer.BarrierOwned()
             && (!transfer.VerificationRequested || transfer.VerificationOwned?.Invoke() == true);
 
+        private async Task<NetworkCombatState> CaptureStableNativeReferenceAsync(
+            NetworkGame session, NetworkCombat combat, NetworkRealTimeCombatState state,
+            Func<bool> barrierOwned, IReadOnlyCollection<string> retainedCombatUnitIds)
+        {
+            Exception lastTransient = null;
+            // A paused Owlcat world can still finish immediate fact attach/detach
+            // callbacks for a short time.  The field log from 2026-10-28 caught a
+            // party fact between those lifecycle states.  Keep the strict graph
+            // validation, but wait for a genuinely quiescent graph instead of
+            // turning a sub-frame transient into a failed reconstruction.
+            const int attempts = 50;
+            const int retryDelayMilliseconds = 40;
+            for (var attempt = 1; attempt <= attempts; attempt++)
+            {
+                var captured = new TaskCompletionSource<NetworkCombatState>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _mainThreadAccessor.Post(() =>
+                {
+                    lock (ActionLock)
+                    {
+                        try
+                        {
+                            if (_nativeTransfer != null || !RealTimePresentationRuntime.Enabled || !IsActive
+                                || !barrierOwned() || !ReferenceEquals(Game, session)
+                                || !ReferenceEquals(Game?.Combat, combat)
+                                || !ReferenceEquals(Game?.RealTimeCombat, state)
+                                || state.Mode != CombatMode.RealTimeWithPause
+                                || state.Phase == CombatSynchronizationPhase.Stable || !GameInteraction.IsPaused)
+                                throw new InvalidOperationException("native-transfer-host-barrier-not-ready");
+                            var reference = GetCurrentNativeReference(retainedCombatUnitIds);
+                            RealTimeNativeTopologyComparison.RequireValid(reference.NativeTopology);
+                            reference.AcceptedOrderReference = RealTimeAcceptedOrderLedger.CaptureReference(
+                                state, session.Id, session.LoadedSaveSeed);
+                            captured.TrySetResult(reference);
+                        }
+                        catch (InvalidOperationException error) when (
+                            error.Message?.StartsWith("native-graph-invalid:", StringComparison.Ordinal) == true)
+                        {
+                            lastTransient = error;
+                            if (attempt == 1 || attempt == attempts)
+                                Logger.LogWarning(error,
+                                    "Native graph is not quiescent during checkpoint capture. Attempt={Attempt}, MaximumAttempts={MaximumAttempts}",
+                                    attempt, attempts);
+                            captured.TrySetResult(null);
+                        }
+                        catch (Exception error) { captured.TrySetException(error); }
+                    }
+                });
+                var reference = await captured.Task;
+                if (reference != null) return reference;
+                if (attempt < attempts) await Task.Delay(retryDelayMilliseconds);
+            }
+            throw new InvalidOperationException("native-reference-did-not-quiesce", lastTransient);
+        }
+
         // Future native reconstruction coordinator calls this AFTER owning a
         // repair barrier. Success only means client-verified archive bytes, not
         // loaded mechanics, Commit, resumed combat or permission to save.
-        internal async Task<NotifyRealTimeNativeCheckpoint> TransferCurrentNativeCheckpointAsync(Func<bool> barrierOwned)
+        internal async Task<NotifyRealTimeNativeCheckpoint> TransferCurrentNativeCheckpointAsync(
+            Func<bool> barrierOwned, IReadOnlyCollection<string> retainedCombatUnitIds = null)
         {
             if (barrierOwned == null) throw new ArgumentNullException(nameof(barrierOwned));
             LastNativeTransferFailure = null;
             NativeTransfer transfer = null;
+            var sourceSession = Game;
+            var sourceCombat = Game?.Combat;
+            var sourceState = Game?.RealTimeCombat;
+            var reference = await CaptureStableNativeReferenceAsync(
+                sourceSession, sourceCombat, sourceState, barrierOwned,
+                retainedCombatUnitIds);
             var started = new TaskCompletionSource<NativeTransfer>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
@@ -180,6 +245,8 @@ namespace WOTRMultiplayer.Services
                     try
                     {
                         if (_nativeTransfer != null || !RealTimePresentationRuntime.Enabled || !IsActive || !barrierOwned()
+                            || !ReferenceEquals(Game, sourceSession) || !ReferenceEquals(Game?.Combat, sourceCombat)
+                            || !ReferenceEquals(Game?.RealTimeCombat, sourceState)
                             || Game?.Combat == null || Game.RealTimeCombat.Mode != CombatMode.RealTimeWithPause
                             || Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable || !GameInteraction.IsPaused)
                             throw new InvalidOperationException("native-transfer-host-barrier-not-ready");
@@ -189,9 +256,6 @@ namespace WOTRMultiplayer.Services
                         if (!RealTimeNativeCheckpointLimits.IsHash(fingerprint)
                             || peers[0].ContentState?.RealTimeBuildFingerprint != fingerprint)
                             throw new InvalidOperationException("native-transfer-build-fingerprint-mismatch");
-                        var reference = CombatInteraction.GetRealTimeNativeReferenceState();
-                        RealTimeNativeTopologyComparison.RequireValid(reference.NativeTopology);
-                        reference.AcceptedOrderReference = RealTimeAcceptedOrderLedger.CaptureReference(Game.RealTimeCombat, Game.Id, Game.LoadedSaveSeed);
                         var referenceBytes = RealTimeNativeReferenceCodec.Encode(Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(reference));
                         var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = reference });
                         var owner = new NativeTransfer
@@ -203,6 +267,8 @@ namespace WOTRMultiplayer.Services
                             Phase = Game.RealTimeCombat.Phase,
                             Peer = peers[0].Id,
                             Reference = reference, ReferenceBytes = referenceBytes,
+                            RetainedCombatUnitIds = retainedCombatUnitIds == null
+                                ? null : retainedCombatUnitIds.ToArray(),
                             ReferenceHash = RealTimeNativeCheckpointLimits.Hash(referenceBytes),
                             Deadline = DateTime.UtcNow.AddSeconds(60),
                             Prepare = new NotifyRealTimeNativeCheckpoint
@@ -254,7 +320,7 @@ namespace WOTRMultiplayer.Services
                         try
                         {
                             if (!IsCurrentNativeTransfer(transfer)) { installed.TrySetResult(false); return; }
-                            var current = CombatInteraction.GetRealTimeNativeReferenceState();
+                            var current = GetCurrentNativeReference(transfer.RetainedCombatUnitIds);
                             RealTimeAcceptedOrderLedger.RequireUnchanged(transfer.State, transfer.Reference.AcceptedOrderReference,
                                 transfer.Session.Id, transfer.Session.LoadedSaveSeed);
                             var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = current });
@@ -292,6 +358,21 @@ namespace WOTRMultiplayer.Services
                 _mainThreadAccessor.Post(() => { lock (ActionLock) FailNativeCheckpointTransfer(transfer, "native-transfer-capture-or-send-failed"); });
                 return null;
             }
+        }
+
+        private NetworkCombatState GetCurrentNativeReference(
+            IReadOnlyCollection<string> retainedCombatUnitIds)
+        {
+            // Capture the complete RT participant registry only when an enclosing
+            // combat-end barrier supplies its exact immutable participant set.
+            // Filtering to that set prevents older encounters remembered by the
+            // presentation registry from changing the final canonical digest.
+            var reference = CombatInteraction.GetRealTimeNativeReferenceState(
+                retainedCombatUnitIds != null);
+            if (retainedCombatUnitIds != null)
+                CombatInteractionService.RetainNativeCombatUnits(reference,
+                    retainedCombatUnitIds);
+            return reference;
         }
 
         private void TickNativeCheckpointTransfer()

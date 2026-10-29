@@ -493,8 +493,25 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
 
             try
             {
+                var game = Game.Instance;
+                if (CombatSaveCaptureScope.Active)
+                {
+                    // Owlcat temporarily turns the existing player/facts off and
+                    // back on while serializing a native checkpoint. EntityFact.Attach
+                    // normally allocates a new id on that re-attach, which made the
+                    // supposedly read-only capture mutate live buff identities and
+                    // forced every RTwP -> TB reconstruction to abort. Only reuse an
+                    // id already owned by this exact fact; a genuinely new fact while
+                    // the world is held remains a hard failure below. The scope
+                    // may be authorized either by the combat-save pause lease or
+                    // by the host's native reconstruction barrier, so Active is
+                    // the single source of truth here.
+                    if (!string.IsNullOrWhiteSpace(fact?.UniqueId))
+                        return fact.UniqueId;
+                    throw new InvalidOperationException("native-checkpoint-fact-id-not-established");
+                }
                 var rawIdentifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{fact.GetType().Name}:{fact.NameForAcronym}:{fact.Owner?.UniqueId}";
-                var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.Fact, Game.Instance.Player.GameId, rawIdentifier);
+                var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.Fact, game.Player.GameId, rawIdentifier);
                 Main.GetLogger<EntitiesIdsPatches>().LogDebug("Fact id has been generated. RawIdentifier={RawIdentifier}, Id={Id}", rawIdentifier, id);
                 return id;
             }

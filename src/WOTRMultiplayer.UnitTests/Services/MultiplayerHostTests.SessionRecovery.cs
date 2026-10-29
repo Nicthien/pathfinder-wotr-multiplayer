@@ -98,6 +98,36 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustHaveHappenedOnceExactly();
         }
 
+        [Test]
+        public void SessionRecovery_WrongClientRoundRequestsAuthoritativeTurnAgain()
+        {
+            var game = SessionRecoveryGame();
+            game.Combat = new NetworkCombat { Seed = 21, Round = 0, Stage = NetworkCombatStage.Running,
+                Turn = new NetworkCombatTurn { UnitId = "enemy", Stage = NetworkCombatTurnStage.Starting } };
+            game.Combat.PlayersNextTurnInitialization.TryAdd("enemy", new() { -1 });
+
+            FakeUtils.GetNetworkReceiverHandler<ClientCombatTurnStarted>(_networkServer)(1,
+                new ClientCombatTurnStarted { UnitId = "enemy", Round = 1 });
+
+            Assert.That(game.Combat.PlayersNextTurnInitialization["enemy"], Does.Not.Contain(1L));
+            A.CallTo(() => _networkServer.Send(1, A<NotifyInvalidCombatTurnStarted>.That.Matches(message =>
+                message.UnitId == "enemy" && message.Round == 0 && message.CombatSeed == 21)))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void CombatInitialization_WaitsUntilAreaLoadingBarrierIsReleased()
+        {
+            var game = SessionRecoveryGame();
+            game.CurrentArea.Seed = 12;
+            game.Combat = new NetworkCombat { Stage = NetworkCombatStage.Initiating };
+            game.ForcedPause = new NetworkForcedPause { Reason = NetworkForcedPauseReason.AreaLoading };
+
+            Assert.That(_multiplayerHost.CanInitializeCombat(), Is.False);
+            Assert.That(game.Combat.IsInitiated, Is.False);
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyCombatInitiated>._)).MustNotHaveHappened();
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void SessionRecovery_RejoinWaitsWithoutFreezingTurnBasedHostAndExpiresWithSession(bool replaceSession)

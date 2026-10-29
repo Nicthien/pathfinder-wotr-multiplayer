@@ -43,6 +43,25 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Is.EqualTo(new[] { "active-party", "active-enemy" }));
         }
 
+        [Test]
+        public void CombatEndNativeReferenceRetainsFinalHistoricalParticipants()
+        {
+            var state = new NetworkCombatState
+            {
+                Units =
+                [
+                    new NetworkUnit { Id = "party" },
+                    new NetworkUnit { Id = "defeated-enemy" }
+                ]
+            };
+
+            CombatInteractionService.RetainNativeCombatUnits(state,
+                Array.Empty<string>(), retainHistoricalCombatUnits: true);
+
+            Assert.That(state.Units.ConvertAll(unit => unit.Id),
+                Is.EqualTo(new[] { "party", "defeated-enemy" }));
+        }
+
         [TestCase(true, false, 12, false)]
         [TestCase(true, true, 0, true)]
         [TestCase(false, false, 0, false)]

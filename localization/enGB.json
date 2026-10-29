@@ -288,16 +288,16 @@
                     "tooltip": "Use it to quickly highlight a specific world position, unit, map object, or other target. Your ping will be visible to other players, helping you communicate important locations or points of interest"
                 },
                 "showLobby": {
-                    "title": "Show Lobby",
-                    "tooltip": "Opens the lobby window, which can also be accessed through the Esc menu"
+                    "title": "Show Lobby (Host)",
+                    "tooltip": "Opens the host lobby window, which can also be accessed through the Esc menu"
                 },
                 "forceUnpause": {
-                    "title": "Force Unpause",
-                    "tooltip": "Completly removes local pause. Use this in case of any bugs with synced pause"
+                    "title": "Force Unpause (Host)",
+                    "tooltip": "Completely removes local pause. Host-only recovery tool for bugs with synchronized pause"
                 },
                 "forceCombatEnd": {
-                    "title": "Force Combat End",
-                    "tooltip": "Immediately and forcefully exit the current combat state. Use this if combat becomes stuck, desynchronized, or does not end correctly"
+                    "title": "Force Combat End (Host)",
+                    "tooltip": "Immediately and forcefully exits the current combat state. Host-only recovery tool for stuck, desynchronized, or incorrectly ending combat"
                 }
             },
             "dangerZone": {

@@ -438,6 +438,8 @@ namespace WOTRMultiplayer.Services
             Game.DialogState.CurrentCueName = cueName;
             Game.DialogState.Answer = null;
             Game.DialogState.HasSystemAnswer = hasSystemAnswer;
+            Game.DialogState.ContinueEnabled = !hasSystemAnswer;
+            Game.DialogState.WitnessRetryScheduled = false;
             Game.DialogState.VoteRoundId = null;
             Game.DialogState.IsSelectingAnswer = false;
             Game.DialogState.VoteCommitted = false;
@@ -2049,6 +2051,7 @@ namespace WOTRMultiplayer.Services
                     state.PendingMode = null;
                     state.PreviousMode = null;
                     state.Phase = CombatSynchronizationPhase.Stable;
+                    RealTimeCombatCoordinator.ClearManualPauseForTurnBased(state);
                     if (mode == CombatMode.TurnBased)
                     {
                         _disconnectedDuringRealTimeCombat = false;
@@ -2232,7 +2235,25 @@ namespace WOTRMultiplayer.Services
                     await GameInteraction.SetPauseAsync(true);
                     return;
                 }
-                if (state.RecoveryStatus == "stopped"
+                var verifiedNativeAbortFallback = state.RecoveryStatus == "stopped"
+                    && stage == RealTimeRepairStage.Fallback
+                    && message.Epoch == state.Epoch && message.State != null
+                    && _nativeReceivePrepare?.Epoch == message.Epoch
+                    && _nativeReceiveFailed && _nativeAbortAcknowledged
+                    && !WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease.IsActive
+                    && _nativeReferenceRestorationOwner == null && !_nativeCommitPending;
+                if (verifiedNativeAbortFallback)
+                {
+                    // The host waited for our native Abort acknowledgement before
+                    // issuing this complete turn-based checkpoint.  Retire the
+                    // failed native receiver so its safety latch does not discard
+                    // the verified fallback and strand both peers in Repairing.
+                    ResetNativeCheckpointReceive();
+                    state.RecoveryStatus = "falling-back";
+                    state.RecoveryFailure = "native-reconstruction-not-committed";
+                    state.Phase = CombatSynchronizationPhase.Repairing;
+                }
+                else if (state.RecoveryStatus == "stopped"
                     && (stage != RealTimeRepairStage.Prepare || message.Epoch <= state.Epoch)) return;
                 if (_nativeReceivePrepare?.Epoch == message.Epoch && IsCurrentNativeReceive())
                 {
@@ -2427,6 +2448,7 @@ namespace WOTRMultiplayer.Services
                     }
                     if (state.Mode == CombatMode.TurnBased)
                     {
+                        RealTimeCombatCoordinator.ClearManualPauseForTurnBased(state);
                         _disconnectedDuringRealTimeCombat = false;
                         _localCriticalFaultState = null;
                     }
@@ -3162,6 +3184,11 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
+            if (DeferRemoteLeveling(playerId, characterLevelingStarted.UnitId, levelingType))
+            {
+                return;
+            }
+
             InitiateLeveling(characterLevelingStarted.UnitId, levelingType);
             LevelingInteraction.StartLeveling(Game.Leveling.UnitId, Game.Leveling.Type);
         }
@@ -3183,13 +3210,19 @@ namespace WOTRMultiplayer.Services
                 && ReferenceEquals(Game, session) && ReferenceEquals(Game?.Combat, combat)
                 && combat?.Stage == NetworkCombatStage.Running
                 && Game.Id == message.SessionId && Game.LoadedSaveSeed == message.LoadedSaveSeed
-                && combat.Seed == message.CombatSeed && combat.Round == message.Round
+                && combat.Seed == message.CombatSeed
                 && Game.RealTimeCombat.Mode == CombatMode.TurnBased
                 && Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable;
             if (!Current()) return;
             _mainThreadAccessor.Post(() =>
             {
                 if (!Current()) return;
+                if (combat.Round != message.Round)
+                {
+                    Logger.LogWarning("[TurnRecovery] Correcting local network round from host. Local={LocalRound}, Host={HostRound}",
+                        combat.Round, message.Round);
+                    combat.Round = message.Round;
+                }
                 if (combat.Turn?.UnitId == message.UnitId)
                 {
                     // The first acknowledgement may have raced the host barrier.
@@ -3258,7 +3291,7 @@ namespace WOTRMultiplayer.Services
             bool Current() => IsActive && ReferenceEquals(Game, session) && ReferenceEquals(Game?.Combat, combat)
                 && turn != null && ReferenceEquals(combat?.Turn, turn) && playerId == NetworkConstants.HostPlayerId
                 && message.SessionId == Game.Id && message.LoadedSaveSeed == Game.LoadedSaveSeed
-                && message.CombatSeed == combat.Seed && message.Round == combat.Round && message.UnitId == turn.UnitId;
+                && message.CombatSeed == combat.Seed && message.UnitId == turn.UnitId;
             if (!Current()) return;
             if (ReferenceEquals(_startSyncAppliedTurn, turn))
             {
@@ -3273,6 +3306,12 @@ namespace WOTRMultiplayer.Services
             _startSyncInFlightTurn = turn;
             try
             {
+                if (combat.Round != message.Round)
+                {
+                    Logger.LogWarning("[TurnRecovery] Correcting local round before start synchronization. Local={LocalRound}, Host={HostRound}",
+                        combat.Round, message.Round);
+                    combat.Round = message.Round;
+                }
                 var combatState = Mapper.Map<NetworkCombatState>(message.CombatState);
                 var areaEffects = Mapper.Map<List<NetworkAreaEffect>>(message.TriggeredAreaEffects);
                 Game.Combat.TriggeredAreaEffects.AddRange(areaEffects);
@@ -3363,6 +3402,13 @@ namespace WOTRMultiplayer.Services
             var areaEffects = Mapper.Map<List<NetworkAreaEffect>>(message.TriggeredAreaEffects);
             Game.Combat.TriggeredAreaEffects.AddRange(areaEffects);
 
+            if (Game.Combat.Round != combatState.RoundNumber)
+            {
+                Logger.LogWarning("Correcting local network round during combat initialization. Local={LocalRound}, Host={HostRound}",
+                    Game.Combat.Round, combatState.RoundNumber);
+                Game.Combat.Round = combatState.RoundNumber;
+            }
+
             await CombatInteraction.UpdateCombatStateAsync(combatState, areaEffects, true);
 
             var confirmation = new ClientCombatInitializationCompleted();
@@ -3435,7 +3481,49 @@ namespace WOTRMultiplayer.Services
             var players = GetSyncedPlayers();
             DialogInteraction.MarkSuggestedCueAnswers(players, suggestions);
             if (Game.DialogState.HasSystemAnswer)
+            {
+                Game.DialogState.ContinueEnabled = message.CanContinue;
                 DialogInteraction.SetDialogContinueButtonState(message.CanContinue);
+                if (!message.CanContinue)
+                    RetryDialogCueWitness(Game.DialogState, message.Dialog, message.CueName);
+            }
+        }
+
+        private async void RetryDialogCueWitness(NetworkDialogState state,
+            Networking.Messages.Contracts.NetworkDialog dialog, string cueName)
+        {
+            if (state == null || dialog == null || state.WitnessRetryScheduled) return;
+            state.WitnessRetryScheduled = true;
+            try
+            {
+                // TCP delivery is reliable, but the first witness may arrive while
+                // the host is replacing one scripted dialog state with the next.
+                // Keep retrying (more slowly after ten seconds) for as long as this
+                // exact cue is current; otherwise a slow load could still deadlock.
+                for (var attempt = 1; ; attempt++)
+                {
+                    await Task.Delay(attempt <= 20 ? 500 : 2000);
+                    if (!IsActive || !ReferenceEquals(Game?.DialogState, state)
+                        || state.ContinueEnabled || !state.HasSystemAnswer
+                        || !string.Equals(state.CurrentCueName, cueName, StringComparison.OrdinalIgnoreCase))
+                        return;
+
+                    if (attempt == 1 || attempt % 10 == 0)
+                    {
+                        Logger.LogWarning("Retrying dialog cue witness. Attempt={Attempt}, DialogId={DialogId}, Cue={Cue}",
+                            attempt, dialog.Id, cueName);
+                    }
+                    Send(new ClientDialogCueWitnessed
+                    {
+                        CueName = cueName,
+                        Dialog = dialog
+                    });
+                }
+            }
+            finally
+            {
+                state.WitnessRetryScheduled = false;
+            }
         }
 
         private void OnNotifyPartyAreaTransitioned(long playerId, NotifyPartyAreaTransitioned partyLeftArea)

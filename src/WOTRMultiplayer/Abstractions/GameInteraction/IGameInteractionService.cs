@@ -32,6 +32,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         bool IsPaused { get; }
 
+        bool IsWorldPaused { get; }
+
         bool IsCapitalPartyMode { get; }
 
         Task ShowZoneLootAsync(string areaExitId);

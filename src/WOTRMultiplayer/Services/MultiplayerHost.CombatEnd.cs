@@ -6,6 +6,7 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Networking.Messages.Game;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.Services
 {
@@ -22,6 +23,8 @@ namespace WOTRMultiplayer.Services
         private NotifyRealTimeCombatEnd _endFrame;
         private RealTimeCombatEndBarrier _endBarrier;
         private long[] _endPeers;
+        private string[] _endParticipantIds;
+        private NetworkCombatState _endFinalState;
         private bool _endNativeReconstructionQueued;
 
         protected override bool TryDeferRealTimeCombatEnd()
@@ -48,6 +51,8 @@ namespace WOTRMultiplayer.Services
                 _endPeers = GetSyncedPlayers().Where(player => player.Id != Game.LocalPlayerId)
                     .Select(player => player.Id).ToArray();
                 _endCaptureQueued = false; _endFailed = false; _endFrame = null; _endBarrier = null;
+                _endParticipantIds = null;
+                _endFinalState = null;
                 _endNativeReconstructionQueued = false;
                 _endDeadline = DateTime.UtcNow.AddSeconds(30);
             }
@@ -112,14 +117,62 @@ namespace WOTRMultiplayer.Services
                     if (!IsCurrentEnd()) return;
                     if (CombatInteraction.HasActiveRealTimeProjectiles() || CombatInteraction.HasActiveRealTimeAtomicActions())
                     { _endCaptureQueued = false; return; }
-                    GameInteraction.SetPause(true);
                     var finalState = await CombatInteraction.GetRealTimeCombatStateAsync();
                     if (!IsCurrentEnd()) return;
-                    if (finalState?.Units == null || finalState.Units.Any(unit => unit?.Descriptor?.Vitals == null
-                        || unit.Descriptor.Vitals.IsInCombat))
-                        throw new InvalidOperationException("combat-end-still-has-active-units");
+                    if (finalState?.Units == null || finalState.Units.Any(unit => unit?.Descriptor?.Vitals == null))
+                        throw new InvalidOperationException("combat-end-invalid-final-unit-state");
+                    if (finalState.Units.Any(unit => unit.Descriptor.Vitals.IsInCombat))
+                    {
+                        // OnCombatEnd can run before the engine's last unit-membership writes. Pausing
+                        // here would freeze those writes forever and turn a transient state into a
+                        // permanent multiplayer barrier. Leave the world running and retry on a later
+                        // main-thread tick; the existing 30-second deadline remains the hard failure.
+                        _endCaptureQueued = false;
+                        GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+                        Logger.LogDebug("Final combat checkpoint is waiting for native unit membership to settle.");
+                        return;
+                    }
+                    var participantIds = finalState.Units.Select(unit => unit.Id).ToArray();
+                    if (!GameInteraction.IsWorldPaused)
+                    {
+                        // Owlcat's IsPaused setter arms the pause for the next Unity tick.
+                        // Capturing the native reference in this same callback therefore sees
+                        // an unpaused world and is correctly rejected. Request the pause now,
+                        // then let the regular combat-end tick retry the capture after the game
+                        // has actually frozen its world.
+                        GameInteraction.SetPause(true);
+                        if (!GameInteraction.IsWorldPaused)
+                        {
+                            _endCaptureQueued = false;
+                            return;
+                        }
+                    }
+                    // The native reconstruction intentionally projects ability contexts to the
+                    // stable source blueprint that survives an Owlcat save/load. Capture the final
+                    // frame through that exact projection as well. Sending the ordinary RT snapshot
+                    // here made the later native digest differ even when both worlds were mechanically
+                    // identical (a long-lived buff could keep AbilityData only in the live world).
+                    finalState = CombatInteraction.GetRealTimeNativeReferenceState(
+                        retainHistoricalCombatUnits: true);
+                    CombatInteractionService.RetainNativeCombatUnits(finalState, participantIds);
+                    // These fields certify the archive itself and are not part of the final gameplay
+                    // frame applied before the native reconstruction barrier.
+                    finalState.NativeTopology = null;
+                    finalState.NativeUnits = null;
+                    finalState.AcceptedOrderReference = null;
+                    if (!IsCurrentEnd()) return;
+                    if (finalState?.Units == null || finalState.Units.Any(unit => unit?.Descriptor?.Vitals == null))
+                        throw new InvalidOperationException("combat-end-invalid-final-unit-state");
+                    if (finalState.Units.Any(unit => unit.Descriptor.Vitals.IsInCombat))
+                    {
+                        _endCaptureQueued = false;
+                        GameInteraction.SetPause(Game.RealTimeCombat.IsManualPauseActive || Game.ForcedPause != null);
+                        return;
+                    }
                     var state = Game.RealTimeCombat;
                     var hash = RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = finalState });
+                    _endParticipantIds = participantIds;
+                    _endFinalState = finalState;
                     if (_endPeers.Length == 0)
                     {
                         // Only for an initially solo host, never drop required peers.
@@ -227,10 +280,23 @@ namespace WOTRMultiplayer.Services
             bool Owned() { lock (ActionLock) return OwnsCombatEndNativeReconstruction(endId, epoch); }
             try
             {
-                var manifest = await ReconstructCurrentNativeCheckpointAsync(Owned);
-                if (!Owned() || manifest == null || manifest.CanonicalStateHash != finalHash
-                    || !await CommitCurrentNativeCheckpointAsync(manifest, Owned))
-                    throw new InvalidOperationException("combat-end-native-reconstruction-not-committed");
+                var manifest = await ReconstructCurrentNativeCheckpointAsync(Owned,
+                    _endParticipantIds);
+                if (!Owned())
+                    throw new InvalidOperationException("combat-end-native-reconstruction-ownership-lost");
+                if (manifest == null)
+                    throw new InvalidOperationException("combat-end-native-reconstruction-missing-manifest");
+                if (manifest.CanonicalStateHash != finalHash)
+                {
+                    NetworkCombatState nativeReference;
+                    lock (ActionLock) nativeReference = _nativeTransfer?.Reference;
+                    throw new InvalidOperationException("combat-end-native-reconstruction-hash-mismatch:"
+                        + $"{finalHash:X16}->{manifest.CanonicalStateHash:X16};"
+                        + $"temporal={RealTimeCombatTemporalDiff.Summarize(_endFinalState, nativeReference) ?? "none"};"
+                        + $"state={RealTimeCombatDiff.Summarize(_endFinalState, nativeReference)}");
+                }
+                if (!await CommitCurrentNativeCheckpointAsync(manifest, Owned))
+                    throw new InvalidOperationException("combat-end-native-reconstruction-commit-refused");
                 _mainThreadAccessor.Post(() =>
                 {
                     lock (ActionLock)
@@ -276,6 +342,24 @@ namespace WOTRMultiplayer.Services
             GameInteraction.SetPause(true);
             Logger.LogError("Combat end remains protected; saving is blocked. Reason={Reason}, EndId={EndId}", reason, _endFrame?.EndId);
             PlayerNotification.ShowWarningNotification(WellKnownKeys.GameNotifications.Combat.FinalSyncFailed.Key);
+        }
+
+        private bool RetryRealTimeCombatEnd()
+        {
+            if (!IsCurrentEnd()) return false;
+            if (_endFailed && _endFrame == null)
+            {
+                // A failure before publication has no immutable peer checkpoint to
+                // preserve. A manual synchronization request may safely retry the
+                // host capture against the same session, combat and loaded world.
+                _endFailed = false;
+                _endCaptureQueued = false;
+                Game.RealTimeCombat.RecoveryStatus = "preparing";
+                Game.RealTimeCombat.RecoveryFailure = null;
+                _endDeadline = DateTime.UtcNow.AddSeconds(30);
+            }
+            TickRealTimeCombatEnd();
+            return true;
         }
     }
 }

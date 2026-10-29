@@ -15,20 +15,43 @@ namespace WOTRMultiplayer.HarmonyPatches
     [HarmonyPatch]
     internal static class CapitalMercenaryPatches
     {
+        private static readonly object TransitionLock = new();
+        private static readonly HashSet<string> TransitionMercenaries = new(StringComparer.OrdinalIgnoreCase);
+
         internal static bool IsEligible(bool multiplayer, bool capital, bool tactical,
             bool custom, bool activeParty, bool scriptedOrHidden)
             => multiplayer && capital && !tactical && custom && activeParty && !scriptedOrHidden;
 
         internal static bool IsCapitalMercenary(UnitEntityData unit)
         {
-            if (unit == null || Main.Multiplayer?.IsActive != true
-                || Game.Instance?.Player?.CapitalPartyMode != true || TacticalCombatHelper.IsActive)
+            if (unit == null || Main.Multiplayer?.IsActive != true || TacticalCombatHelper.IsActive)
                 return false;
+            var capital = Game.Instance?.Player?.CapitalPartyMode == true;
+            bool leased;
+            lock (TransitionLock) leased = TransitionMercenaries.Contains(unit.UniqueId);
+            if (!capital && !leased) return false;
             var companion = unit.Get<UnitPartCompanion>();
-            return IsEligible(true, true, false, unit.IsCustomCompanion(),
+            return IsEligible(true, capital || leased, false, unit.IsCustomCompanion(),
                 companion != null && (int)companion.State == 2,
                 companion == null || companion.ShouldBeHidden || companion.IsIgnoreFixInGame
                 || companion.IsEtudeBracketSetCompanionPosition || companion.GetCurrentSpawner() != null);
+        }
+
+        internal static void CaptureTransitionMercenaries()
+        {
+            lock (TransitionLock)
+            {
+                TransitionMercenaries.Clear();
+                if (Main.Multiplayer?.IsActive != true || Game.Instance?.Player?.CapitalPartyMode != true
+                    || TacticalCombatHelper.IsActive) return;
+                foreach (var unit in Game.Instance.Player.PartyAndPets)
+                    if (IsCapitalMercenary(unit)) TransitionMercenaries.Add(unit.UniqueId);
+            }
+        }
+
+        internal static void ClearTransitionMercenaries()
+        {
+            lock (TransitionLock) TransitionMercenaries.Clear();
         }
 
         private static bool IsMainOrCapitalMercenary(UnitEntityData unit)

@@ -141,9 +141,9 @@
       },
       "hotkeys": {
         "title": "Raccourcis clavier", "ping": { "title": "Signaler", "tooltip": "Signale rapidement un emplacement, une unité, un objet ou une autre cible aux autres joueurs." },
-        "showLobby": { "title": "Afficher le salon", "tooltip": "Ouvre le salon, également accessible depuis le menu Échap." },
-        "forceUnpause": { "title": "Forcer la reprise", "tooltip": "Supprime toute pause locale. À utiliser uniquement si la pause synchronisée reste bloquée." },
-        "forceCombatEnd": { "title": "Forcer la fin du combat", "tooltip": "Quitte immédiatement l'état de combat. À utiliser seulement si le combat est bloqué, désynchronisé ou ne se termine pas correctement." }
+        "showLobby": { "title": "Afficher le salon (hôte)", "tooltip": "Ouvre le salon de l'hôte, également accessible depuis le menu Échap." },
+        "forceUnpause": { "title": "Forcer la reprise (hôte)", "tooltip": "Supprime toute pause locale. Outil de secours réservé à l'hôte si la pause synchronisée reste bloquée." },
+        "forceCombatEnd": { "title": "Forcer la fin du combat (hôte)", "tooltip": "Quitte immédiatement l'état de combat. Outil de secours réservé à l'hôte si le combat est bloqué, désynchronisé ou ne se termine pas correctement." }
       },
       "dangerZone": {
         "title": "Zone à risque (réservée aux utilisateurs avertis)",

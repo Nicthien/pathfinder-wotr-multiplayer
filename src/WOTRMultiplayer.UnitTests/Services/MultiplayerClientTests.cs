@@ -14,6 +14,8 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
+using WOTRMultiplayer.Entities.Dialogs;
+using WOTRMultiplayer.Entities.Leveling;
 using WOTRMultiplayer.Networking;
 using WOTRMultiplayer.Networking.Abstractions;
 using WOTRMultiplayer.Networking.Messages.Game;
@@ -323,6 +325,7 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             _logger = A.Fake<ILogger<MultiplayerClient>>();
             _gameInteractionService = A.Fake<IGameInteractionService>();
+            A.CallTo(() => _gameInteractionService.GetPetOwnerId(A<string>._)).Returns(null);
             A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             _levelingInteractionService = A.Fake<ILevelingInteractionService>();
@@ -366,6 +369,138 @@ namespace WOTRMultiplayer.UnitTests.Services
                 _networkClient,
                 _valueGenerator,
                 _mapper, _mainThreadAccessor = A.Fake<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>());
+        }
+
+        [Test]
+        public void RemoteLevelUpStart_DoesNotOpenOwnersWindowOnClient()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "host-unit", Owner = host }]
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient);
+
+            handler(-1, new NotifyLevelingStarted
+            {
+                UnitId = "host-unit",
+                Type = NetworkLevelingType.Leveling.ToString()
+            });
+
+            Assert.That(_multiplayerClient.Game.Leveling, Is.Null);
+            A.CallTo(() => _levelingInteractionService.StartLeveling(A<string>._, A<NetworkLevelingType>._))
+                .MustNotHaveHappened();
+        }
+
+        [Test]
+        public void OwnedLevelUpStart_StillOpensOnClient()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "client-unit", Owner = client }]
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient);
+
+            handler(-1, new NotifyLevelingStarted
+            {
+                UnitId = "client-unit",
+                Type = NetworkLevelingType.Leveling.ToString()
+            });
+
+            Assert.That(_multiplayerClient.Game.Leveling?.UnitId, Is.EqualTo("client-unit"));
+            A.CallTo(() => _levelingInteractionService.StartLeveling("client-unit", NetworkLevelingType.Leveling))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void RemoteLevelUpWhileLocalPlayerRoams_ReplaysHeadlesslyWithoutOpeningCharGen()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "host-unit", Owner = host }]
+            };
+            A.CallTo(() => _levelingInteractionService.IsBackgroundLevelingReady).Returns(true);
+            using var replayCompleted = new ManualResetEventSlim();
+            A.CallTo(() => _levelingInteractionService.CompleteLeveling()).Invokes(() =>
+            {
+                _multiplayerClient.Game.Leveling = null;
+                replayCompleted.Set();
+            });
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient)(-1,
+                new NotifyLevelingStarted
+                {
+                    UnitId = "host-unit",
+                    Type = NetworkLevelingType.Leveling.ToString()
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
+                new NotifyLevelingNameChanged { Name = "RemoteName" });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
+                new NotifyLevelingCompleted());
+
+            Assert.That(replayCompleted.Wait(TimeSpan.FromSeconds(3)), Is.True);
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling(
+                "host-unit", NetworkLevelingType.Leveling)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _levelingInteractionService.StartLeveling(
+                "host-unit", NetworkLevelingType.Leveling)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void SimultaneousOwnedLevelUps_QueueAndReplayTheRemoteResultAfterLocalCompletion()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Players = [host, client],
+                Characters =
+                [
+                    new NetworkCharacter { UnitId = "host-unit", Owner = host },
+                    new NetworkCharacter { UnitId = "client-unit", Owner = client }
+                ],
+                Leveling = new NetworkLeveling("client-unit", NetworkLevelingType.Leveling)
+            };
+            A.CallTo(() => _levelingInteractionService.IsBackgroundLevelingReady).Returns(true);
+            using var replayCompleted = new ManualResetEventSlim();
+            A.CallTo(() => _levelingInteractionService.CompleteLeveling()).Invokes(() =>
+            {
+                _multiplayerClient.Game.Leveling = null;
+                replayCompleted.Set();
+            });
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient)(-1,
+                new NotifyLevelingStarted
+                {
+                    UnitId = "host-unit",
+                    Type = NetworkLevelingType.Leveling.ToString()
+                });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
+                new NotifyLevelingNameChanged { Name = "RemoteName" });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
+                new NotifyLevelingCompleted());
+
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling("host-unit", NetworkLevelingType.Leveling))
+                .MustNotHaveHappened();
+
+            _multiplayerClient.OnLevelingCompleted();
+
+            Assert.That(replayCompleted.Wait(TimeSpan.FromSeconds(3)), Is.True);
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling("host-unit", NetworkLevelingType.Leveling))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _levelingInteractionService.SetLevelingName("RemoteName"))
+                .MustHaveHappenedOnceExactly();
         }
 
         [Test]
@@ -1423,6 +1558,50 @@ namespace WOTRMultiplayer.UnitTests.Services
                 x.Stage == (int)RealTimeModeTransitionStage.Complete))).MustNotHaveHappened();
             A.CallTo(() => _networkClient.Broadcast(A<ClientRealTimeRepairAck>.That.Matches(x =>
                 x.Stage == (int)RealTimeRepairStage.Resume))).MustNotHaveHappened();
+        }
+
+        [Test]
+        public async Task DialogContinue_WhenHostStillWaits_RetriesWitnessUntilAcknowledged()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            var dialog = new NetworkDialog { Id = "dialog", Name = "scripted", IsScripted = true };
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                DialogState = new NetworkDialogState(dialog)
+                {
+                    CurrentCueName = "cue",
+                    HasSystemAnswer = true
+                }
+            };
+            var receive = FakeUtils.GetNetworkReceiverHandler<NotifyDialogCueAnswerSuggested>(_networkClient);
+            using var witnessSent = new ManualResetEventSlim();
+            A.CallTo(() => _networkClient.Broadcast(A<ClientDialogCueWitnessed>._))
+                .Invokes(() => witnessSent.Set());
+            var waiting = new NotifyDialogCueAnswerSuggested
+            {
+                Dialog = _mapper.Map<Networking.Messages.Contracts.NetworkDialog>(dialog),
+                CueName = "cue",
+                CanContinue = false,
+                Suggestions = []
+            };
+
+            receive(NetworkConstants.HostPlayerId, waiting);
+            Assert.That(_multiplayerClient.IsActive, Is.True);
+            Assert.That(_multiplayerClient.Game.DialogState.WitnessRetryScheduled, Is.True);
+            Assert.That(witnessSent.Wait(TimeSpan.FromSeconds(3)), Is.True);
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientDialogCueWitnessed>.That.Matches(message =>
+                message.Dialog.Id == "dialog" && message.CueName == "cue")))
+                .MustHaveHappenedOnceExactly();
+
+            waiting.CanContinue = true;
+            receive(NetworkConstants.HostPlayerId, waiting);
+            await Task.Delay(650);
+
+            A.CallTo(() => _networkClient.Broadcast(A<ClientDialogCueWitnessed>.That.Matches(message =>
+                message.Dialog.Id == "dialog" && message.CueName == "cue")))
+                .MustHaveHappenedOnceExactly();
+            Assert.That(_multiplayerClient.Game.DialogState.ContinueEnabled, Is.True);
         }
 
         [Test]

@@ -185,10 +185,18 @@ namespace WOTRMultiplayer.UnitTests.Services
                 Pump(queued, hostNetwork, clientNetwork);
                 if (host.Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable
                     && client.Game.RealTimeCombat.Phase == CombatSynchronizationPhase.Stable) return;
-                if (host.Game.RealTimeCombat.RecoveryStatus == "stopped") return;
+                // A native failure marks the transfer stopped while its abort is
+                // crossing the queued transport.  Keep pumping: an acknowledged
+                // abort must now continue into the verified turn-based fallback.
+                if (host.Game.RealTimeCombat.RecoveryFailure == "native-transfer-abort-not-acknowledged") return;
                 await Task.Delay(1);
             }
-            Assert.Fail("Recovery did not settle after the bounded transport pump.");
+            Assert.Fail("Recovery did not settle after the bounded transport pump. "
+                + $"host={host.Game.RealTimeCombat.Mode}/{host.Game.RealTimeCombat.Phase}/"
+                + $"{host.Game.RealTimeCombat.RecoveryStatus}/{host.Game.RealTimeCombat.RecoveryFailure}; "
+                + $"client={client.Game.RealTimeCombat.Mode}/{client.Game.RealTimeCombat.Phase}/"
+                + $"{client.Game.RealTimeCombat.RecoveryStatus}/{client.Game.RealTimeCombat.RecoveryFailure}; "
+                + $"queued={queued.Count}; transfer={host.LastNativeTransferFailure}; recovery={host.LastNativeRecoveryFailure}");
         }
 
         private static void AssertRecovered(MultiplayerHost host, MultiplayerClient client,

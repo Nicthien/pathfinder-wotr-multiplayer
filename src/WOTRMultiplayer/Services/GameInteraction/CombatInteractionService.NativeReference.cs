@@ -144,7 +144,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return completion.Task;
         }
 
-        public NetworkCombatState GetRealTimeNativeReferenceState()
+        public NetworkCombatState GetRealTimeNativeReferenceState(bool retainHistoricalCombatUnits = false)
         {
             var game = Game.Instance;
             if (!RealTimePresentationRuntime.Enabled || RealTimePresentationRuntime.IsClientActive
@@ -165,7 +165,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 // restores only the units whose native CombatState is currently
                 // in combat. A restore digest must therefore describe that native
                 // membership instead of stale RT presentation history.
-                RetainNativeCombatUnits(state, world.Units.InCombat().Select(unit => unit.UniqueId));
+                RetainNativeCombatUnits(state, world.Units.InCombat().Select(unit => unit.UniqueId),
+                    retainHistoricalCombatUnits);
                 state.NativeTopology = RealTimeNativeGraphInspection.CaptureState(world.Units.All, world.AreaEffects,
                     () => ReferenceEquals(Game.Instance, game) && ReferenceEquals(game.State, world) && CombatSaving.CombatSavePauseLease.IsWorldPaused(game));
                 state.NativeUnits = world.Units.All.Select(unit => new Entities.Units.NetworkUnit
@@ -178,10 +179,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
 
         internal static void RetainNativeCombatUnits(NetworkCombatState state,
-            System.Collections.Generic.IEnumerable<string> nativeUnitIds)
+            System.Collections.Generic.IEnumerable<string> nativeUnitIds,
+            bool retainHistoricalCombatUnits = false)
         {
             if (state?.Units == null || nativeUnitIds == null)
                 throw new InvalidOperationException("native-combat-membership-missing");
+            // At RTwP combat end Owlcat has already cleared native InCombat,
+            // while the immutable final checkpoint deliberately retains every
+            // encounter participant. The native reconstruction must certify
+            // that same final checkpoint instead of collapsing it to zero units.
+            if (retainHistoricalCombatUnits) return;
             var native = new System.Collections.Generic.HashSet<string>(nativeUnitIds,
                 StringComparer.OrdinalIgnoreCase);
             state.Units = state.Units.Where(unit => unit != null && native.Contains(unit.Id)).ToList();

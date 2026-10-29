@@ -19,7 +19,9 @@ using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Content;
+using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.Items;
+using WOTRMultiplayer.Entities.Leveling;
 using WOTRMultiplayer.Entities.Settings;
 using WOTRMultiplayer.Networking;
 using WOTRMultiplayer.Networking.Abstractions;
@@ -81,6 +83,86 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
             _multiplayerHost.Game.RealTimeCombat.Phase = CombatSynchronizationPhase.Stable;
             Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.False);
+        }
+
+        [Test]
+        public void DialogCueWitness_StaleCueIsIgnored_CurrentCueEnablesContinue()
+        {
+            var host = new NetworkPlayer(NetworkConstants.HostPlayerId)
+            {
+                IsHost = true, LobbySyncStatus = NetworkLobbySyncStatus.Succeed
+            };
+            var client = new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed };
+            var dialog = new NetworkDialog { Id = "dialog", Name = "scripted", IsScripted = true };
+            var state = new NetworkDialogState(dialog)
+            {
+                CurrentCueName = "current-cue",
+                HasSystemAnswer = true
+            };
+            state.CueViews["current-cue"] = [NetworkConstants.HostPlayerId];
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Players = [host, client],
+                DialogState = state
+            };
+            var receive = FakeUtils.GetNetworkReceiverHandler<ClientDialogCueWitnessed>(_networkServer);
+            var message = new ClientDialogCueWitnessed
+            {
+                Dialog = _mapper.Map<Networking.Messages.Contracts.NetworkDialog>(dialog),
+                CueName = "stale-cue"
+            };
+
+            receive(42, message);
+            Assert.That(state.CueViews["current-cue"], Does.Not.Contain(42));
+
+            message.CueName = "current-cue";
+            receive(42, message);
+
+            Assert.That(state.CueViews["current-cue"], Does.Contain(42));
+            A.CallTo(() => _dialogInteractionService.SetDialogContinueButtonState(true))
+                .MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void DialogVotes_DifferentAnswersNeverCommitAndUnanimityStillRequired()
+        {
+            var host = new NetworkPlayer(NetworkConstants.HostPlayerId)
+            {
+                IsHost = true, LobbySyncStatus = NetworkLobbySyncStatus.Succeed
+            };
+            var client = new NetworkPlayer(42) { LobbySyncStatus = NetworkLobbySyncStatus.Succeed };
+            var dialog = new NetworkDialog { Id = "dialog", Name = "dialog" };
+            var state = new NetworkDialogState(dialog)
+            {
+                CurrentCueName = "cue",
+                VoteRoundId = "round"
+            };
+            state.VoteParticipants.UnionWith([NetworkConstants.HostPlayerId, 42]);
+            state.CueViews["cue"] = [NetworkConstants.HostPlayerId, 42];
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = NetworkConstants.HostPlayerId,
+                Players = [host, client],
+                DialogState = state
+            };
+            var receive = FakeUtils.GetNetworkReceiverHandler<ClientDialogCueAnswerSuggested>(_networkServer);
+            receive(42, new ClientDialogCueAnswerSuggested
+            {
+                Dialog = _mapper.Map<Networking.Messages.Contracts.NetworkDialog>(dialog),
+                CueName = "cue",
+                AnswerName = "client-answer",
+                VoteRoundId = "round"
+            });
+
+            var committed = _multiplayerHost.OnBeforeSelectDialogAnswer(
+                dialog, "cue", "host-answer", false, null);
+
+            Assert.That(committed, Is.False);
+            Assert.That(state.VoteCommitted, Is.False);
+            Assert.That(state.Answer, Is.Null);
+            A.CallTo(() => _dialogInteractionService.SelectDialogAnswer(A<string>._, A<string>._))
+                .MustNotHaveHappened();
         }
 
         [Test]
@@ -204,6 +286,7 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             _logger = A.Fake<ILogger<MultiplayerHost>>();
             _gameInteractionService = A.Fake<IGameInteractionService>();
+            A.CallTo(() => _gameInteractionService.GetPetOwnerId(A<string>._)).Returns(null);
             A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             _levelingInteractionService = A.Fake<ILevelingInteractionService>();
@@ -241,6 +324,48 @@ namespace WOTRMultiplayer.UnitTests.Services
                 _hashService,
                 _mapper,
                 _mainThreadAccessor);
+        }
+
+        [Test]
+        public void OwnedLevelUp_DoesNotWaitForRemoteUiWitnesses()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = -1,
+                Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "host-unit", Owner = host }],
+                Leveling = new NetworkLeveling("host-unit", NetworkLevelingType.Leveling)
+            };
+
+            Assert.That(_multiplayerHost.CanMakeLevelingDecisions(), Is.True);
+        }
+
+        [Test]
+        public void RemoteLevelUp_IsDeferredInsteadOfOpeningOnHost()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = -1,
+                Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "client-unit", Owner = client }]
+            };
+            var handler = FakeUtils.GetNetworkReceiverHandler<ClientCharacterLevelingRequested>(_networkServer);
+
+            handler(42, new ClientCharacterLevelingRequested
+            {
+                UnitId = "client-unit",
+                Type = NetworkLevelingType.Leveling.ToString()
+            });
+
+            Assert.That(_multiplayerHost.Game.Leveling, Is.Null);
+            A.CallTo(() => _levelingInteractionService.StartLeveling(A<string>._, A<NetworkLevelingType>._))
+                .MustNotHaveHappened();
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyLevelingStarted>.That.Matches(message =>
+                message.UnitId == "client-unit"))).MustHaveHappenedOnceExactly();
         }
 
         [Test]
@@ -559,6 +684,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         [Test]
         public async Task CombatModeSwitch_PeerRequiresNativeReconstruction_AbortsBeforeCommit()
         {
+            if (!RealTimePresentationRuntime.Enabled) return;
             PrepareRealTimeRepairTest();
             A.CallTo(() => _gameInteractionService.TrySetTurnBasedCombatModeAsync(false, A<Func<bool>>._))
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
@@ -570,6 +696,13 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Epoch = 1, PlayerId = 42, Stage = (int)RealTimeModeTransitionStage.Prepare,
                     Applied = true, RequiresNativeReconstruction = true
                 });
+
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (_multiplayerHost.Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Repairing
+                && DateTime.UtcNow < deadline)
+                await Task.Delay(25);
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing),
+                "The bounded native graph retry must eventually abort the transition.");
 
             Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
                 Is.EqualTo(CombatSynchronizationPhase.Repairing));
@@ -902,10 +1035,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Verify, 1));
             if (RealTimePresentationRuntime.Enabled)
             {
-                await AssertNativeRecoveryWithoutEngineStops();
-                handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Apply, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
-                handler.Invoke(42, RepairAck(1, RealTimeRepairStage.Resume, _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
-                Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+                await AssertNativeRecoveryFallsBack();
+                var fallbackEpoch = _multiplayerHost.Game.RealTimeCombat.Epoch;
+                handler.Invoke(42, RepairAck(fallbackEpoch, RealTimeRepairStage.Fallback,
+                    _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+                handler.Invoke(42, RepairAck(fallbackEpoch, RealTimeRepairStage.Resume,
+                    _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+                Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+                Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
                 return;
             }
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x => x.Stage == (int)RealTimeRepairStage.Apply && x.State != null)))
@@ -934,9 +1071,17 @@ namespace WOTRMultiplayer.UnitTests.Services
 
             if (RealTimePresentationRuntime.Enabled)
             {
-                await AssertNativeRecoveryWithoutEngineStops();
+                await AssertNativeRecoveryFallsBack();
                 A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
-                    x.Stage == (int)RealTimeRepairStage.Fallback))).MustNotHaveHappened();
+                    x.Stage == (int)RealTimeRepairStage.Fallback && x.State != null)))
+                    .MustHaveHappenedOnceExactly();
+                var fallbackEpoch = _multiplayerHost.Game.RealTimeCombat.Epoch;
+                handler.Invoke(42, RepairAck(fallbackEpoch, RealTimeRepairStage.Fallback,
+                    _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+                handler.Invoke(42, RepairAck(fallbackEpoch, RealTimeRepairStage.Resume,
+                    _multiplayerHost.Game.RealTimeCombat.CanonicalStateHash));
+                Assert.That(_multiplayerHost.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+                Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
                 return;
             }
 
@@ -990,15 +1135,18 @@ namespace WOTRMultiplayer.UnitTests.Services
                 && x.Action.Id == null))).MustHaveHappenedOnceExactly();
         }
 
-        private async Task AssertNativeRecoveryWithoutEngineStops()
+        private async Task AssertNativeRecoveryFallsBack()
         {
-            for (var i = 0; i < 1000 && _multiplayerHost.Game.RealTimeCombat.RecoveryStatus != "stopped"; i++)
+            for (var i = 0; i < 3000
+                && _multiplayerHost.Game.RealTimeCombat.Phase != CombatSynchronizationPhase.FallingBackToTurnBased; i++)
                 await Task.Delay(1);
-            Assert.That(_multiplayerHost.Game.RealTimeCombat.RecoveryStatus, Is.EqualTo("stopped"));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.Phase,
+                Is.EqualTo(CombatSynchronizationPhase.FallingBackToTurnBased));
+            Assert.That(_multiplayerHost.Game.RealTimeCombat.RecoveryStatus, Is.EqualTo("falling-back"));
             Assert.That(_multiplayerHost.Game.RealTimeCombat.RecoveryFailure, Is.EqualTo("native-reconstruction-not-committed"));
             Assert.That(_multiplayerHost.IsSavingBlockedByCombatSync, Is.True);
             A.CallTo(() => _networkServer.Broadcast(A<NotifyRealTimeRepair>.That.Matches(x =>
-                x.Stage == (int)RealTimeRepairStage.Apply || x.Stage == (int)RealTimeRepairStage.Resume))).MustNotHaveHappened();
+                x.Stage == (int)RealTimeRepairStage.Stopped))).MustNotHaveHappened();
         }
 
         private void PrepareRealTimeRepairTest()

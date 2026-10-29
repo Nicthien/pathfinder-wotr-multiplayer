@@ -23,7 +23,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         NetworkCombatState GetCombatState();
 
         NetworkCombatState GetRealTimeCombatState();
-        NetworkCombatState GetRealTimeNativeReferenceState();
+        NetworkCombatState GetRealTimeNativeReferenceState(bool retainHistoricalCombatUnits = false);
 
         Task<NetworkCombatState> GetRealTimeCombatStateAsync();
 

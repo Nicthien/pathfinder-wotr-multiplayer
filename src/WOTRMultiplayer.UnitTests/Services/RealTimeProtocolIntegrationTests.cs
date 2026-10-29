@@ -973,7 +973,7 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
-        public async Task TwoActors_UnrepairableUnit_StaysPausedAndBlocksSaving()
+        public async Task TwoActors_NativeRepairFailure_FallsBackToVerifiedTurnBasedMode()
         {
             var (host, client, hostNetwork, clientNetwork, queued, clientCombat) = CreatePair(nativeRecovery: true);
             Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
@@ -981,8 +981,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync()).Returns(
                 Task.FromResult(new NetworkCombatState { Units = [new NetworkUnit { Id = "unrepairable-unit" }] }));
             A.CallTo(() => clientCombat.TryApplyAndReadRealTimeCombatStateAsync(
-                A<NetworkCombatState>._, A<Func<bool>>._, A<bool>._)).Returns(
-                Task.FromResult(new NetworkCombatState { Units = [new NetworkUnit { Id = "unrepairable-unit" }] }));
+                A<NetworkCombatState>._, A<Func<bool>>._, A<bool>._)).ReturnsLazily(
+                (NetworkCombatState checkpoint, Func<bool> guard, bool _) => Task.FromResult(
+                    RealTimePresentationRuntime.Enabled && guard()
+                        ? checkpoint
+                        : new NetworkCombatState { Units = [new NetworkUnit { Id = "unrepairable-unit" }] }));
 
             A.CallTo(() => clientCombat.TryRestoreNativeReferenceStateAsync(A<object>._, A<object>._,
                 A<NetworkCombatState>._, A<Func<bool>>._)).Returns(Task.FromResult<NetworkCombatState>(null));
@@ -992,8 +995,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             if (RealTimePresentationRuntime.Enabled)
             {
                 await PumpRecovery(queued, hostNetwork, clientNetwork, host, client);
-                Assert.That(host.Game.RealTimeCombat.RecoveryStatus, Is.EqualTo("stopped"));
-                Assert.That(host.IsSavingBlockedByCombatSync && client.IsSavingBlockedByCombatSync, Is.True);
+                Assert.That(host.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+                Assert.That(client.Game.RealTimeCombat.Mode, Is.EqualTo(CombatMode.TurnBased));
+                Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+                Assert.That(client.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+                Assert.That(host.IsSavingBlockedByCombatSync || client.IsSavingBlockedByCombatSync, Is.False);
                 A.CallTo(() => clientCombat.TryCommitNativeReferenceStateAsync(A<object>._, A<object>._,
                     A<NetworkCombatState>._, A<Func<bool>>._)).MustNotHaveHappened();
                 return;
@@ -1015,6 +1021,14 @@ namespace WOTRMultiplayer.UnitTests.Services
             }).CreateMapper();
             var hostGame = A.Fake<IGameInteractionService>();
             var clientGame = A.Fake<IGameInteractionService>();
+            var hostPaused = false;
+            var clientPaused = false;
+            A.CallTo(() => hostGame.IsPaused).ReturnsLazily(() => hostPaused);
+            A.CallTo(() => clientGame.IsPaused).ReturnsLazily(() => clientPaused);
+            A.CallTo(() => hostGame.IsWorldPaused).ReturnsLazily(() => hostPaused);
+            A.CallTo(() => clientGame.IsWorldPaused).ReturnsLazily(() => clientPaused);
+            A.CallTo(() => hostGame.SetPause(A<bool>._)).Invokes((bool paused) => hostPaused = paused);
+            A.CallTo(() => clientGame.SetPause(A<bool>._)).Invokes((bool paused) => clientPaused = paused);
             A.CallTo(() => hostGame.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             A.CallTo(() => clientGame.TrySetTurnBasedCombatModeAsync(A<bool>._, A<Func<bool>>._))
@@ -1033,14 +1047,22 @@ namespace WOTRMultiplayer.UnitTests.Services
                     pause();
                     return Task.FromResult(true);
                 });
-            A.CallTo(() => hostGame.SetPauseAsync(true)).Returns(Task.CompletedTask);
-            A.CallTo(() => clientGame.SetPauseAsync(true)).Returns(Task.CompletedTask);
+            A.CallTo(() => hostGame.SetPauseAsync(A<bool>._)).ReturnsLazily((bool paused) =>
+            {
+                hostPaused = paused;
+                return Task.CompletedTask;
+            });
+            A.CallTo(() => clientGame.SetPauseAsync(A<bool>._)).ReturnsLazily((bool paused) =>
+            {
+                clientPaused = paused;
+                return Task.CompletedTask;
+            });
             A.CallTo(() => hostGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostGame.TrySetTurnBasedCombatModeAsync(true, A<Func<bool>>._))
                 .ReturnsLazily((bool _, Func<bool> canApply) => Task.FromResult(canApply()));
             A.CallTo(() => clientGame.SetTurnBasedCombatModeAsync(false)).Returns(Task.CompletedTask);
             A.CallTo(() => hostCombat.GetRealTimeCombatState()).Returns(new NetworkCombatState());
-            A.CallTo(() => hostCombat.GetRealTimeNativeReferenceState()).ReturnsLazily(() =>
+            A.CallTo(() => hostCombat.GetRealTimeNativeReferenceState(A<bool>._)).ReturnsLazily(() =>
             {
                 var reference = endState ?? new NetworkCombatState();
                 reference.NativeTopology ??= new Networking.Messages.Contracts.NetworkNativeTopology();

@@ -61,6 +61,18 @@ namespace WOTRMultiplayer.Services
 
         private long _nextRealTimeUnitDeathSequence;
 
+        private DeferredLevelingSession _deferredLeveling;
+        private bool _replayingDeferredLeveling;
+
+        private sealed class DeferredLevelingSession
+        {
+            public long OwnerId { get; set; }
+            public string UnitId { get; set; }
+            public NetworkLevelingType Type { get; set; }
+            public Queue<(object Message, Action Apply)> Messages { get; } = new();
+            public bool HasTerminalMessage { get; set; }
+        }
+
         public NetworkArea CurrentArea => Game.CurrentArea;
 
         public bool IsInCombat => Game?.Combat != null;
@@ -1074,8 +1086,16 @@ namespace WOTRMultiplayer.Services
                 return false;
             }
 
-            return CanControlLeveling(Game.LocalPlayerId, Game.Leveling.UnitId, Game.Leveling.Type)
-                && Game.Leveling.PlayerReadiness.Count >= GetSyncedPlayersCount();
+            if (!CanControlLeveling(Game.LocalPlayerId, Game.Leveling.UnitId, Game.Leveling.Type))
+            {
+                return false;
+            }
+
+            // Ordinary companion level-ups are owned by one player. Requiring every
+            // other PC to open and witness the same modal is what blurred/blocked the
+            // remote game and made two independent level-ups impossible.
+            return IsIndependentLeveling(Game.Leveling.Type)
+                || Game.Leveling.PlayerReadiness.Count >= GetSyncedPlayersCount();
         }
 
         // Visibility follows ownership, NOT phase readiness: waiting for an ACK
@@ -1102,6 +1122,137 @@ namespace WOTRMultiplayer.Services
             // master's assignment via GetPartyCharacter/GetPetOwnerId.
             if (!ownerId.HasValue || GetPlayer(ownerId.Value) == null) ownerId = hostId;
             return ownerId.HasValue && ownerId.Value == playerId;
+        }
+
+        private static bool IsIndependentLeveling(NetworkLevelingType type)
+            => type == NetworkLevelingType.Leveling || type == NetworkLevelingType.MythicLeveling;
+
+        protected bool DeferRemoteLeveling(long ownerId, string unitId, NetworkLevelingType type)
+        {
+            if (!IsIndependentLeveling(type) || string.IsNullOrWhiteSpace(unitId)
+                || CanControlLeveling(Game.LocalPlayerId, unitId, type))
+            {
+                return false;
+            }
+
+            lock (ActionLock)
+            {
+                if (_deferredLeveling != null)
+                {
+                    return _deferredLeveling.OwnerId == ownerId
+                        && string.Equals(_deferredLeveling.UnitId, unitId, StringComparison.OrdinalIgnoreCase)
+                        && _deferredLeveling.Type == type;
+                }
+
+                _deferredLeveling = new DeferredLevelingSession
+                {
+                    OwnerId = ownerId,
+                    UnitId = unitId,
+                    Type = type
+                };
+                Logger.LogInformation("[LevelingOwnerUI] Deferring remote level-up replay. Owner={Owner}, UnitId={UnitId}, Type={Type}",
+                    ownerId, unitId, type);
+                return true;
+            }
+        }
+
+        private Action<long, T> DeferLevelingMessages<T>(Action<long, T> handler) where T : class
+            => (receivedFrom, message) =>
+            {
+                lock (ActionLock)
+                {
+                    if (!_replayingDeferredLeveling && _deferredLeveling != null)
+                    {
+                        _deferredLeveling.Messages.Enqueue((message, () => handler(receivedFrom, message)));
+                        if (message is NotifyLevelingCompleted || message is NotifyLevelingTerminated)
+                        {
+                            _deferredLeveling.HasTerminalMessage = true;
+                        }
+                        TryReplayDeferredLeveling();
+                        return;
+                    }
+                }
+
+                handler(receivedFrom, message);
+            };
+
+        private void TryReplayDeferredLeveling()
+        {
+            DeferredLevelingSession deferred;
+            lock (ActionLock)
+            {
+                if (_replayingDeferredLeveling || Game?.Leveling != null
+                    || _deferredLeveling?.HasTerminalMessage != true)
+                {
+                    return;
+                }
+
+                _replayingDeferredLeveling = true;
+                deferred = _deferredLeveling;
+            }
+
+            _ = ReplayDeferredLevelingAsync(deferred);
+        }
+
+        private async Task ReplayDeferredLevelingAsync(DeferredLevelingSession deferred)
+        {
+            try
+            {
+                InitiateLeveling(deferred.UnitId, deferred.Type);
+                // Independent remote level-ups must never open CharGen or enter a
+                // modal game mode on this peer. Replay them against a headless
+                // controller while the local player remains in the world or in
+                // their own separate level-up window.
+                LevelingInteraction.StartBackgroundLeveling(deferred.UnitId, deferred.Type);
+
+                var deadline = DateTime.UtcNow.AddSeconds(20);
+                while (!LevelingInteraction.IsBackgroundLevelingReady && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(50);
+                }
+                if (!LevelingInteraction.IsBackgroundLevelingReady)
+                {
+                    throw new TimeoutException("deferred-leveling-ui-timeout");
+                }
+
+                Logger.LogInformation("[LevelingOwnerUI] Replaying deferred remote level-up. Owner={Owner}, UnitId={UnitId}, Messages={Count}",
+                    deferred.OwnerId, deferred.UnitId, deferred.Messages.Count);
+                while (true)
+                {
+                    (object Message, Action Apply) entry;
+                    lock (ActionLock)
+                    {
+                        if (deferred.Messages.Count == 0) break;
+                        entry = deferred.Messages.Dequeue();
+                    }
+                    entry.Apply();
+                    await Task.Delay(entry.Message is NotifyLevelingPhaseChanged ? 150 : 50);
+                }
+
+                deadline = DateTime.UtcNow.AddSeconds(20);
+                while (Game?.Leveling != null && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(50);
+                }
+                if (Game?.Leveling != null)
+                {
+                    throw new TimeoutException("deferred-leveling-completion-timeout");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "[LevelingOwnerUI] Deferred remote level-up replay failed. Owner={Owner}, UnitId={UnitId}",
+                    deferred.OwnerId, deferred.UnitId);
+            }
+            finally
+            {
+                lock (ActionLock)
+                {
+                    if (ReferenceEquals(_deferredLeveling, deferred)) _deferredLeveling = null;
+                    _replayingDeferredLeveling = false;
+                }
+                TryReplayDeferredLeveling();
+            }
         }
 
         public bool CanMakeNewGameSequenceDecisions()
@@ -1664,6 +1815,7 @@ namespace WOTRMultiplayer.Services
             }
 
             Game.Leveling = null;
+            TryReplayDeferredLeveling();
         }
 
         public void OnLevelingCompleted()
@@ -1696,6 +1848,7 @@ namespace WOTRMultiplayer.Services
             }
 
             Game.Leveling = null;
+            TryReplayDeferredLeveling();
         }
 
         public void OnCharacterSelectionWindowShown()
@@ -3252,6 +3405,8 @@ namespace WOTRMultiplayer.Services
             Game.Combat = null;
             Game.ArmyCombat = null;
             Game.Leveling = null;
+            _deferredLeveling = null;
+            _replayingDeferredLeveling = false;
             _pauseCooldown = null;
             ResetLastCombatTurn();
             ValueGenerator.ResetSeededGenerators(IdentifierLifetime.Area, IdentifierLifetime.Combat, IdentifierLifetime.CombatTurn);
@@ -3651,44 +3806,44 @@ namespace WOTRMultiplayer.Services
                 .On<NotifyPlayerReadyStatusChanged>(OnNotifyPlayerReadyStatusChanged)
 
                 // leveling
-                .On<NotifyLevelingClassArchetypeSelected>(OnNotifyLevelingClassArchetypeSelected)
-                .On<NotifyLevelingMythicClassSelected>(OnNotifyLevelingMythicClassSelected)
-                .On<NotifyLevelingClassSelected>(OnNotifyLevelingClassSelected)
-                .On<NotifyLevelingPhaseWitnessed>(OnNotifyLevelingPhaseWitnessed)
-                .On<NotifyLevelingPhaseChanged>(OnNotifyLevelingPhaseChanged)
-                .On<NotifyLevelingSkillPointIncreased>(OnNotifyLevelingSkillPointIncreased)
-                .On<NotifyLevelingSkillPointDecreased>(OnNotifyLevelingSkillPointDecreased)
-                .On<NotifyLevelingAbilityScoreIncreased>(OnNotifyLevelingAbilityScoreIncreased)
-                .On<NotifyLevelingAbilityScoreDecreased>(OnNotifyLevelingAbilityScoreDecreased)
-                .On<NotifyLevelingPortraitSelected>(OnNotifyLevelingPortraitSelected)
-                .On<NotifyLevelingVoiceSelected>(OnNotifyLevelingVoiceSelected)
-                .On<NotifyLevelingRaceSelected>(OnNotifyLevelingRaceSelected)
-                .On<NotifyLevelingGenderSelected>(OnNotifyLevelingGenderSelected)
-                .On<NotifyLevelingAlignmentSelected>(OnNotifyLevelingAlignmentSelected)
-                .On<NotifyLevelingNameChanged>(OnNotifyLevelingNameChanged)
-                .On<NotifyLevelingBodyTypeAppearanceChanged>(OnNotifyLevelingBodyTypeAppearanceChanged)
-                .On<NotifyLevelingBodyColorAppearanceChanged>(OnNotifyLevelingBodyColorAppearanceChanged)
-                .On<NotifyLevelingEyesColorAppearanceChanged>(OnNotifyLevelingEyesColorAppearanceChanged)
-                .On<NotifyLevelingFaceAppearanceChanged>(OnNotifyLevelingFaceAppearanceChanged)
-                .On<NotifyLevelingHairColorAppearanceChanged>(OnNotifyLevelingHairColorAppearanceChanged)
-                .On<NotifyLevelingHairStyleAppearanceChanged>(OnNotifyLevelingHairStyleAppearanceChanged)
-                .On<NotifyLevelingHornsAppearanceChanged>(OnNotifyLevelingHornsAppearanceChanged)
-                .On<NotifyLevelingHornsColorAppearanceChanged>(OnNotifyLevelingHornsColorAppearanceChanged)
-                .On<NotifyLevelingPrimaryOutfitColorAppearanceChanged>(OnNotifyLevelingPrimaryOutfitColorAppearanceChanged)
-                .On<NotifyLevelingSecondaryOutfitColorAppearanceChanged>(OnNotifyLevelingSecondaryOutfitColorAppearanceChanged)
-                .On<NotifyLevelingScarAppearanceChanged>(OnNotifyLevelingScarAppearanceChanged)
-                .On<NotifyLevelingTattooAppearanceChanged>(OnNotifyLevelingTattooAppearanceChanged)
-                .On<NotifyLevelingTattooColorAppearanceChanged>(OnNotifyLevelingTattooColorAppearanceChanged)
-                .On<NotifyLevelingWarpaintAppearanceChanged>(OnNotifyLevelingWarpaintAppearanceChanged)
-                .On<NotifyLevelingWarpaintColorAppearanceChanged>(OnNotifyLevelingWarpaintColorAppearanceChanged)
-                .On<NotifyLevelingRacialAbilityScoreBonusChanged>(OnNotifyLevelingRacialAbilityScoreBonusChanged)
-                .On<NotifyLevelingBirthMonthChanged>(OnNotifyLevelingBirthMonthChanged)
-                .On<NotifyLevelingBirthDayChanged>(OnNotifyLevelingBirthDayChanged)
-                .On<NotifyLevelingFeatureSelected>(OnNotifyLevelingFeatureSelected)
-                .On<NotifyLevelingSpellChosen>(OnNotifyLevelingSpellChosen)
-                .On<NotifyLevelingSpellRemoved>(OnNotifyLevelingSpellRemoved)
-                .On<NotifyLevelingCompleted>(OnNotifyLevelingCompleted)
-                .On<NotifyLevelingTerminated>(OnNotifyLevelingTerminated)
+                .On<NotifyLevelingClassArchetypeSelected>(DeferLevelingMessages<NotifyLevelingClassArchetypeSelected>(OnNotifyLevelingClassArchetypeSelected))
+                .On<NotifyLevelingMythicClassSelected>(DeferLevelingMessages<NotifyLevelingMythicClassSelected>(OnNotifyLevelingMythicClassSelected))
+                .On<NotifyLevelingClassSelected>(DeferLevelingMessages<NotifyLevelingClassSelected>(OnNotifyLevelingClassSelected))
+                .On<NotifyLevelingPhaseWitnessed>(DeferLevelingMessages<NotifyLevelingPhaseWitnessed>(OnNotifyLevelingPhaseWitnessed))
+                .On<NotifyLevelingPhaseChanged>(DeferLevelingMessages<NotifyLevelingPhaseChanged>(OnNotifyLevelingPhaseChanged))
+                .On<NotifyLevelingSkillPointIncreased>(DeferLevelingMessages<NotifyLevelingSkillPointIncreased>(OnNotifyLevelingSkillPointIncreased))
+                .On<NotifyLevelingSkillPointDecreased>(DeferLevelingMessages<NotifyLevelingSkillPointDecreased>(OnNotifyLevelingSkillPointDecreased))
+                .On<NotifyLevelingAbilityScoreIncreased>(DeferLevelingMessages<NotifyLevelingAbilityScoreIncreased>(OnNotifyLevelingAbilityScoreIncreased))
+                .On<NotifyLevelingAbilityScoreDecreased>(DeferLevelingMessages<NotifyLevelingAbilityScoreDecreased>(OnNotifyLevelingAbilityScoreDecreased))
+                .On<NotifyLevelingPortraitSelected>(DeferLevelingMessages<NotifyLevelingPortraitSelected>(OnNotifyLevelingPortraitSelected))
+                .On<NotifyLevelingVoiceSelected>(DeferLevelingMessages<NotifyLevelingVoiceSelected>(OnNotifyLevelingVoiceSelected))
+                .On<NotifyLevelingRaceSelected>(DeferLevelingMessages<NotifyLevelingRaceSelected>(OnNotifyLevelingRaceSelected))
+                .On<NotifyLevelingGenderSelected>(DeferLevelingMessages<NotifyLevelingGenderSelected>(OnNotifyLevelingGenderSelected))
+                .On<NotifyLevelingAlignmentSelected>(DeferLevelingMessages<NotifyLevelingAlignmentSelected>(OnNotifyLevelingAlignmentSelected))
+                .On<NotifyLevelingNameChanged>(DeferLevelingMessages<NotifyLevelingNameChanged>(OnNotifyLevelingNameChanged))
+                .On<NotifyLevelingBodyTypeAppearanceChanged>(DeferLevelingMessages<NotifyLevelingBodyTypeAppearanceChanged>(OnNotifyLevelingBodyTypeAppearanceChanged))
+                .On<NotifyLevelingBodyColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingBodyColorAppearanceChanged>(OnNotifyLevelingBodyColorAppearanceChanged))
+                .On<NotifyLevelingEyesColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingEyesColorAppearanceChanged>(OnNotifyLevelingEyesColorAppearanceChanged))
+                .On<NotifyLevelingFaceAppearanceChanged>(DeferLevelingMessages<NotifyLevelingFaceAppearanceChanged>(OnNotifyLevelingFaceAppearanceChanged))
+                .On<NotifyLevelingHairColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingHairColorAppearanceChanged>(OnNotifyLevelingHairColorAppearanceChanged))
+                .On<NotifyLevelingHairStyleAppearanceChanged>(DeferLevelingMessages<NotifyLevelingHairStyleAppearanceChanged>(OnNotifyLevelingHairStyleAppearanceChanged))
+                .On<NotifyLevelingHornsAppearanceChanged>(DeferLevelingMessages<NotifyLevelingHornsAppearanceChanged>(OnNotifyLevelingHornsAppearanceChanged))
+                .On<NotifyLevelingHornsColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingHornsColorAppearanceChanged>(OnNotifyLevelingHornsColorAppearanceChanged))
+                .On<NotifyLevelingPrimaryOutfitColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingPrimaryOutfitColorAppearanceChanged>(OnNotifyLevelingPrimaryOutfitColorAppearanceChanged))
+                .On<NotifyLevelingSecondaryOutfitColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingSecondaryOutfitColorAppearanceChanged>(OnNotifyLevelingSecondaryOutfitColorAppearanceChanged))
+                .On<NotifyLevelingScarAppearanceChanged>(DeferLevelingMessages<NotifyLevelingScarAppearanceChanged>(OnNotifyLevelingScarAppearanceChanged))
+                .On<NotifyLevelingTattooAppearanceChanged>(DeferLevelingMessages<NotifyLevelingTattooAppearanceChanged>(OnNotifyLevelingTattooAppearanceChanged))
+                .On<NotifyLevelingTattooColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingTattooColorAppearanceChanged>(OnNotifyLevelingTattooColorAppearanceChanged))
+                .On<NotifyLevelingWarpaintAppearanceChanged>(DeferLevelingMessages<NotifyLevelingWarpaintAppearanceChanged>(OnNotifyLevelingWarpaintAppearanceChanged))
+                .On<NotifyLevelingWarpaintColorAppearanceChanged>(DeferLevelingMessages<NotifyLevelingWarpaintColorAppearanceChanged>(OnNotifyLevelingWarpaintColorAppearanceChanged))
+                .On<NotifyLevelingRacialAbilityScoreBonusChanged>(DeferLevelingMessages<NotifyLevelingRacialAbilityScoreBonusChanged>(OnNotifyLevelingRacialAbilityScoreBonusChanged))
+                .On<NotifyLevelingBirthMonthChanged>(DeferLevelingMessages<NotifyLevelingBirthMonthChanged>(OnNotifyLevelingBirthMonthChanged))
+                .On<NotifyLevelingBirthDayChanged>(DeferLevelingMessages<NotifyLevelingBirthDayChanged>(OnNotifyLevelingBirthDayChanged))
+                .On<NotifyLevelingFeatureSelected>(DeferLevelingMessages<NotifyLevelingFeatureSelected>(OnNotifyLevelingFeatureSelected))
+                .On<NotifyLevelingSpellChosen>(DeferLevelingMessages<NotifyLevelingSpellChosen>(OnNotifyLevelingSpellChosen))
+                .On<NotifyLevelingSpellRemoved>(DeferLevelingMessages<NotifyLevelingSpellRemoved>(OnNotifyLevelingSpellRemoved))
+                .On<NotifyLevelingCompleted>(DeferLevelingMessages<NotifyLevelingCompleted>(OnNotifyLevelingCompleted))
+                .On<NotifyLevelingTerminated>(DeferLevelingMessages<NotifyLevelingTerminated>(OnNotifyLevelingTerminated))
                 // respec selector & window
                 .On<NotifyLevelingRespecCompleted>(OnNotifyLevelingRespecCompleted)
                 .On<NotifyLevelingRespecWindowShown>(OnNotifyLevelingRespecWindowShown)

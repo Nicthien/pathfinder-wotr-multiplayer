@@ -25,6 +25,7 @@ using Owlcat.Runtime.UI.VirtualListSystem;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using WOTRMultiplayer.Abstractions;
 using WOTRMultiplayer.Abstractions.GameInteraction;
 using WOTRMultiplayer.Abstractions.UI;
 using WOTRMultiplayer.Abstractions.UI.Controllers;
@@ -941,21 +942,26 @@ namespace WOTRMultiplayer.UI
             // hotkeys
             yield return new SettingsEntityHeaderVM(new LocalizedString { Key = WellKnownKeys.Settings.Hotkeys.Title.Key });
             yield return CreateKeyBindingSetting(
-                WellKnownKeys.Settings.Hotkeys.ShowLobby.Title.Key,
-                WellKnownKeys.Settings.Hotkeys.ShowLobby.Tooltip.Key,
-                WellKnownSettings.Hotkeys.ShowLobby);
-            yield return CreateKeyBindingSetting(
                 WellKnownKeys.Settings.Hotkeys.Ping.Title.Key,
                 WellKnownKeys.Settings.Hotkeys.Ping.Tooltip.Key,
                 WellKnownSettings.Hotkeys.Ping);
-            yield return CreateKeyBindingSetting(
-                WellKnownKeys.Settings.Hotkeys.ForceUnpause.Title.Key,
-                WellKnownKeys.Settings.Hotkeys.ForceUnpause.Tooltip.Key,
-                WellKnownSettings.Hotkeys.ForceUnpause);
-            yield return CreateKeyBindingSetting(
-                WellKnownKeys.Settings.Hotkeys.ForceCombatEnd.Title.Key,
-                WellKnownKeys.Settings.Hotkeys.ForceCombatEnd.Tooltip.Key,
-                WellKnownSettings.Hotkeys.ForceCombatEnd);
+            var multiplayerActorAccessor = _serviceProvider.GetService<IMultiplayerActorAccessor>();
+            var host = multiplayerActorAccessor?.Host;
+            if (host?.IsActive == true && ReferenceEquals(multiplayerActorAccessor.Current, host))
+            {
+                yield return CreateKeyBindingSetting(
+                    WellKnownKeys.Settings.Hotkeys.ShowLobby.Title.Key,
+                    WellKnownKeys.Settings.Hotkeys.ShowLobby.Tooltip.Key,
+                    WellKnownSettings.Hotkeys.ShowLobby);
+                yield return CreateKeyBindingSetting(
+                    WellKnownKeys.Settings.Hotkeys.ForceUnpause.Title.Key,
+                    WellKnownKeys.Settings.Hotkeys.ForceUnpause.Tooltip.Key,
+                    WellKnownSettings.Hotkeys.ForceUnpause);
+                yield return CreateKeyBindingSetting(
+                    WellKnownKeys.Settings.Hotkeys.ForceCombatEnd.Title.Key,
+                    WellKnownKeys.Settings.Hotkeys.ForceCombatEnd.Tooltip.Key,
+                    WellKnownSettings.Hotkeys.ForceCombatEnd);
+            }
 
             // danger zone
             yield return new SettingsEntityHeaderVM(new LocalizedString { Key = WellKnownKeys.Settings.DangerZone.Title.Key });

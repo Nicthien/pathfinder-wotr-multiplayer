@@ -34,6 +34,9 @@ This variant is unofficial and is not affiliated with Owlcat Games.
   turn-based mode;
 - stronger synchronization for units, buffs, projectiles, areas of effect,
   summons, dialogues, map events, and other interactions;
+- character-owner-only level-up screens, with invisible queued replay on the
+  remote peer so two players can progress their characters without sharing the
+  same modal window;
 - session recovery and reconnection with epoch and sequence checks;
 - synchronized saving and restoration during turn-based combat;
 - complete French interface and localization;
@@ -59,6 +62,10 @@ Saving and resuming combat have been tested with one host instance and one
 connected client instance, using two isolated installations and profiles on the
 same machine. This does not yet replace a full campaign test or validation on
 two physical PCs.
+
+Independent level-up has automated coverage for ownership, queuing, and replay
+resumption. Its complete visual flow still needs confirmation on two physical
+PCs before it can be considered campaign-validated.
 
 The mod deliberately keeps strict safeguards: saving is rejected during a
 mode-switch, synchronization, or repair barrier, and a partially applied state

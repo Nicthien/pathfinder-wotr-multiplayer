@@ -35,6 +35,9 @@ Cette variante n'est ni officielle ni affiliée à Owlcat Games.
   sécurisé vers le tour par tour ;
 - synchronisation renforcée des unités, buffs, projectiles, zones d'effet,
   invocations, dialogues, événements de carte et autres interactions ;
+- montée de niveau réservée au propriétaire du personnage, avec mise en file
+  invisible de la réplication distante afin que deux joueurs puissent faire
+  progresser leurs personnages sans partager la même fenêtre modale ;
 - reprise de session et reconnexion avec contrôles d'époque et de séquence ;
 - sauvegarde et restauration synchronisées en plein combat au tour par tour ;
 - interface et localisation françaises complètes ;
@@ -60,6 +63,11 @@ La sauvegarde et la reprise d'un combat ont été vérifiées avec une instance
 hôte et une instance cliente réellement connectées, dans deux installations et
 deux profils isolés sur une même machine. Cette preuve ne remplace pas encore
 une campagne complète ni une validation sur deux PC physiques.
+
+La montée de niveau indépendante dispose de tests automatisés du propriétaire,
+de la mise en file et de la reprise de la réplication. Son enchaînement visuel
+complet reste à confirmer sur deux PC physiques avant de le considérer comme
+validé en campagne.
 
 Le mod conserve volontairement des protections strictes : une sauvegarde est
 refusée pendant une barrière de changement de mode, de synchronisation ou de

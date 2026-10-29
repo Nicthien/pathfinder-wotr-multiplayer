@@ -111,6 +111,51 @@ namespace WOTRMultiplayer.UnitTests.Services.Hotkeys
         }
 
         [Test]
+        public void Initialize_HostOnlyToolsPressedByClient_AreRejected()
+        {
+            // Arrange
+            var client = A.Fake<IMultiplayerClient>();
+            var host = A.Fake<IMultiplayerHost>();
+            A.CallTo(() => client.IsInLobby).Returns(false);
+            A.CallTo(() => host.IsActive).Returns(true);
+            A.CallTo(() => _multiplayerActorAccessor.Current).Returns(client);
+            A.CallTo(() => _multiplayerActorAccessor.Host).Returns(host);
+            _hotkeysService.Initialize();
+
+            // Act
+            FakeUtils.GetHotkeyCallback(WellKnownSettings.Hotkeys.ShowLobby, _keyboardAccessor).Invoke();
+            FakeUtils.GetHotkeyCallback(WellKnownSettings.Hotkeys.ForceUnpause, _keyboardAccessor).Invoke();
+            FakeUtils.GetHotkeyCallback(WellKnownSettings.Hotkeys.ForceCombatEnd, _keyboardAccessor).Invoke();
+
+            // Assert
+            A.CallTo(() => _lobbyWindowController.EnsureStandaloneWindowInitialized()).MustNotHaveHappened();
+            A.CallTo(() => client.ForceUnpause()).MustNotHaveHappened();
+            A.CallTo(() => client.ForceCombatEnd()).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void Initialize_HostOnlyToolsPressedByHost_AreExecuted()
+        {
+            // Arrange
+            var host = A.Fake<IMultiplayerHost>();
+            A.CallTo(() => host.IsActive).Returns(true);
+            A.CallTo(() => host.IsInLobby).Returns(false);
+            A.CallTo(() => _multiplayerActorAccessor.Current).Returns(host);
+            A.CallTo(() => _multiplayerActorAccessor.Host).Returns(host);
+            _hotkeysService.Initialize();
+
+            // Act
+            FakeUtils.GetHotkeyCallback(WellKnownSettings.Hotkeys.ShowLobby, _keyboardAccessor).Invoke();
+            FakeUtils.GetHotkeyCallback(WellKnownSettings.Hotkeys.ForceUnpause, _keyboardAccessor).Invoke();
+            FakeUtils.GetHotkeyCallback(WellKnownSettings.Hotkeys.ForceCombatEnd, _keyboardAccessor).Invoke();
+
+            // Assert
+            A.CallTo(() => _lobbyWindowController.EnsureStandaloneWindowInitialized()).MustHaveHappenedOnceExactly();
+            A.CallTo(() => host.ForceUnpause()).MustHaveHappenedOnceExactly();
+            A.CallTo(() => host.ForceCombatEnd()).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
         public void ConfigureHotkey_NoBindingPairs_BindingsAreNotRegistered()
         {
             // Arrange

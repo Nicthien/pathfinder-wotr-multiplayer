@@ -112,22 +112,41 @@ namespace WOTRMultiplayer.Services
             catch (Exception error)
             {
                 LastNativeRecoveryFailure = error.ToString();
-                Logger.LogError(error, "Authoritative reconstruction stopped. Epoch={Epoch}; no unsafe fallback or save.", epoch);
-                if (Owned() && _nativeTransfer != null) await AbortCurrentNativeCheckpointAsync();
+                Logger.LogError(error,
+                    "Authoritative reconstruction failed. Epoch={Epoch}; attempting verified turn-based fallback.", epoch);
+                var transferExisted = Owned() && _nativeTransfer != null;
+                var transferRevoked = !transferExisted || await AbortCurrentNativeCheckpointAsync();
                 _mainThreadAccessor.Post(() =>
                 {
                     lock (ActionLock)
                     {
                         if (!Owned()) return;
-                        state.RecoveryStatus = "stopped";
+                        if (!transferRevoked)
+                        {
+                            // A client may still be loading the native archive.  In
+                            // that one case it is unsafe to start another mechanical
+                            // transition; remain paused and keep saving blocked.
+                            state.RecoveryStatus = "stopped";
+                            state.RecoveryFailure = "native-transfer-abort-not-acknowledged";
+                            _nativeReconstructionRequiredForModeSwitch = false;
+                            _queuedCombatMode = null;
+                            _realTimeRepairDeadline = default;
+                            GameInteraction.SetPause(true);
+                            Send(new NotifyRealTimeRepair { Epoch = state.Epoch, Stage = (int)RealTimeRepairStage.Stopped,
+                                SessionId = session.Id, LoadedSaveSeed = session.LoadedSaveSeed,
+                                Mode = (int)state.Mode, Reason = state.RecoveryFailure });
+                            return;
+                        }
+                        if (transferExisted) ResetNativeCheckpointTransfer();
+                        state.RecoveryStatus = "falling-back";
                         state.RecoveryFailure = "native-reconstruction-not-committed";
                         _nativeReconstructionRequiredForModeSwitch = false;
                         _queuedCombatMode = null;
                         _realTimeRepairDeadline = default;
                         GameInteraction.SetPause(true);
-                        Send(new NotifyRealTimeRepair { Epoch = state.Epoch, Stage = (int)RealTimeRepairStage.Stopped,
-                            SessionId = session.Id, LoadedSaveSeed = session.LoadedSaveSeed,
-                            Mode = (int)state.Mode, Reason = state.RecoveryFailure });
+                        new RealTimeCombatCoordinator(state).ForceFallbackAfterUntrustedRuleResult();
+                        _nativeRecoveryOwner = null;
+                        _ = StartRealTimeRepairFallbackAsync();
                     }
                 });
             }

@@ -999,7 +999,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     node =>
                     {
                         var caster = _gameStateLookupService.GetUnitEntity(node.CasterId);
-                        return caster == null ? null : _gameStateLookupService.FindAbility(caster, node.SourceAbility);
+                        return RealTimeContextAbilityResolver.Resolve(caster, node.SourceAbility,
+                            _gameStateLookupService);
                     }, parameters => _mapper.Map<AbilityParams>(parameters));
                 var replica = RealTimeAreaReplicaFactory.CreateDetached(blueprint, context, state,
                     id => _gameStateLookupService.GetUnitEntity(id), parameters => _mapper.Map<AbilityParams>(parameters));
@@ -2365,6 +2366,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     // half-updated health graph.
                     foreach (var (networkUnit, unit) in unitsToUpdate)
                         if (unit != null) UpdateUnitHealth(unit, networkUnit);
+                    RealTimeUnitResultReplication.ApplyGroupCombatCounters(unitsToUpdate.Select(pair =>
+                        (pair.Value, pair.Key.Descriptor?.Vitals)));
                 }
 
                 _logger.LogInformation("Combat state has been updated. RoundNumber={RoundNumber}, UnitsCount={UnitsCount}, IsFullUpdate={IsFullUpdate}", networkCombatState.RoundNumber, networkCombatState.Units.Count, requiresFullUpdate);
@@ -2760,7 +2763,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 _logger.LogInformation("Orientation has been updated. UnitId={UnitId}, PreviousOrientation={PreviousOrientation}, NewOrientation={NewOrientation}", unit.UniqueId, previousOrientation.ToString("F4"), unit.Orientation.ToString("F4"));
             }
 
-            if (RealTimePresentationRuntime.IsClientActive && unit.RiderPart == null
+            if (Main.Multiplayer?.IsActive == true && !Main.Multiplayer.CanInitiateAreaTransitions()
+                && unit.RiderPart == null
                 && unit.View != null && networkUnit.Position != null)
             {
                 var target = networkUnit.Position.ToUnityVector3();

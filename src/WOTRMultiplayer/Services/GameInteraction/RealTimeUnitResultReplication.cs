@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.EntitySystem.Stats;
@@ -94,6 +95,26 @@ namespace WOTRMultiplayer.Services.GameInteraction
             ApplyValues(unit.Descriptor, state);
             unit.CombatState.m_InCombat = state.IsInCombat;
             if (state.GroupCounterCaptured) unit.Group.IsInCombat.m_GuardCount = state.GroupCombatCounter;
+        }
+
+        public static void ApplyGroupCombatCounters(
+            IEnumerable<(UnitEntityData Unit, NetworkUnitVitals Vitals)> states)
+        {
+            var expected = new Dictionary<object, (UnitEntityData Unit, int Counter)>();
+            foreach (var (unit, vitals) in states)
+            {
+                if (unit == null || vitals?.GroupCounterCaptured != true) continue;
+                if (unit.Group == null) throw new InvalidOperationException("missing-unit-combat-group");
+                if (expected.TryGetValue(unit.Group, out var existing)
+                    && existing.Counter != vitals.GroupCombatCounter)
+                    throw new InvalidOperationException("inconsistent-shared-combat-group-counter");
+                expected[unit.Group] = (unit, vitals.GroupCombatCounter);
+            }
+
+            // Auras and other buffs can touch this shared guard after a previous
+            // member was restored. Seal each group exactly once at the very end.
+            foreach (var pair in expected)
+                pair.Value.Unit.Group.IsInCombat.m_GuardCount = pair.Value.Counter;
         }
 
         public static void ApplyValidated(UnitEntityData unit, NetworkUnitDescriptor state)

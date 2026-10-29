@@ -4,7 +4,13 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 {
     public interface ILevelingInteractionService
     {
+        bool IsLevelingUIReady { get; }
+
+        bool IsBackgroundLevelingReady { get; }
+
         void StartLeveling(string unitId, NetworkLevelingType levelingType);
+
+        void StartBackgroundLeveling(string unitId, NetworkLevelingType levelingType);
 
         void SelectLevelingClassArchetype(NetworkLevelingArchetype levelingArchetype);
 

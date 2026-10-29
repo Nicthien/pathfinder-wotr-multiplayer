@@ -208,7 +208,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 node =>
                 {
                     var caster = _gameStateLookupService.GetUnitEntity(node.CasterId);
-                    return caster == null ? null : _gameStateLookupService.FindAbility(caster, node.SourceAbility);
+                    return RealTimeContextAbilityResolver.Resolve(caster, node.SourceAbility,
+                        _gameStateLookupService);
                 },
                 parameters => _mapper.Map<AbilityParams>(parameters));
         }
@@ -229,7 +230,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 var sourceCaster = string.IsNullOrWhiteSpace(sourceCasterId) ? caster ?? unit
                     : _gameStateLookupService.GetUnitEntity(sourceCasterId)
                       ?? throw new InvalidOperationException("unresolved-legacy-buff-ability-caster:" + sourceCasterId);
-                var ability = _gameStateLookupService.FindAbility(sourceCaster, confirmed.SourceAbility)
+                var ability = RealTimeContextAbilityResolver.Resolve(sourceCaster, confirmed.SourceAbility,
+                                  _gameStateLookupService)
                     ?? throw new InvalidOperationException("unresolved-legacy-buff-ability");
                 var parameters = _mapper.Map<AbilityParams>(confirmed.SourceAbilityParams) ?? AbilityParams.Empty;
                 parent = new AbilityExecutionContext(ability, parameters,

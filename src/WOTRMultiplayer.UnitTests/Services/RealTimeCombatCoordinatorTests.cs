@@ -52,6 +52,25 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public void SwitchToTurnBasedClearsRealTimeManualPauseOnEveryPeer()
+        {
+            var coordinator = CreateRealTime(10UL);
+            coordinator.State.PausedPlayers.Add(-1);
+            coordinator.State.ResumeVotes.Add(42);
+            var pauseSequence = coordinator.State.PauseSequence;
+
+            coordinator.RequestModeSwitch(CombatMode.TurnBased, new long[] { -1 });
+            coordinator.AcknowledgeBarrier(-1, new long[] { -1 });
+            coordinator.CommitModeSwitch(20UL);
+            coordinator.AcknowledgeModeCommit(-1, new long[] { -1 });
+            coordinator.CompleteModeCommit();
+
+            Assert.That(coordinator.State.PausedPlayers, Is.Empty);
+            Assert.That(coordinator.State.ResumeVotes, Is.Empty);
+            Assert.That(coordinator.State.PauseSequence, Is.EqualTo(pauseSequence + 1));
+        }
+
+        [Test]
         public void Repair_MatchingHash_ResumesRealTime()
         {
             var coordinator = CreateRealTime(10UL);

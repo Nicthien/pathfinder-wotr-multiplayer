@@ -1284,6 +1284,13 @@ namespace WOTRMultiplayer.Services
                     return false;
                 }
 
+                // Never freeze the combat roster while one peer is still loading the
+                // area. Missing native enemies cannot be repaired by excluding them.
+                if (Game.ForcedPause?.Reason == NetworkForcedPauseReason.AreaLoading)
+                {
+                    return false;
+                }
+
                 switch (Game.Combat.Stage)
                 {
                     case NetworkCombatStage.Initiating:
@@ -1381,16 +1388,35 @@ namespace WOTRMultiplayer.Services
                             return false;
                         }
 
-                        var unitsToRemoveFromCombat = Game.Combat.UnavailableUnits.Values.SelectMany(x => x).Distinct().ToList();
+                        var combat = Game.Combat;
+                        var unitsToRemoveFromCombat = combat.UnavailableUnits.Values.SelectMany(x => x).Distinct().ToList();
                         var message = new NotifyCombatUnitsExcluded
                         {
                             Units = unitsToRemoveFromCombat
                         };
                         Send(message);
-                        CombatInteraction.ExcludeUnitsFromCombatAsync(unitsToRemoveFromCombat)
-                            .ContinueWith(x => Game.Combat.UnavailableUnits.TryRemove(Game.LocalPlayerId, out _));
+                        // This completion may run after a save load, area change or
+                        // multiplayer reset replaced Game/Combat.  Never dereference
+                        // the mutable session from the continuation and always observe
+                        // the worker exception so it cannot surface later on Unity's
+                        // finalizer thread as an unrelated unobserved failure.
+                        _ = CombatInteraction.ExcludeUnitsFromCombatAsync(unitsToRemoveFromCombat)
+                            .ContinueWith(task =>
+                            {
+                                if (task.IsFaulted)
+                                {
+                                    Logger.LogError(task.Exception,
+                                        "Unable to exclude unavailable units while initializing combat");
+                                    return;
+                                }
+                                lock (ActionLock)
+                                {
+                                    if (ReferenceEquals(Game?.Combat, combat))
+                                        combat.UnavailableUnits.TryRemove(Game.LocalPlayerId, out _);
+                                }
+                            }, TaskScheduler.Default);
 
-                        Game.Combat.IsSynced = true;
+                        combat.IsSynced = true;
                         return false;
                     case NetworkCombatStage.Finalizing:
                     case NetworkCombatStage.Running:
@@ -2903,12 +2929,17 @@ namespace WOTRMultiplayer.Services
 
         public async Task BeginRealTimeRepairAsync()
         {
+            await TryBeginRealTimeRepairAsync();
+        }
+
+        private async Task<bool> TryBeginRealTimeRepairAsync()
+        {
             if (!IsRealTimeCombatActive || Game.RealTimeCombat.CombatEndPending
                 || _nativeRecoveryOwner != null || _waitingForRealTimePeer
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable
                     && Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Repairing)
             {
-                return;
+                return false;
             }
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             Game.RealTimeCombat.RecoveryStatus = "preparing"; Game.RealTimeCombat.RecoveryFailure = null;
@@ -2935,12 +2966,12 @@ namespace WOTRMultiplayer.Services
                         combat.RecoveryFailure = "repair-safe-point-timeout";
                         GameInteraction.SetPause(true);
                     }
-                    return;
+                    return false;
                 }
                 if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.RealTimeCombat, combat)
                     || combat.Epoch != epoch || combat.Phase != CombatSynchronizationPhase.Repairing
                     || _realTimeRepairStage != RealTimeRepairStage.Prepare)
-                    return;
+                    return true;
                 _lastRealTimeRepairMessage = new NotifyRealTimeRepair
                 {
                     Epoch = epoch,
@@ -2953,11 +2984,13 @@ namespace WOTRMultiplayer.Services
                 {
                     await StartRealTimeRepairVerificationAsync();
                 }
+                return true;
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Unable to pause for real-time combat verification. Epoch={Epoch}", Game.RealTimeCombat.Epoch);
                 GameInteraction.SetPause(true);
+                return false;
             }
         }
 
@@ -3884,6 +3917,11 @@ namespace WOTRMultiplayer.Services
                     Logger.LogWarning("[LevelingOwnerUI] Unauthorized leveling request rejected. PlayerId={PlayerId}, UnitId={UnitId}", playerId, message.UnitId);
                     return;
                 }
+                if (DeferRemoteLeveling(playerId, message.UnitId, levelingType))
+                {
+                    SendLevelingStartedConfirmation(message.UnitId, levelingType);
+                    return;
+                }
                 if (Game.Leveling == null)
                 {
                     InitiateLeveling(message.UnitId, levelingType);
@@ -3978,6 +4016,16 @@ namespace WOTRMultiplayer.Services
         private void OnClientCombatTurnStarted(long playerId, ClientCombatTurnStarted started)
         {
             if (_combatSave?.ConfirmTurnAlignment(playerId, started) == true) return;
+            var turn = Game?.Combat?.Turn;
+            if (turn == null || !GetSyncedPlayers().Any(player => player.Id == playerId)
+                || started.Round != Game.Combat.Round
+                || !string.Equals(started.UnitId, turn.UnitId, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.LogWarning("[TurnRecovery] Rejecting stale client turn start. Player={Player}, ClientUnit={ClientUnit}, HostUnit={HostUnit}, ClientRound={ClientRound}, HostRound={HostRound}",
+                    playerId, started?.UnitId, turn?.UnitId, started?.Round, Game?.Combat?.Round);
+                if (turn != null) Send(playerId, TurnRecoveryMessage(turn.UnitId));
+                return;
+            }
             AddPlayerReadyStatus(PlayerTurnReadinessType.Start, playerId, started.UnitId);
 
             TryStartTurn();
@@ -4036,11 +4084,12 @@ namespace WOTRMultiplayer.Services
             });
         }
 
-        private async void OnClientDialogCueWitnessed(long playerId, ClientDialogCueWitnessed message)
+        private void OnClientDialogCueWitnessed(long playerId, ClientDialogCueWitnessed message)
         {
-            await WaitWhileTrue(() => Game.DialogState == null, "Waiting for dialog to initialize before witnessing cue");
-
-            if (message.Dialog?.Id != Game.DialogState.Dialog.Id || message.CueName != Game.DialogState.CurrentCueName
+            if (message?.Dialog == null || string.IsNullOrWhiteSpace(message.CueName)
+                || !GetSyncedPlayers().Any(p => p.Id == playerId)) return;
+            if (message.Dialog.Id != Game.DialogState?.Dialog?.Id
+                || message.CueName != Game.DialogState?.CurrentCueName
                 || !GetSyncedPlayers().Any(p => p.Id == playerId)) return;
 
             AddCueWitness(message.CueName, playerId);
@@ -4457,6 +4506,10 @@ namespace WOTRMultiplayer.Services
                     IsTurnBasedModeEnabled = true,
                     AutoStopAfterFirstMoveAction = false,
                     AutoEndTurn = false,
+                    // Apply the game's maximum turn animation speed to both peers,
+                    // including player turns, instead of requiring Space to be held.
+                    TimeScaleInPlayerTurn = 3f,
+                    TimeScaleInNonPlayerTurn = 3f,
                 },
                 Main = new NetworkGameMainSettings
                 {
@@ -4667,11 +4720,14 @@ namespace WOTRMultiplayer.Services
         }
 
         private void SendLevelingStartedConfirmation(long? playerId = null)
+            => SendLevelingStartedConfirmation(Game.Leveling.UnitId, Game.Leveling.Type, playerId);
+
+        private void SendLevelingStartedConfirmation(string unitId, NetworkLevelingType type, long? playerId = null)
         {
             var message = new NotifyLevelingStarted
             {
-                UnitId = Game.Leveling.UnitId,
-                Type = Game.Leveling.Type.ToString()
+                UnitId = unitId,
+                Type = type.ToString()
             };
             if (playerId.HasValue)
             {

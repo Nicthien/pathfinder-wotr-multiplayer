@@ -12,6 +12,7 @@ using WOTRMultiplayer.Abstractions;
 using WOTRMultiplayer.Abstractions.PubSub;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.MapObjects;
+using WOTRMultiplayer.HarmonyPatches;
 using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.Services.PubSub
@@ -68,6 +69,7 @@ namespace WOTRMultiplayer.Services.PubSub
         {
             try
             {
+                CapitalMercenaryPatches.CaptureTransitionMercenaries();
                 if (ActorAccessor.Current == null || !ActorAccessor.Host.IsActive)
                 {
                     return;
@@ -151,6 +153,7 @@ namespace WOTRMultiplayer.Services.PubSub
 
                 Logger.LogInformation("OnAreaLoadingComplete");
                 ActorAccessor.Current.OnAreaLoadingComplete();
+                CapitalMercenaryPatches.ClearTransitionMercenaries();
             }
             catch (Exception ex)
             {

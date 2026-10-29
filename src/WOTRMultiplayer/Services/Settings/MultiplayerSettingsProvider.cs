@@ -1,4 +1,6 @@
 ﻿using WOTRMultiplayer.Abstractions.Settings;
+using Kingmaker.Settings;
+using UnityEngine;
 using WOTRMultiplayer.Entities.Settings;
 
 namespace WOTRMultiplayer.Services.Settings
@@ -32,6 +34,7 @@ namespace WOTRMultiplayer.Services.Settings
             // hotkeys
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Hotkeys.Ping);
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Hotkeys.ShowLobby);
+            MigrateLegacyShowLobbyHotkey();
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Hotkeys.ForceUnpause);
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.Hotkeys.ForceCombatEnd);
 
@@ -52,6 +55,28 @@ namespace WOTRMultiplayer.Services.Settings
             _settingsControllerAccessor.CreateDefaultValue(WellKnownSettings.DangerZone.SaveGameChunkSize);
             _settingsControllerAccessor.CreateDefaultValue<string>(WellKnownSettings.DangerZone.LocalUnitDeathNotificationDelay);
             _settingsControllerAccessor.CreateDefaultValue<string>(WellKnownSettings.DangerZone.RemoteUnitDeathProcessingDelay);
+        }
+
+        private void MigrateLegacyShowLobbyHotkey()
+        {
+            var binding = _settingsControllerAccessor.GetValue(WellKnownSettings.Hotkeys.ShowLobby);
+            if (!IsLegacyShowLobbyBinding(binding))
+            {
+                return;
+            }
+
+            _settingsControllerAccessor.SetValue(
+                WellKnownSettings.Hotkeys.ShowLobby,
+                WellKnownSettings.Hotkeys.ShowLobby.DefaultValue);
+        }
+
+        internal static bool IsLegacyShowLobbyBinding(KeyBindingPair binding)
+        {
+            return binding.Binding1.Key == KeyCode.F2
+                && !binding.Binding1.IsCtrlDown
+                && !binding.Binding1.IsAltDown
+                && !binding.Binding1.IsShiftDown
+                && binding.Binding2.Key == KeyCode.None;
         }
 
         public NetworkMultiplayerSettings GetSettings()

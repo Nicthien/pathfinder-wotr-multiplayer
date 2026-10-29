@@ -156,6 +156,7 @@ namespace WOTRMultiplayer.HarmonyPatches.MapObjects
                 entry.Condition == null || entry.Condition.Check(null));
             if (action != null)
             {
+                CapitalMercenaryPatches.CaptureTransitionMercenaries();
                 Main.Multiplayer.OnAreaTransition(new NetworkAreaTransition
                 {
                     AreaExitId = transition.View.UniqueId,
@@ -167,17 +168,10 @@ namespace WOTRMultiplayer.HarmonyPatches.MapObjects
                 return;
             }
 
-            var currentArea = Game.Instance.CurrentlyLoadedArea;
-            var target = transition.AreaEnterPoint;
-            if (Game.Instance.State.LoadedAreaState.Encounter == null && target.Area.IsGlobalMap)
-            {
-                var globalMap = Kingmaker.Blueprints.Root.BlueprintRoot.Instance.GlobalMap.GetGlobalMap(target);
-                if (globalMap != null) Game.Instance.Player.GetGlobalMap(globalMap).Player.AreaReturnPoint =
-                    transition.GetEnterPointToReturnTo();
-            }
-            EventBus.RaiseEvent<IPartyLeaveAreaHandler>(handler =>
-                handler.HandlePartyLeaveArea(currentArea, target, transition));
-            Game.Instance.LoadArea(target, transition.Settings.AutoSaveMode, null);
+            // Preserve the native exit pipeline: it is responsible for presenting
+            // the collect-all loot window and then raising PartyLeaveArea itself.
+            EventBus.RaiseEvent<ILootInterractionHandler>(handler =>
+                handler.HandleZoneLootInterraction(transition));
         }
 
         private static void SelectAllCharactersControlledByLocalPlayer()

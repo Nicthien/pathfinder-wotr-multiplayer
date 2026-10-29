@@ -119,6 +119,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public bool IsPaused => Game.Instance.IsPaused || Game.Instance.m_WillBePaused;
 
+        public bool IsWorldPaused => CombatSaving.CombatSavePauseLease.IsWorldPaused(Game.Instance);
+
         public bool IsCapitalPartyMode => Game.Instance.Player.CapitalPartyMode;
 
         public GameInteractionService(
@@ -254,6 +256,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                HarmonyPatches.CapitalMercenaryPatches.CaptureTransitionMercenaries();
                 var currentArea = Game.Instance.CurrentlyLoadedArea;
                 if (!string.Equals(currentArea?.AssetGuid.ToString(), networkAreaTransition.From.Id, StringComparison.OrdinalIgnoreCase))
                 {
@@ -296,20 +299,21 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public void SetPause(bool isPaused)
         {
             _logger.LogInformation("Pause game. RequestedIsPaused={IsPaused}, GameIsPaused={GameIsPaused}", isPaused, Game.Instance.IsPaused);
-            if (Game.Instance.IsPaused == isPaused)
+            if (!isPaused)
             {
+                // Owlcat can schedule a pause for the next tick without setting IsPaused yet.
+                // A mode-switch Complete received in that window used to return early because
+                // IsPaused was already false, leaving m_WillBePaused armed. The client then
+                // paused by itself one frame after the host resumed and immediately diverged.
+                Game.Instance.m_WillBePaused = false;
+                Game.Instance.PauseOnLoadPendingTicks = 0;
+                if (Game.Instance.IsPaused)
+                    Game.Instance.IsPaused = false;
                 return;
             }
 
-            if (isPaused)
-            {
+            if (!Game.Instance.IsPaused)
                 Game.Instance.IsPaused = true;
-                return;
-            }
-
-            Game.Instance.m_WillBePaused = false;
-            Game.Instance.PauseOnLoadPendingTicks = 0;
-            Game.Instance.IsPaused = false;
         }
 
         public Task SetPauseAsync(bool isPaused)

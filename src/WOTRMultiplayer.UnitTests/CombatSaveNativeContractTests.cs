@@ -233,6 +233,8 @@ namespace WOTRMultiplayer.UnitTests
         public void CapturePatchesCoverObservedDerivedFactAndAdditionalLimbCallbacks()
         {
             Assert.That(AccessTools.Method(typeof(AddFeatureOnSkill), "OnActivate"), Is.Not.Null);
+            Assert.That(AccessTools.Method(typeof(Kingmaker.Designers.Mechanics.Buffs.BuffStatusCondition), "OnTurnOff"), Is.Not.Null);
+            Assert.That(AccessTools.Method(typeof(Kingmaker.Designers.Mechanics.Buffs.BuffStatusCondition), "OnTurnOn"), Is.Not.Null);
             Assert.That(AccessTools.Method(typeof(AddAdditionalLimb), "OnTurnOff"), Is.Not.Null);
             Assert.That(AccessTools.Method(typeof(AddAdditionalLimb), "OnTurnOn"), Is.Not.Null);
             Assert.That(AccessTools.Field(typeof(Kingmaker.Items.UnitBody), "m_PolymorphAdditionalLimbs"), Is.Not.Null);
@@ -240,10 +242,13 @@ namespace WOTRMultiplayer.UnitTests
             Assert.That(AccessTools.Field(typeof(Kingmaker.UnitLogic.Commands.Base.UnitCommand), "<Result>k__BackingField"), Is.Not.Null);
             Assert.That(AccessTools.Field(typeof(Kingmaker.UnitLogic.Commands.Base.UnitCommand), "<IsFinished>k__BackingField"), Is.Not.Null);
             Assert.That(typeof(CombatSaveDerivedFactsPatch).GetCustomAttributes(typeof(HarmonyPatch), false), Is.Not.Empty);
+            Assert.That(CombatSaveStatusConditionPatch.TargetMethods(), Has.Exactly(2).Items);
             Assert.That(typeof(CombatSaveRememberAdditionalLimbPatch).GetCustomAttributes(typeof(HarmonyPatch), false), Is.Not.Empty);
             Assert.That(typeof(CombatSaveRestoreAdditionalLimbPatch).GetCustomAttributes(typeof(HarmonyPatch), false), Is.Not.Empty);
             Assert.That(CombatSaveDerivedFactsPatch.Prefix(), Is.True,
                 "Outside a capture, ordinary skill-derived feature updates must remain enabled");
+            Assert.That(CombatSaveStatusConditionPatch.Prefix(), Is.True,
+                "Outside a capture, ordinary status-condition updates must remain enabled");
         }
 
         [Test]

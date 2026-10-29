@@ -15,10 +15,12 @@ using Kingmaker.UI.MVVM._PCView.CharGen.Phases.Race;
 using Kingmaker.UI.MVVM._PCView.CharGen.Phases.Skills;
 using Kingmaker.UI.MVVM._PCView.CharGen.Phases.Spells;
 using Kingmaker.UI.MVVM._PCView.CharGen.Phases.Voice;
+using Kingmaker.UI.MVVM._VM.CharGen;
 using Kingmaker.UI.MVVM._VM.CharGen.Phases;
 using Kingmaker.UI.MVVM._VM.CharGen.Phases.Class;
 using Kingmaker.UI.MVVM._VM.CharGen.Phases.Common;
 using Kingmaker.UI.MVVM._VM.CharGen.Phases.FeatureSelector;
+using Kingmaker.UI.MVVM._VM.CharGen.Phases.Mythic;
 using Kingmaker.UI.MVVM._VM.CharGen.Phases.Portrait;
 using Kingmaker.UI.MVVM._VM.CharGen.Phases.Spells;
 using Kingmaker.UnitLogic.Class.LevelUp;
@@ -38,6 +40,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly IPlayerNotificationService _playerNotificationService;
         private readonly IGameStateLookupService _gameStateLookupService;
         private readonly IUISyncCountersService _uiSyncCountersService;
+        private CharGenVM _backgroundCharGen;
+        private LevelUpController _backgroundLevelUpController;
+
+        public bool IsLevelingUIReady => _backgroundCharGen != null || _uiAccessor.CharGenView?.ViewModel != null;
+        public bool IsBackgroundLevelingReady => _backgroundCharGen != null;
 
         public LevelingInteractionService(
             ILogger<LevelingInteractionService> logger,
@@ -84,6 +91,61 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     throw;
                 }
             });
+        }
+
+        public void StartBackgroundLeveling(string unitId, NetworkLevelingType levelingType)
+        {
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    if (_backgroundCharGen != null)
+                        throw new InvalidOperationException("background-leveling-already-active");
+                    var unit = _gameStateLookupService.GetUnitEntity(unitId);
+                    if (unit == null)
+                        throw new InvalidOperationException($"background-leveling-unit-missing:{unitId}");
+                    var mode = levelingType switch
+                    {
+                        NetworkLevelingType.Leveling when unit.Progression.CharacterLevel <= 0 => LevelUpState.CharBuildMode.CharGen,
+                        NetworkLevelingType.Leveling => LevelUpState.CharBuildMode.LevelUp,
+                        _ or NetworkLevelingType.MythicLeveling => LevelUpState.CharBuildMode.Mythic,
+                    };
+                    var config = LevelUpConfig.Create(unit, mode);
+                    _backgroundLevelUpController = config.StartController();
+                    using (_backgroundLevelUpController.EnterApplyingPlanScope())
+                    {
+                        _backgroundCharGen = new CharGenVM(
+                            _backgroundLevelUpController,
+                            () => FinishBackgroundLeveling(commit: false),
+                            () => FinishBackgroundLeveling(commit: true),
+                            config);
+                    }
+                    _logger.LogInformation("Started headless remote leveling. UnitId={UnitId}, Mode={Mode}", unitId, mode);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error while starting headless remote leveling. UnitId={UnitId}", unitId);
+                    FinishBackgroundLeveling(commit: false);
+                    throw;
+                }
+            });
+        }
+
+        private void FinishBackgroundLeveling(bool commit)
+        {
+            var viewModel = _backgroundCharGen;
+            var controller = _backgroundLevelUpController;
+            _backgroundCharGen = null;
+            _backgroundLevelUpController = null;
+            try
+            {
+                if (commit) controller?.Commit();
+                controller?.Stop();
+            }
+            finally
+            {
+                viewModel?.Dispose();
+            }
         }
 
         public void SelectLevelingClassArchetype(NetworkLevelingArchetype levelingArchetype)
@@ -142,13 +204,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    if (_uiAccessor.CharGenView?.ViewModel == null)
-                    {
-                        _logger.LogWarning("Can't select mythic class due to missing CharGenView");
-                        return;
-                    }
-
-                    var viewModel = (_uiAccessor.CharGenView?.SelectedDetailView as CharGenMythicPhaseDetailedPCView)?.ViewModel;
+                    var viewModel = _backgroundCharGen?.CurrentPhaseVM.Value as CharGenMythicPhaseVM
+                        ?? (_uiAccessor.CharGenView?.SelectedDetailView as CharGenMythicPhaseDetailedPCView)?.ViewModel;
                     if (viewModel == null)
                     {
                         _logger.LogError("Can't select mythic class due to missing mythic leveling phase viewmodel");
@@ -650,30 +707,29 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    if (_uiAccessor.CharGenView?.ViewModel == null)
+                    CharGenFeatureSelectorItemVM requestedFeatureVM;
+                    if (_backgroundCharGen?.CurrentPhaseVM.Value is CharGenFeatureSelectorPhaseVM backgroundPhase)
                     {
-                        _logger.LogWarning("Can't select feature due to missing CharGenView");
-                        return;
+                        requestedFeatureVM = backgroundPhase.ExtractNestedEntities()
+                            .OfType<CharGenFeatureSelectorItemVM>().FirstOrDefault(featureItem =>
+                            string.Equals(featureItem.Feature.NameForAcronym, networkLevelingFeature.Name, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(featureItem.Feature.Feature.AssetGuid.ToString(), networkLevelingFeature.Id, StringComparison.OrdinalIgnoreCase));
                     }
-
-                    var view = _uiAccessor.CharGenView?.SelectedDetailView as CharGenFeatureSelectorPhaseDetailedPCView;
-                    if (view == null)
+                    else
                     {
-                        _logger.LogError("Unable to get leveling feature view");
-                        return;
+                        var view = _uiAccessor.CharGenView?.SelectedDetailView as CharGenFeatureSelectorPhaseDetailedPCView;
+                        requestedFeatureVM = view?.m_Selector.VirtualList.Elements
+                            .Select(element => element.Data as CharGenFeatureSelectorItemVM)
+                            .FirstOrDefault(featureItem => featureItem != null
+                                && string.Equals(featureItem.Feature.NameForAcronym, networkLevelingFeature.Name, StringComparison.OrdinalIgnoreCase)
+                                && string.Equals(featureItem.Feature.Feature.AssetGuid.ToString(), networkLevelingFeature.Id, StringComparison.OrdinalIgnoreCase));
                     }
-
-                    var featureToSelect = view.m_Selector.VirtualList.Elements.FirstOrDefault(x => x.Data is CharGenFeatureSelectorItemVM featureItem
-                         && string.Equals(featureItem.Feature.NameForAcronym, networkLevelingFeature.Name, StringComparison.OrdinalIgnoreCase)
-                         && string.Equals(featureItem.Feature.Feature.AssetGuid.ToString(), networkLevelingFeature.Id, StringComparison.OrdinalIgnoreCase));
-                    if (featureToSelect == null)
+                    if (requestedFeatureVM == null)
                     {
                         _playerNotificationService.ShowWarningNotification(WellKnownKeys.GameNotifications.Leveling.FeatureMismatch.Key, args: networkLevelingFeature.Name);
                         _logger.LogError("Unable to find requested feature in the list. FeatureName={FeatureName}, FeatureId={FeatureId}", networkLevelingFeature.Name, networkLevelingFeature.Id);
                         return;
                     }
-
-                    var requestedFeatureVM = featureToSelect.Data as CharGenFeatureSelectorItemVM;
                     requestedFeatureVM.SetSelected(true);
                     _logger.LogInformation("Selected leveling feature. FeatureName={FeatureName}, FeatureId={FeatureId}", requestedFeatureVM.Feature.NameForAcronym, requestedFeatureVM.Feature.Feature.AssetGuid.ToString());
                 }
@@ -748,6 +804,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
+                    if (_backgroundLevelUpController != null)
+                    {
+                        _backgroundLevelUpController.SpendSkillPoint(networkLevelingSkillPoint.StatType);
+                        return;
+                    }
                     var skillView = GetLevelingSkillAllocatorView(networkLevelingSkillPoint.StatType);
                     if (skillView == null)
                     {
@@ -772,6 +833,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
+                    if (_backgroundLevelUpController != null)
+                    {
+                        _backgroundLevelUpController.UnspendSkillPoint(networkLevelingSkillPoint.StatType);
+                        return;
+                    }
                     var skillView = GetLevelingSkillAllocatorView(networkLevelingSkillPoint.StatType);
                     if (skillView == null)
                     {
@@ -943,6 +1009,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
+                    if (_backgroundLevelUpController != null)
+                    {
+                        _backgroundLevelUpController.AddStatPoint(networkLevelingAbilityScore.StatType);
+                        return;
+                    }
                     var abilityScoreView = GetLevelingAbilityScoreAllocatorView(networkLevelingAbilityScore.StatType);
                     if (abilityScoreView == null)
                     {
@@ -967,6 +1038,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
+                    if (_backgroundLevelUpController != null)
+                    {
+                        _backgroundLevelUpController.RemoveStatPoint(networkLevelingAbilityScore.StatType);
+                        return;
+                    }
                     var abilityScoreView = GetLevelingAbilityScoreAllocatorView(networkLevelingAbilityScore.StatType);
                     if (abilityScoreView == null)
                     {
@@ -991,7 +1067,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    _uiAccessor.CharGenView.ViewModel.Complete();
+                    if (_backgroundCharGen != null) _backgroundCharGen.Complete();
+                    else _uiAccessor.CharGenView.ViewModel.Complete();
                 }
                 catch (Exception ex)
                 {
@@ -1007,7 +1084,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
-                    _uiAccessor.CharGenView.ViewModel.Close();
+                    if (_backgroundCharGen != null) _backgroundCharGen.Close();
+                    else _uiAccessor.CharGenView.ViewModel.Close();
                 }
                 catch (Exception ex)
                 {
@@ -1152,6 +1230,18 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                if (_backgroundCharGen != null)
+                {
+                    if (networkLevelingPhase.Index < 0
+                        || networkLevelingPhase.Index >= _backgroundCharGen.PhasesCollection.Count)
+                    {
+                        _logger.LogError("Background leveling phase is out of range. Index={Index}, TotalCount={TotalCount}",
+                            networkLevelingPhase.Index, _backgroundCharGen.PhasesCollection.Count);
+                        return;
+                    }
+                    _backgroundCharGen.CurrentPhaseVM.Value = _backgroundCharGen.PhasesCollection[networkLevelingPhase.Index];
+                    return;
+                }
                 if (_uiAccessor.CharGenView == null)
                 {
                     _logger.LogError("Unable to update switch leveling phase due too missing CharGenView");
@@ -1220,6 +1310,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private CharGenSpellsPhaseVM GetCharGenSpellsPhaseVM()
         {
+            if (_backgroundCharGen?.CurrentPhaseVM.Value is CharGenSpellsPhaseVM backgroundPhase)
+                return backgroundPhase;
             if (_uiAccessor.CharGenView == null)
             {
                 _logger.LogError("Unable to get leveling spellphase vm due too missing CharGenView");
@@ -1237,8 +1329,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private CharGenClassPhaseVM GetLevelingPhaseViewModel()
         {
-            var viewModel = (_uiAccessor.CharGenView?.SelectedDetailView as CharGenClassPhaseDetailedPCView)?.ViewModel;
-            return viewModel;
+            return _backgroundCharGen?.CurrentPhaseVM.Value as CharGenClassPhaseVM
+                ?? (_uiAccessor.CharGenView?.SelectedDetailView as CharGenClassPhaseDetailedPCView)?.ViewModel;
         }
 
         private void SelectAppearanceTexture(SelectionGroupRadioVM<TextureSelectorItemVM> selector, string selectorName, string textureName)

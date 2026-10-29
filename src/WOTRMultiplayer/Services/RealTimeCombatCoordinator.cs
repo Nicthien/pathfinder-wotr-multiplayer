@@ -149,10 +149,24 @@ namespace WOTRMultiplayer.Services
                 throw new InvalidOperationException("Every player must apply the committed combat mode before resuming.");
             }
 
+            ClearManualPauseForTurnBased(_state);
             _state.PreviousMode = null;
             _state.ReadyPlayers.Clear();
             _state.RequiredPlayers.Clear();
             _state.Phase = CombatSynchronizationPhase.Stable;
+        }
+
+        internal static void ClearManualPauseForTurnBased(NetworkRealTimeCombatState state)
+        {
+            if (state == null || state.Mode != CombatMode.TurnBased
+                || state.PausedPlayers.Count == 0 && state.ResumeVotes.Count == 0)
+                return;
+            // RTwP manual pause ownership has no meaning once the native
+            // turn-based controller is active. Keeping it made the client
+            // re-apply pause after mode completion while the host resumed.
+            state.PausedPlayers.Clear();
+            state.ResumeVotes.Clear();
+            state.PauseSequence++;
         }
 
         public void AbortModeSwitch()

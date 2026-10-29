@@ -70,7 +70,6 @@ namespace WOTRMultiplayer.UnitTests.Services
         [TestCase("old", 17, 21, 2, -1)]
         [TestCase("game", 16, 21, 2, -1)]
         [TestCase("game", 17, 20, 2, -1)]
-        [TestCase("game", 17, 21, 1, -1)]
         [TestCase("game", 17, 21, 2, 1)]
         public void SessionRecovery_RejectsStaleOrNonHostTurn(string id, int save, int combat, int round, long sender)
         {
@@ -81,6 +80,23 @@ namespace WOTRMultiplayer.UnitTests.Services
                 new NotifyInvalidCombatTurnStarted { SessionId = id, LoadedSaveSeed = save,
                     CombatSeed = combat, Round = round, UnitId = "enemy" });
             A.CallTo(() => _mainThreadAccessor.Post(A<Action>._)).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void SessionRecovery_HostCheckpointCorrectsLocalRound()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp()) { Id = "game", LoadedSaveSeed = 17,
+                Combat = new NetworkCombat { Seed = 21, Round = 2, Stage = NetworkCombatStage.Running } };
+            A.CallTo(() => _mainThreadAccessor.Post(A<Action>._)).Invokes((Action action) => action());
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyInvalidCombatTurnStarted>(_networkClient)(-1,
+                new NotifyInvalidCombatTurnStarted { SessionId = "game", LoadedSaveSeed = 17,
+                    CombatSeed = 21, Round = 1, UnitId = "enemy" });
+
+            Assert.That(_multiplayerClient.Game.Combat.Round, Is.EqualTo(1));
+            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn(
+                "enemy", A<Action>._, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
         }
 
         [Test]
