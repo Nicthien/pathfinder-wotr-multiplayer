@@ -22,5 +22,14 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(4)]
         [LogMe]
         public List<NetworkAreaEffect> AreaEffects { get; set; } = [];
+
+        [ProtoMember(5)] public List<NetworkProjectileState> Projectiles { get; set; } = [];
+        [ProtoMember(6)] public bool ProjectilesCaptured { get; set; }
+        // Only populated for the native reconstruction reference, not frequent snapshots.
+        [ProtoMember(7)] public NetworkNativeTopology NativeTopology { get; set; }
+        [ProtoMember(8)] public NetworkAcceptedOrderReference AcceptedOrderReference { get; set; }
+        // Native checkpoint only. Entries contain an ID and buff collection;
+        // they are not additional encounter participants.
+        [ProtoMember(9)] public List<NetworkUnit> NativeUnits { get; set; } = [];
     }
 }

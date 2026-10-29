@@ -5,16 +5,22 @@ using Kingmaker.UI.MVVM._VM.Tooltip.Bricks;
 using Owlcat.Runtime.UI.Tooltips;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Content;
+using WOTRMultiplayer.Services;
 
 namespace WOTRMultiplayer.UI.Tooltips
 {
     public class ContentDiscrepancyTooltipTemplate : TooltipBaseTemplate
     {
         private readonly NetworkPlayer _player;
+        private readonly NetworkContentState _hostContent;
+        private readonly RealTimeContentMismatch _realTimeMismatch;
 
-        public ContentDiscrepancyTooltipTemplate(NetworkPlayer player)
+        public ContentDiscrepancyTooltipTemplate(NetworkPlayer player, NetworkContentState hostContent,
+            RealTimeContentMismatch realTimeMismatch)
         {
             _player = player;
+            _hostContent = hostContent;
+            _realTimeMismatch = realTimeMismatch;
         }
 
         public override IEnumerable<ITooltipBrick> GetHeader(TooltipTemplateType type)
@@ -24,6 +30,25 @@ namespace WOTRMultiplayer.UI.Tooltips
 
         public override IEnumerable<ITooltipBrick> GetBody(TooltipTemplateType type)
         {
+            if (_realTimeMismatch != RealTimeContentMismatch.None)
+            {
+                yield return new TooltipBrickTitle(
+                    new LocalizedString { Key = WellKnownKeys.LobbyWindow.Tooltips.ContentDiscrepancy.Compatibility.Title.Key },
+                    TooltipTitleType.H1, saberFormat: true);
+                if ((_realTimeMismatch & RealTimeContentMismatch.GameVersion) != 0)
+                    yield return new TooltipBrickText(string.Format(
+                        new LocalizedString { Key = WellKnownKeys.LobbyWindow.Tooltips.ContentDiscrepancy.Compatibility.GameVersion.Key },
+                        _hostContent?.GameVersion ?? "?", _player.ContentState?.GameVersion ?? "?"));
+                if ((_realTimeMismatch & RealTimeContentMismatch.ProtocolVersion) != 0)
+                    yield return new TooltipBrickText(string.Format(
+                        new LocalizedString { Key = WellKnownKeys.LobbyWindow.Tooltips.ContentDiscrepancy.Compatibility.ProtocolVersion.Key },
+                        _hostContent?.RealTimeProtocolVersion.ToString() ?? "?",
+                        _player.ContentState?.RealTimeProtocolVersion.ToString() ?? "?"));
+                if ((_realTimeMismatch & RealTimeContentMismatch.BuildFingerprint) != 0)
+                    yield return new TooltipBrickText(
+                        new LocalizedString { Key = WellKnownKeys.LobbyWindow.Tooltips.ContentDiscrepancy.Compatibility.BuildFingerprint.Key });
+            }
+
             if (_player.ContentState.DiscrepantDLCs.Any())
             {
                 yield return new TooltipBrickTitle(new LocalizedString { Key = WellKnownKeys.LobbyWindow.Tooltips.ContentDiscrepancy.DLCs.Title.Key }, TooltipTitleType.H1, saberFormat: true);

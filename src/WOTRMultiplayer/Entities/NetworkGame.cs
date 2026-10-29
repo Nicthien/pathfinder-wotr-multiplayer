@@ -5,6 +5,7 @@ using Kingmaker.UI.Kingdom;
 using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
 using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.GlobalMap;
@@ -47,6 +48,8 @@ namespace WOTRMultiplayer.Entities
         public NetworkArmyCombat ArmyCombat { get; set; }
 
         public NetworkCombat Combat { get; set; }
+
+        public NetworkRealTimeCombatState RealTimeCombat { get; set; } = new();
 
         public NetworkCombatTurn LastCombatTurn { get; set; }
 

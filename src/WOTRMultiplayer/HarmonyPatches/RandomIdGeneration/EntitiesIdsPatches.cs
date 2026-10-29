@@ -24,6 +24,7 @@ using Kingmaker.View;
 using Kingmaker.View.MapObjects;
 using Kingmaker.Visual.Sound;
 using Microsoft.Extensions.Logging;
+using WOTRMultiplayer.Services.CombatSaving;
 using WOTRMultiplayer.Services.Random;
 
 namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
@@ -136,6 +137,10 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             var newInstructions = new List<CodeInstruction>()
             {
                 new(OpCodes.Ldloc_2),
+                new(OpCodes.Ldarg_0),
+                new(OpCodes.Ldarg_1),
+                new(OpCodes.Ldarg_2),
+                new(OpCodes.Ldarg_S, 4),
                 new(OpCodes.Call, replaceWith),
             };
             return PatchPlayerIdGeneration(target, instructions, newInstructions);
@@ -171,6 +176,7 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             {
                 new(OpCodes.Ldarg_1),
                 new(OpCodes.Ldarg_2),
+                new(OpCodes.Ldarg_3),
                 new(OpCodes.Call, replaceWith),
             };
             return PatchPlayerIdGeneration(target, instructions, newInstructions);
@@ -394,7 +400,9 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             }
         }
 
-        private static string GetNewAreaEffectUniqueId(AreaEffectView areaEffectView)
+        private static string GetNewAreaEffectUniqueId(AreaEffectView areaEffectView,
+            MechanicsContext parentContext, BlueprintAbilityAreaEffect blueprint,
+            TargetWrapper target, bool onUnit)
         {
             if (!Main.Multiplayer.IsActive)
             {
@@ -405,7 +413,10 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             {
                 var identifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{areaEffectView.GetType().Name}:{areaEffectView.name}";
                 var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.AreaEffect, Game.Instance.Player.GameId, identifier);
-                return id;
+                var targetKey = target?.IsUnit == true ? $"unit:{target.UnitRef.Id}" : target == null
+                    ? "none" : $"point:{QuantizeEntityPoint(target.m_Point.x)}:{QuantizeEntityPoint(target.m_Point.y)}:{QuantizeEntityPoint(target.m_Point.z)}";
+                var authorityKey = $"area:{blueprint.AssetGuid}:{parentContext?.MaybeCaster?.UniqueId}:{parentContext?.SourceAbility?.AssetGuid}:{targetKey}:{onUnit}";
+                return Main.Multiplayer.ResolveRealTimeEntityId(authorityKey, () => id);
             }
             catch (Exception ex)
             {
@@ -413,6 +424,9 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
                 throw;
             }
         }
+
+        private static long QuantizeEntityPoint(float value) => checked((long)Math.Round(value * 1000d,
+            MidpointRounding.AwayFromZero));
 
         private static string GetNewEntityUniqueId(EntityViewBase prefab)
         {
@@ -436,7 +450,8 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             }
         }
 
-        private static string GetNewUnitUniqueId(BlueprintUnit unit, UnitEntityView prefab)
+        private static string GetNewUnitUniqueId(BlueprintUnit unit, UnitEntityView prefab,
+            UnityEngine.Vector3 position)
         {
             if (!Main.Multiplayer.IsActive)
             {
@@ -447,10 +462,11 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             {
                 var seedKind = SeedKind.Session | SeedKind.LoadedSaveSeed;
                 var baseIdentifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{unit.AssetGuid}:{unit.name}:{unit.Faction}:{prefab.name}";
+                var summon = Rulebook.CurrentContext?.CurrentEvent as RuleSummonUnit;
                 // DoNotLinkToCaster - usually it's some scripted summons (e.g. islands -> Arcane undertow) which could be summoned during different combat stages
-                if (Rulebook.CurrentContext?.CurrentEvent is RuleSummonUnit ruleSummonUnit && !ruleSummonUnit.DoNotLinkToCaster)
+                if (summon != null && !summon.DoNotLinkToCaster)
                 {
-                    baseIdentifier += $":{ruleSummonUnit.Initiator?.UniqueId}";
+                    baseIdentifier += $":{summon.Initiator?.UniqueId}";
                     seedKind |= SeedKind.CombatTurnSeed;
                 }
 
@@ -458,7 +474,8 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
                 var rawIdentifier = $"{baseIdentifier}_{seededContext.Id}";
                 var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.Unit, Game.Instance.Player.GameId, rawIdentifier);
                 Main.GetLogger<EntitiesIdsPatches>().LogInformation("UnitId has been generated. RawIdentifier={RawIdentifier}, Id={Id}", rawIdentifier, id);
-                return id;
+                var authorityKey = $"unit:{unit.AssetGuid}:{prefab.name}:{summon?.Initiator?.UniqueId}:{QuantizeEntityPoint(position.x)}:{QuantizeEntityPoint(position.y)}:{QuantizeEntityPoint(position.z)}";
+                return Main.Multiplayer.ResolveRealTimeEntityId(authorityKey, () => id);
             }
             catch (Exception ex)
             {
@@ -476,8 +493,25 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
 
             try
             {
+                var game = Game.Instance;
+                if (CombatSaveCaptureScope.Active)
+                {
+                    // Owlcat temporarily turns the existing player/facts off and
+                    // back on while serializing a native checkpoint. EntityFact.Attach
+                    // normally allocates a new id on that re-attach, which made the
+                    // supposedly read-only capture mutate live buff identities and
+                    // forced every RTwP -> TB reconstruction to abort. Only reuse an
+                    // id already owned by this exact fact; a genuinely new fact while
+                    // the world is held remains a hard failure below. The scope
+                    // may be authorized either by the combat-save pause lease or
+                    // by the host's native reconstruction barrier, so Active is
+                    // the single source of truth here.
+                    if (!string.IsNullOrWhiteSpace(fact?.UniqueId))
+                        return fact.UniqueId;
+                    throw new InvalidOperationException("native-checkpoint-fact-id-not-established");
+                }
                 var rawIdentifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{fact.GetType().Name}:{fact.NameForAcronym}:{fact.Owner?.UniqueId}";
-                var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.Fact, Game.Instance.Player.GameId, rawIdentifier);
+                var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.Fact, game.Player.GameId, rawIdentifier);
                 Main.GetLogger<EntitiesIdsPatches>().LogDebug("Fact id has been generated. RawIdentifier={RawIdentifier}, Id={Id}", rawIdentifier, id);
                 return id;
             }
@@ -542,7 +576,12 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
             try
             {
                 var rawIdentifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{blueprint.NameForAcronym}:{caster?.Unit?.UniqueId}:{fact?.UniqueId}:{blueprintSpellbook?.name}";
-                var id = Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.AbilityData, Game.Instance.Player.GameId, rawIdentifier);
+                var game = Game.Instance;
+                var id = CombatSaveActivation.Enabled && CombatSavePauseLease.HoldsSaveWorld(game)
+                    ? (Main.Multiplayer.ValueGenerator as DeterministicValueGenerator
+                        ?? throw new NotSupportedException("combat-save-generator-unsupported"))
+                        .ReuseLatestAbilityDataId(game.Player.GameId, rawIdentifier)
+                    : Main.Multiplayer.ValueGenerator.GenerateUniqueId(IdType.AbilityData, game.Player.GameId, rawIdentifier);
                 Main.GetLogger<EntitiesIdsPatches>().LogDebug("AbilityData id has been generated. RawIdentifier={RawIdentifier}, Id={Id}", rawIdentifier, id);
                 return id;
             }

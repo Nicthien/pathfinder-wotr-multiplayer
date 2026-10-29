@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -22,6 +22,8 @@ using WOTRMultiplayer.Config.DI;
 using WOTRMultiplayer.Localization;
 using WOTRMultiplayer.Networking.Abstractions.ExternalConnections;
 using WOTRMultiplayer.Services.PubSub;
+using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.Automation;
 using WOTRMultiplayer.Services.Settings;
 
 namespace WOTRMultiplayer
@@ -29,6 +31,7 @@ namespace WOTRMultiplayer
     public class Main
     {
         private static ILogger<Main> _logger;
+        private static TestControlBridge _testControlBridge;
 
         public static IServiceProvider ServiceProvider { get; private set; }
 
@@ -48,7 +51,11 @@ namespace WOTRMultiplayer
 
         public static IHashService HashService { get; private set; }
 
+        public static Version ModVersion { get; private set; }
+
         public static IMultiplayerRollsProcessor Rolls { get; private set; }
+
+        public const int MaxCharactersInParty = 6;
 
         public static ILogger<T> GetLogger<T>()
         {
@@ -57,8 +64,13 @@ namespace WOTRMultiplayer
 
         public static bool Load(UnityModManager.ModEntry entry)
         {
+            string isolatedProfile = null;
             try
             {
+                ModVersion = entry.Version;
+                isolatedProfile = RealTimeTestProfileBootstrap.ApplyIfRequested();
+                if (isolatedProfile != null)
+                    entry.Logger.Log($"RTwP isolated test profile: {isolatedProfile}");
                 ModManagerSettings = UnityModManager.ModSettings.Load<UnityModManagerSettings>(entry);
                 ModManagerSettings.ModFolder = entry.Path;
                 ModManagerSettings.ModId = entry.Info.Id;
@@ -91,10 +103,13 @@ namespace WOTRMultiplayer
                 State = ServiceProvider.GetRequiredService<IGameStateLookupService>();
                 HashService = ServiceProvider.GetRequiredService<IHashService>();
                 Lobby = ServiceProvider.GetRequiredService<ILobbyWindowController>();
+                _testControlBridge = ServiceProvider.GetRequiredService<TestControlBridge>();
+                _testControlBridge.Start(isolatedProfile);
 
                 entry.OnGUI += OnGui;
                 entry.OnSaveGUI += OnSaveGui;
                 entry.OnToggle += OnToggle;
+                entry.OnUpdate += OnUpdate;
 
                 var harmony = new Harmony(entry.Info.Id);
                 harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -131,6 +146,22 @@ namespace WOTRMultiplayer
         private static void TaskScheduler_UnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
         {
             _logger.LogError(e.Exception, "Unobserved task exception");
+        }
+
+        private static void OnUpdate(UnityModManager.ModEntry entry, float deltaTime)
+        {
+            try
+            {
+                (ServiceProvider?.GetService<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>()
+                    as WOTRMultiplayer.UI.MainThreadAccessor)?.Drain();
+                _testControlBridge?.Tick();
+                Multiplayer?.UpdateRealTimeCombat();
+                ServiceProvider?.GetService<IGlobalMapInteractionService>()?.TickMapPresentation();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Real-time combat update failed; no further state was sent this frame");
+            }
         }
 
         private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)

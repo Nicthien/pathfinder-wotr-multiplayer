@@ -32,7 +32,7 @@
                     "unableToLoad": "External servers configuration is corrupted and cannot be loaded.\nMake sure the following file is either deleted or in the correct format:\n{0}",
                     "unableToSave": "External servers configuration cannot be saved.\nMake sure the game is allowed to write to the following file:\n{0}",
                     "unreachableSignalingServer": "Unable to connect to the matchmaking server\n{0}",
-                    "modConflict": "Can't connect because of an unexpected compatibility issue.\nDisable other mods and try again"
+                    "modConflict": "The game versions, DLCs, gameplay mods or multiplayer protocol do not match. Check the lobby compatibility details and the host log. Local voice mods may differ."
                 }
             },
             "hostMenu": {
@@ -98,6 +98,60 @@
             }
         },
         "lobbyWindow": {
+            "realTime": {
+                "combatStatus": "Combat: {0}",
+                "pausePolicy": "Pause policy: {0}",
+                "preferredMode": "Preferred combat mode: {0}",
+                "networkResponse": "Snapshot response: {0} ms; missing replies: {1}",
+                "modeRealTime": "Real time with pause",
+                "turnBased": "Turn based",
+                "synchronizing": "Synchronizing",
+                "repairing": "Repairing",
+                "fallingBack": "Returning to turn based",
+                "paused": "Paused",
+                "hostOnly": "Host only",
+                "consensusResume": "Anyone can pause, everyone must resume",
+                "freeResume": "Anyone can pause or resume",
+                "unknown": "Unknown",
+                "switchToRealTime": "Switch to real time",
+                "switchToTurnBased": "Switch to turn based",
+                "preferRealTime": "Prefer real time for new combats",
+                "preferTurnBased": "Prefer turn based for new combats",
+                "changePausePolicy": "Change pause policy",
+                "repair": "Force synchronization",
+                "manualSyncRequested": "Synchronization requested. Waiting for the other player's confirmations.",
+                "manualSyncUnavailable": "Synchronization unavailable: outside combat, action in progress or no safe checkpoint.",
+                "manualSyncOutsideCombat": "Recovery available during a blocked combat.",
+                "saveCombat": "Save combat",
+                "saveCombatLoadFailed": "The combat could not be restored on both PCs. Resuming is blocked to avoid inconsistent state. Load another safe save from the game menu.",
+                "saveCombatReady": "Combat restored and verified on every connected PC. The game is resuming.",
+                "saveCombatWorking": "Saving combat: pausing and verifying both PCs…",
+        "saveCombatSaved": "Combat saved to a new slot.",
+        "saveCombatRecovering": "Save cancelled: rebuilding both peers from the host's unchanged turn. Wait for confirmation before resuming.",
+                "saveCombatBusy": "A combat save is already in progress.",
+                "saveCombatWaitAction": "Cannot save: wait until the action or movement ends.",
+                "saveCombatWaitTurn": "Cannot save: wait for a player turn in turn-based combat.",
+                "saveCombatSync": "Cannot save: both PCs must be synchronized.",
+                "saveCombatTimeout": "Save cancelled: no peer confirmation within 15 seconds.",
+                "saveCombatPeerRefused": "Save cancelled: the other PC is not ready.",
+                "saveCombatSessionChanged": "Save cancelled: a player disconnected or the session changed.",
+                "saveCombatNativeRefused": "Saving is not allowed by the game in the current situation.",
+                "saveCombatTransition": "Cannot save: loading or a transition is in progress.",
+                "saveCombatFailed": "Combat was not saved. Check that no action or synchronization is in progress.",
+                "saveCombatLocked": "Unavailable: multiplayer combat restoration is under development and has not been validated in game.",
+                "requestResume": "Request resume",
+                "requestPause": "Pause",
+                "recoveryPreparing": "Recovery: pausing and waiting for both PCs",
+                "recoveryRebuilding": "Recovery: rebuilding from the host",
+                "recoveryLoading": "Recovery: loading the host world",
+                "recoveryVerifying": "Recovery: checking units and effects",
+                "recoveryCommitted": "State restored and verified; waiting to resume",
+                "recoveryReconnecting": "Connection lost: combat paused until the other PC returns",
+                "modeUnavailable": "Combat mode cannot change yet: wait for the current action or synchronization and check the multiplayer menu.",
+                "modeQueued": "Combat mode change requested: it will apply after the current synchronization.",
+                "recoveryStopped": "Recovery failed: do not save. Leave the session and reload a safe copy.",
+                "recoveryFailureCode": "Diagnostic code: {0}"
+            },
             "server": {
                 "title": "Server",
                 "external": {
@@ -139,6 +193,12 @@
             "tooltips": {
                 "contentDiscrepancy": {
                     "title": "Content difference - {0}",
+                    "compatibility": {
+                        "title": "Multiplayer compatibility",
+                        "gameVersion": "Game version: host {0}, player {1}",
+                        "protocolVersion": "Real-time protocol: host {0}, player {1}",
+                        "buildFingerprint": "Multiplayer package differs. Install the same local test build on both PCs."
+                    },
                     "DLCs": {
                         "title": "Downloadable content",
                         "reasons": {
@@ -226,6 +286,10 @@
             },
             "miscellaneous": {
                 "title": "Miscellaneous",
+                "regroupDistantPlayersOnCombatStart": {
+                    "title": "Regroup distant players when combat starts",
+                    "tooltip": "When enabled, the host teleports player-controlled characters more than 30 metres away close to the party member who engaged the enemy. The host-authoritative combat initialization then synchronizes their positions for every player."
+                },
                 "hideServerAddress": {
                     "title": "Hide Server Address",
                     "tooltip": "Toggles whether the server IP address is shown in the UI. When enabled, the IP address is hidden to protect privacy"
@@ -246,16 +310,16 @@
                     "tooltip": "Use it to quickly highlight a specific world position, unit, map object, or other target. Your ping will be visible to other players, helping you communicate important locations or points of interest"
                 },
                 "showLobby": {
-                    "title": "Show Lobby",
-                    "tooltip": "Opens the lobby window, which can also be accessed through the Esc menu"
+                    "title": "Show Lobby (Host)",
+                    "tooltip": "Opens the host lobby window, which can also be accessed through the Esc menu"
                 },
                 "forceUnpause": {
-                    "title": "Force Unpause",
-                    "tooltip": "Completly removes local pause. Use this in case of any bugs with synced pause"
+                    "title": "Force Unpause (Host)",
+                    "tooltip": "Completely removes local pause. Host-only recovery tool for bugs with synchronized pause"
                 },
                 "forceCombatEnd": {
-                    "title": "Force Combat End",
-                    "tooltip": "Immediately and forcefully exit the current combat state. Use this if combat becomes stuck, desynchronized, or does not end correctly"
+                    "title": "Force Combat End (Host)",
+                    "tooltip": "Immediately and forcefully exits the current combat state. Host-only recovery tool for stuck, desynchronized, or incorrectly ending combat"
                 }
             },
             "dangerZone": {
@@ -320,7 +384,13 @@
         },
         "gameNotifications": {
             "dialogs": {
-                "waitingForOtherPlayers": "Some players have not seen the cue yet"
+                "waitingForOtherPlayers": "Some players have not seen the cue yet",
+                "waitingForAgreement": "Waiting for the other player to choose the same answer.",
+                "soloAfterDisconnect": "The other player disconnected. Click an answer to confirm alone; no answer is chosen automatically.",
+                "rejoinSync": "Reconnecting: transferring and verifying the current state. The host stays in the game; please wait.",
+                "rejoinWaiting": "Reconnection pending: finish the host's turn-based combat, dialogue or loot screen and return to a local area. The host can stay in the game.",
+                "rejoinFailed": "Reconnection could not be verified. The game remains safely paused; check the logs and reconnect the client from a safe area.",
+                "agreementChooseCharacter": "Both players chose the same answer. The host can click it again to select the character performing the action."
             },
             "rolls": {
                 "missingDamageRoll": "Error retrieving damage roll for {0} unit.\nThis guarantees desync in the game",
@@ -373,6 +443,20 @@
             },
             "combat": {
                 "unitAutokilled": "Auto-killing unit '{0}' ({1}) as it's been killed at {2}",
+                "finalSyncFailed": "The final combat state could not be confirmed. Saving remains blocked. Collect diagnostics, then return to the main menu and load a safe save.",
+                "saveBlockedDuringSynchronization": "Save unavailable during real-time multiplayer combat or synchronization. Switch to turn-based mode or wait until combat ends.",
+                "saveBlockedAfterDisconnect": "Saving is blocked after a disconnect during real-time combat because this state may differ from the host. Return to the main menu and load a safe save.",
+                "realTimeCommandRejected": "The host rejected the real-time command ({0}).",
+                "realTimeCommandRejection": {
+                    "inactive": "real-time mode is inactive", "barrier": "synchronization is in progress",
+                    "epoch": "the combat epoch changed", "sequence": "the command is old or duplicated",
+                    "sender": "the sender identity is invalid", "session": "the session changed",
+                    "save": "another save is loaded", "commandId": "the command identity is invalid",
+                    "malformed": "the command data is incomplete",
+                    "unknownUnit": "the character is unavailable", "ownership": "the character belongs to another player",
+                    "game": "the game rejected the action", "stateChanged": "the combat state changed during the action",
+                    "unknown": "unknown reason"
+                },
                 "start": {
                     "desyncedStartup": {
                         "host": "Combat recovery has been initiated due to desynced combat startup sequence.\nReason: {0}",
@@ -393,6 +477,7 @@
                     "ended": "----- Turn Ended: {0}",
                     "delayed": "----- Turn Delayed: {0}",
                     "hostOrderDesync": "Next turn for player {0} has been overridden",
+                    "endSyncFailed": "Combat synchronization failed after retries. The next turn is blocked and saving is disabled; keep the stable save and collect diagnostics.",
                     "clientOrderDesync": "Next unit turn has been overridden to '{0}'",
                     "invalidUnit": "Current turn unit {0} is dead or missing at {1}. Killing unit / resetting combat turn."
                 },
@@ -412,7 +497,8 @@
             },
             "globalMap": {
                 "disabledActionBar": "Global map spells are restricted to the host",
-                "loading": "Waiting for everyone to finish loading"
+                "loading": "Waiting for everyone to finish loading",
+                "eventDisplayFailed": "A map event could not be displayed. Note the time of the problem; details are in the log."
             }
         }
     }

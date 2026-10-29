@@ -44,7 +44,7 @@ using WOTRMultiplayer.Extensions;
 
 namespace WOTRMultiplayer.Services.GameInteraction
 {
-    public class GlobalMapInteractionService : IGlobalMapInteractionService
+    public partial class GlobalMapInteractionService : IGlobalMapInteractionService
     {
         private readonly ILogger<GlobalMapInteractionService> _logger;
         private readonly IMainThreadAccessor _mainThreadAccessor;
@@ -239,6 +239,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                if (globalMapCommonPopup != null && _shownPopupKey != PopupKey(globalMapCommonPopup)) return;
                 var modalMessage = _uiAccessor.CommonPCView?.m_MessageModalPCView;
                 if (modalMessage?.ViewModel == null)
                 {
@@ -404,18 +405,27 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                var key = PopupKey(globalMapCommonPopup);
+                CancelPendingPopup(key);
                 var modalMessage = _uiAccessor.CommonPCView?.m_MessageModalPCView;
-                if (modalMessage?.ViewModel != null)
+                if (modalMessage?.ViewModel != null && _shownPopupKey == key)
                 {
                     // reset state
                     modalMessage.m_AcceptButton.Interactable = true;
                     modalMessage.m_DeclineButton.Interactable = true;
 
-                    modalMessage.m_AcceptButton.OnLeftClick?.Invoke();
+                    _acceptingPopupKey = key;
+                    try { modalMessage.m_AcceptButton.OnLeftClick?.Invoke(); }
+                    finally { _acceptingPopupKey = null; }
 
                     _logger.LogInformation("Global map common popup has been accepted");
                     return;
                 }
+                // Do not accept an unrelated window. Apply only the confirmed
+                // collection if its own window could not be presented in time.
+                if (globalMapCommonPopup.Type == NetworkGlobalMapCommonPopupType.Ingredients)
+                    ApplyConfirmedIngredients(globalMapCommonPopup);
+                else _logger.LogWarning("[MapEvent] Confirmed popup has no matching view. Type={Type}", globalMapCommonPopup.Type);
             });
         }
 
@@ -423,6 +433,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                _pendingArrival = null;
                 var messageBoxView = _uiAccessor.GlobalMapEnterMessagePCView;
                 if (messageBoxView?.ViewModel == null)
                 {
@@ -439,6 +450,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                _pendingArrival = null;
                 var messageBoxView = _uiAccessor.GlobalMapEnterMessagePCView;
                 if (messageBoxView?.ViewModel == null)
                 {
@@ -499,12 +511,20 @@ namespace WOTRMultiplayer.Services.GameInteraction
             });
         }
 
-        public void RollEncounter(NetworkGlobalMapEncounter globalMapEncounter)
+        public void RollEncounter(NetworkGlobalMapEncounter globalMapEncounter, string eventId = null)
         {
+            var receivedScope = GlobalMapPresentationScope.Current;
             _mainThreadAccessor.Post(() =>
             {
                 try
                 {
+                    if (!GlobalMapPresentationScope.Matches(receivedScope)) return;
+                    if (GlobalMapView.Instance == null || _uiAccessor.GlobalMapPCView?.ViewModel == null)
+                    {
+                        QueueEncounter(globalMapEncounter, eventId);
+                        return;
+                    }
+                    if (!RememberEncounter(eventId)) return;
                     var encounterId = BlueprintGuid.Parse(globalMapEncounter.BlueprintId);
                     var encounter = ResourcesLibrary.TryGetBlueprint<BlueprintRandomEncounter>(encounterId);
                     if (encounter == null)
@@ -531,6 +551,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     RandomEncountersController.State.Player.StartEncounter(combatRandomEncounterData);
                     Game.Instance.RandomEncountersController.m_LastStartedEncounter = RandomEncountersController.State.Player.CurrentEncounterData;
                     Game.Instance.Player.REManager.OnGlobalMapEncounterStarted(encounter, false);
+                    ObserveEncounterMarker(combatRandomEncounterData, eventId);
                     _logger.LogInformation("Global map encounter has been rolled. BlueprintId={BlueprintId}, Seed={Seed}, AvoidanceResult={AvoidanceResult}", globalMapEncounter.BlueprintId, globalMapEncounter.Seed, globalMapEncounter.AvoidanceResult);
                 }
                 catch (Exception ex)
@@ -1452,38 +1473,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public Task<bool> ShowCommonPopupAsync(NetworkGlobalMapCommonPopup popup)
         {
             var tcs = new TaskCompletionSource<bool>();
+            var receivedScope = GlobalMapPresentationScope.Current;
             _mainThreadAccessor.Post(() =>
             {
-                try
-                {
-                    if (_uiAccessor.CommonPCView.m_MessageModalPCView.ViewModel != null)
-                    {
-                        _logger.LogWarning("Message popup is already opened");
-                        tcs.SetResult(false);
-                        return;
-                    }
-
-                    switch (popup.Type)
-                    {
-                        case NetworkGlobalMapCommonPopupType.Fatigue:
-                            UIUtility.ShowMessageBox(UIStrings.Instance.GlobalMap.PartyIsFatigue, MessageModalBase.ModalType.Dialog, _uiAccessor.GlobalMapPCView.ViewModel.OnFatigueClose);
-                            tcs.SetResult(true);
-                            _logger.LogInformation("Fatigue popup has been shown");
-                            return;
-                        case NetworkGlobalMapCommonPopupType.Exhaust:
-                            UIUtility.ShowMessageBox(UIStrings.Instance.GlobalMap.PartyIsExhausted, MessageModalBase.ModalType.Dialog, _uiAccessor.GlobalMapPCView.ViewModel.OnFatigueClose);
-                            tcs.SetResult(true);
-                            _logger.LogInformation("Exhaust popup has been shown");
-                            return;
-                    }
-
-                    tcs.SetResult(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error while showing popup");
-                    tcs.SetResult(false);
-                }
+                if (!GlobalMapPresentationScope.Matches(receivedScope)) { tcs.TrySetResult(false); return; }
+                QueuePopup(popup, tcs);
             });
 
             return tcs.Task;

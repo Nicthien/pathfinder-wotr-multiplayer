@@ -11,5 +11,13 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(1)]
         [LogMe]
         public NetworkAIAction Action { get; set; }
+
+        [ProtoMember(2)]
+        [LogMe]
+        public long RealTimeEpoch { get; set; }
+
+        [ProtoMember(3)]
+        [LogMe]
+        public long RealTimeSequence { get; set; }
     }
 }

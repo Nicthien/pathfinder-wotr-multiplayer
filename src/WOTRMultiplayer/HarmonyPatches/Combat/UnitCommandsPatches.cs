@@ -19,7 +19,9 @@ using Microsoft.Extensions.Logging;
 using UnityEngine;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
 using static Kingmaker.UnitLogic.Commands.Base.UnitCommand;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
@@ -152,6 +154,66 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             }
         }
 
+        [HarmonyPatch(typeof(UnitCommands), nameof(UnitCommands.Run), [typeof(UnitCommand)])]
+        [HarmonyPrefix]
+        public static bool UnitCommands_Run_Prefix(UnitCommand __0)
+        {
+            return InterceptRealTimePlayerCommand(__0);
+        }
+
+        [HarmonyPatch(typeof(UnitCommands), nameof(UnitCommands.Run), [typeof(UnitCommand), typeof(bool), typeof(bool)])]
+        [HarmonyPrefix]
+        public static bool UnitCommands_RunWithFlags_Prefix(UnitCommand __0)
+        {
+            return InterceptRealTimePlayerCommand(__0);
+        }
+
+        private static bool InterceptRealTimePlayerCommand(UnitCommand command)
+        {
+            if (Services.CombatSaving.CombatSavePauseLease.Active || Services.CombatSaving.CombatSaveLoadState.Active) return false;
+            if (RealTimePresentationRuntime.IsClientActive && command?.CreatedByPlayer != true)
+                return false;
+            if (!RealTimeCommandExecutionScope.IsActive && Main.Multiplayer.IsRealTimeCombatBarrierActive
+                && command?.CreatedByPlayer == true)
+            {
+                Main.GetLogger<UnitCommandsPatches>().LogWarning("Real-time command was blocked by synchronization barrier. CommandType={CommandType}, UnitId={UnitId}", command.GetType().Name, command.Executor?.UniqueId);
+                return false;
+            }
+
+            if (RealTimeCommandExecutionScope.IsActive || !Main.Multiplayer.IsRealTimeClientCombatActive
+                || command?.CreatedByPlayer != true)
+            {
+                return true;
+            }
+
+            if (command.Executor == null || !Main.Multiplayer.IsControlledByLocalPlayer(command.Executor.UniqueId))
+            {
+                Main.GetLogger<UnitCommandsPatches>().LogWarning("Real-time command for an unowned or missing unit was blocked locally. CommandType={CommandType}, UnitId={UnitId}", command.GetType().Name, command.Executor?.UniqueId);
+                return false;
+            }
+
+            bool sent;
+            switch (command)
+            {
+                case UnitAttack attack:
+                    sent = Main.Multiplayer.SubmitRealTimeCombatCommand(RealTimeCommandKind.Attack, attack: CreateNetworkUnitAttack(attack));
+                    break;
+                case UnitUseAbility ability:
+                    sent = Main.Multiplayer.SubmitRealTimeCombatCommand(RealTimeCommandKind.UseAbility, ability: CreateNetworkAbilityUse(ability));
+                    break;
+                default:
+                    Main.GetLogger<UnitCommandsPatches>().LogWarning("Unsupported real-time player command was blocked from client-side execution. CommandType={CommandType}, UnitId={UnitId}", command.GetType().Name, command.Executor.UniqueId);
+                    return false;
+            }
+
+            if (!sent)
+            {
+                Main.GetLogger<UnitCommandsPatches>().LogWarning("Real-time player command was not accepted for transmission. CommandType={CommandType}, UnitId={UnitId}", command.GetType().Name, command.Executor.UniqueId);
+            }
+            // The host executes the order and broadcasts the accepted command.
+            return false;
+        }
+
 
         [HarmonyPatch(typeof(UnitCommand), nameof(UnitCommand.OnRun))]
         [HarmonyPrefix]
@@ -164,7 +226,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
             try
             {
-                var isGetUp = Game.Instance.TurnBasedCombatController.CurrentTurn?.UnitCanGetUpOnCommand?.Value ?? false;
+                var isGetUp = Game.Instance.TurnBasedCombatController?.CurrentTurn?.UnitCanGetUpOnCommand?.Value ?? false;
                 switch (__instance)
                 {
                     case UnitInteractWithUnit unitInteractWithUnit when unitInteractWithUnit.CreatedByPlayer:
@@ -178,7 +240,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                     case UnitLootUnit unitLootUnit when unitLootUnit.CreatedByPlayer:
                         var path = PathVisualizer.Instance?.CurrentPathForUnit(unitLootUnit.Executor.View);
                         var networkPath = path?.vectorPath.Select(v => v.ToNetworkVector3()).ToList();
-                        var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(__instance.Executor);
+                        var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(__instance.Executor);
                         var networkUnitLootUnit = new NetworkUnitLootUnit
                         {
                             InitiatorUnitId = __instance.Executor.UniqueId,
@@ -235,7 +297,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void UnitAttack_OnStart_Postfix(UnitAttack __instance)
         {
-            if (!Main.Multiplayer.IsActive || (!Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive))
+            if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive
+                || (!Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive))
             {
                 return;
             }
@@ -320,7 +383,11 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                         OnUnitMove(unitAttack.Executor, __instance.Executor.Position);
                         break;
                     case UnitUseAbility unitUseAbility:
-                        Main.GetLogger<UnitCommandsPatches>().LogInformation("ForceFinished unit useability command. ExecutorUnitId={ExecutorUnitId}", __instance.Executor.UniqueId, unitUseAbility.TargetUnit?.UniqueId);
+                        Main.GetLogger<UnitCommandsPatches>().LogWarning("[AbilityReplay] Spell stopped before start. ExecutorUnitId={ExecutorUnitId}, Ability={Ability}, ConfirmedReplay={ConfirmedReplay}, CloseEnough={CloseEnough}, MoveCooldown={MoveCooldown}, StandardCooldown={StandardCooldown}, MovementLimit={MovementLimit}",
+                            __instance.Executor.UniqueId, unitUseAbility.Ability?.NameForAcronym,
+                            ConfirmedAbilityReplay.Contains(__instance), __instance.IsUnitCloseEnough(),
+                            __instance.Executor.CombatState.Cooldown.MoveAction, __instance.Executor.CombatState.Cooldown.StandardAction,
+                            Game.Instance.TurnBasedCombatController?.CurrentTurn?.CurrentMovementLimit);
                         OnUnitMove(unitUseAbility.Executor, __instance.Executor.Position);
                         break;
                 }
@@ -336,7 +403,12 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPostfix]
         public static void UnitUseAbility_OnStart_Postfix(UnitUseAbility __instance)
         {
-            if (!Main.Multiplayer.IsActive || (!Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive))
+            if (ConfirmedAbilityReplay.Contains(__instance))
+                Main.GetLogger<UnitCommandsPatches>().LogInformation(
+                    "[AbilityReplay] Confirmed cast started. UnitId={UnitId}, Ability={Ability}",
+                    __instance.Executor?.UniqueId, __instance.Ability?.NameForAcronym);
+            if (!Main.Multiplayer.IsActive || Main.Multiplayer.IsRealTimeClientCombatActive
+                || (!Game.Instance.Player.IsInCombat && !TacticalCombatHelper.IsActive))
             {
                 return;
             }
@@ -457,10 +529,15 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         private static void OnAbilityUse(UnitUseAbility command)
         {
+            Main.Multiplayer.OnAbilityUse(CreateNetworkAbilityUse(command));
+        }
+
+        private static NetworkAbilityUse CreateNetworkAbilityUse(UnitUseAbility command)
+        {
             var path = PathVisualizer.Instance?.CurrentPathForUnit(command.Executor.View);
             var networkPath = path?.vectorPath.Select(v => v.ToNetworkVector3()).ToList();
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(command.Executor);
-            var attackMode = Game.Instance.TurnBasedCombatController.CurrentTurn?.m_AttackMode;
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(command.Executor);
+            var attackMode = Game.Instance.TurnBasedCombatController?.CurrentTurn?.m_AttackMode;
 
             var abilityUse = new NetworkAbilityUse
             {
@@ -468,19 +545,20 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 Target = Main.Mapper.Map<NetworkTargetWrapper>(command.Target),
                 InitiatorUnitId = command.Executor.UniqueId,
                 VectorPath = networkPath,
+                CasterPosition = command.Executor.Position.ToNetworkVector3(),
                 CommandType = command.Type.ToString(),
                 MovementLimit = movementLimit?.ToString(),
                 AttackMode = attackMode?.ToString()
             };
 
-            Main.Multiplayer.OnAbilityUse(abilityUse);
+            return abilityUse;
         }
 
         private static void OnUnitMove(UnitEntityData unit, Vector3 destination)
         {
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(unit);
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(unit);
             var path = PathVisualizer.Instance?.m_CurrentPath?.vectorPath;
-            var attackMode = Game.Instance.TurnBasedCombatController.CurrentTurn?.m_AttackMode;
+            var attackMode = Game.Instance.TurnBasedCombatController?.CurrentTurn?.m_AttackMode;
             var unitMoveTo = new NetworkUnitMoveTo
             {
                 InitiatorUnitId = unit.UniqueId,
@@ -496,9 +574,14 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         private static void OnUnitAttack(UnitAttack command)
         {
+            Main.Multiplayer.OnUnitAttackCommandStarted(CreateNetworkUnitAttack(command));
+        }
+
+        private static NetworkUnitAttack CreateNetworkUnitAttack(UnitAttack command)
+        {
             var path = PathVisualizer.Instance?.CurrentPathForUnit(command.Executor.View);
             var networkPath = path?.vectorPath.Select(v => v.ToNetworkVector3()).ToList();
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(command.Executor);
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(command.Executor);
 
             var unitAttack = new NetworkUnitAttack
             {
@@ -511,7 +594,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 MovementLimit = movementLimit?.ToString()
             };
 
-            Main.Multiplayer.OnUnitAttackCommandStarted(unitAttack);
+            return unitAttack;
         }
 
         private static bool DoesMountMakeSameAction(UnitEntityData unitEntity)

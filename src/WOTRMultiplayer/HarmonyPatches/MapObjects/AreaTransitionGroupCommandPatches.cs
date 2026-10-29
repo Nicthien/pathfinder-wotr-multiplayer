@@ -55,6 +55,7 @@ namespace WOTRMultiplayer.HarmonyPatches.MapObjects
 
         private static void OnActionsAreaTransition(AreaTransitionPart areaTransition)
         {
+            CapitalMercenaryPatches.CaptureTransitionMercenaries();
             var currentArea = Game.Instance.CurrentlyLoadedArea;
             var transition = new NetworkAreaTransition
             {

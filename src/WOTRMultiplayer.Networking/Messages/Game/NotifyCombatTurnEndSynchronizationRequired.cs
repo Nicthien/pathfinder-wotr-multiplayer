@@ -12,5 +12,13 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(1)]
         [LogMe]
         public List<NetworkUnit> Units { get; set; } = [];
+
+        [ProtoMember(2)]
+        [LogMe]
+        public string UnitId { get; set; }
+
+        [ProtoMember(3)]
+        [LogMe]
+        public long SynchronizationSequence { get; set; }
     }
 }

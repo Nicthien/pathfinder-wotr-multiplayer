@@ -50,12 +50,17 @@ namespace WOTRMultiplayer.Services.Hotkeys
             _bindings.Clear();
 
             ConfigureHotkey(WellKnownSettings.Hotkeys.Ping, OnPingHotkey);
-            ConfigureHotkey(WellKnownSettings.Hotkeys.ShowLobby, OnShowLobbyHotkey);
-            ConfigureHotkey(WellKnownSettings.Hotkeys.ForceUnpause, OnForceUnpauseHotkey);
-            ConfigureHotkey(WellKnownSettings.Hotkeys.ForceCombatEnd, OnForceCombatEndHotkey);
+            ConfigureHotkey(WellKnownSettings.Hotkeys.ShowLobby, OnShowLobbyHotkey, IsHostAuthorized);
+            ConfigureHotkey(WellKnownSettings.Hotkeys.ForceUnpause, OnForceUnpauseHotkey, IsHostAuthorized);
+            ConfigureHotkey(WellKnownSettings.Hotkeys.ForceCombatEnd, OnForceCombatEndHotkey, IsHostAuthorized);
         }
 
         public void ConfigureHotkey(WellKnownSettingKey<KeyBindingPair> hotkey, Action hotkeyHandler)
+        {
+            ConfigureHotkey(hotkey, hotkeyHandler, isAuthorized: null);
+        }
+
+        private void ConfigureHotkey(WellKnownSettingKey<KeyBindingPair> hotkey, Action hotkeyHandler, Func<bool> isAuthorized)
         {
             try
             {
@@ -69,7 +74,7 @@ namespace WOTRMultiplayer.Services.Hotkeys
                     _keyboardAccessor.RegisterBinding(hotkey.Key, actualValue.Binding2, actualValue.GameModesGroup, actualValue.TriggerOnHold, isHoldTrigger: false);
                 }
 
-                var bind = _keyboardAccessor.Bind(hotkey.Key, () => OnHotkeyPressed(hotkey.Key, hotkeyHandler));
+                var bind = _keyboardAccessor.Bind(hotkey.Key, () => OnHotkeyPressed(hotkey.Key, hotkeyHandler, isAuthorized));
                 _bindings.Add(bind);
                 _logger.LogInformation("Hotkey has been configured. Key={Key}", hotkey.Key);
             }
@@ -80,10 +85,16 @@ namespace WOTRMultiplayer.Services.Hotkeys
             }
         }
 
-        private void OnHotkeyPressed(string key, Action onHotkey)
+        private void OnHotkeyPressed(string key, Action onHotkey, Func<bool> isAuthorized)
         {
             if (_multiplayerActorAccessor.Current == null || _multiplayerActorAccessor.Current.IsInLobby)
             {
+                return;
+            }
+
+            if (isAuthorized != null && !isAuthorized())
+            {
+                _logger.LogWarning("Hotkey execution rejected because the local player is not authorized. Key={Key}", key);
                 return;
             }
 
@@ -95,6 +106,13 @@ namespace WOTRMultiplayer.Services.Hotkeys
             {
                 _logger.LogError(ex, "Error while executing hotkey handler. Key={Key}", key);
             }
+        }
+
+        private bool IsHostAuthorized()
+        {
+            var host = _multiplayerActorAccessor.Host;
+            return host?.IsActive == true
+                && ReferenceEquals(_multiplayerActorAccessor.Current, host);
         }
 
         private void OnPingHotkey()

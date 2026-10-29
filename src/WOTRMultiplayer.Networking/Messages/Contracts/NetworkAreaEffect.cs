@@ -21,6 +21,45 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(5)]
         public string Type { get; set; }
 
+        [ProtoMember(6)]
+        public string BlueprintId { get; set; }
+
+        [ProtoMember(7)]
+        public string CasterUnitId { get; set; }
+
+        [ProtoMember(8)]
+        public string OwnerUnitId { get; set; }
+
+        [ProtoMember(9)]
+        public string SourceAbilityBlueprintId { get; set; }
+
+        [ProtoMember(10)]
+        public long CreationGameTimeTicks { get; set; }
+
+        [ProtoMember(11)]
+        public long? DurationTicks { get; set; }
+
+        [ProtoMember(12)]
+        public string SceneName { get; set; }
+
+        [ProtoMember(13)]
+        public string TargetUnitId { get; set; }
+
+        [ProtoMember(14)]
+        public NetworkVector3 TargetPoint { get; set; }
+
+        [ProtoMember(15)]
+        public float? TargetOrientation { get; set; }
+
+        [ProtoMember(16)]
+        public bool IsAttachedToUnit { get; set; }
+
+        [ProtoMember(17)]
+        public float Orientation { get; set; }
+
+        [ProtoMember(18)]
+        public List<NetworkBuffContextState> ContextChain { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

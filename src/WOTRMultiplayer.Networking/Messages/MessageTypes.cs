@@ -1,4 +1,4 @@
-﻿namespace WOTRMultiplayer.Networking.Messages
+namespace WOTRMultiplayer.Networking.Messages
 {
     /// <summary>
     /// protobuf ids must be unique, but no one cares about actual int value
@@ -297,9 +297,40 @@
             ClientInvalidUnitTurnStartRequested,
             NotifyArmyCombatTurnSynchronizationRequired,
             ClientArmyCombatTurnSynchronized,
-            ClientDialogCueAnswerSelected,
+            ClientDialogCueAnswerSelected = 800,
             NotifyDialogCueAnswerSelectionDenied,
-            NotifyDialogCueWitnessedByAll
+            NotifyDialogCueWitnessedByAll,
+            NotifyRealTimeCombatSnapshot,
+            ClientRealTimeStateHash,
+            ClientRealTimeCombatCommand,
+            NotifyRealTimeCombatCommandAccepted,
+            ClientRealTimePauseRequested,
+            NotifyRealTimePauseChanged,
+            NotifyRealTimeModeTransition,
+            ClientRealTimeModeTransitionAck,
+            NotifyRealTimeRepair,
+            ClientRealTimeRepairAck,
+            NotifyRealTimeCombatPreference,
+            NotifyRealTimeRuleRoll,
+            ClientRealTimeRuleRollFault,
+            ClientRealTimeAIActionFault,
+            NotifyRealTimeEntityId,
+            ClientRealTimeEntityIdFault,
+            ClientRealTimeCommandFault,
+            NotifyRealTimeUnitKilled,
+            NotifyRealTimeAuthoritativeEvent,
+            NotifyRealTimeCombatEnd,
+            ClientRealTimeCombatEndAck,
+            NotifyRealTimeCombatCommandRejected,
+            NotifyRealTimeNativeCheckpoint,
+            NotifyRealTimeNativeCheckpointChunk,
+            ClientRealTimeNativeCheckpointAck,
+            NotifySessionRejoin,
+            NotifySessionRejoinChunk,
+            ClientSessionRejoinAck,
+            NotifyCombatSave,
+            ClientCombatSaveAck,
+            NotifyTurnMovementState
         }
 
         public static class Mods

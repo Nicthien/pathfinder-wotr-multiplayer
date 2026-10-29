@@ -34,5 +34,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(7)]
         [LogMe]
         public string AttackMode { get; set; }
+
+        [ProtoMember(8)]
+        [LogMe]
+        public NetworkVector3 CasterPosition { get; set; }
     }
 }

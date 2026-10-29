@@ -5,6 +5,7 @@ using Kingmaker.RuleSystem.Rules;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Abstractions;
 using WOTRMultiplayer.Abstractions.PubSub;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.Services.PubSub
 {
@@ -35,6 +36,7 @@ namespace WOTRMultiplayer.Services.PubSub
 
         public void HandleRoundStarted(int round)
         {
+            if (RealTimeNativeLoadLease.SuppressesLifecycle(ActorAccessor.Current)) return;
             if (ActorAccessor.Current == null)
             {
                 return;
@@ -49,6 +51,7 @@ namespace WOTRMultiplayer.Services.PubSub
 
         public void HandlePartyCombatStateChanged(bool inCombat)
         {
+            if (RealTimeNativeLoadLease.SuppressesLifecycle(ActorAccessor.Current)) return;
             if (ActorAccessor.Current == null)
             {
                 return;

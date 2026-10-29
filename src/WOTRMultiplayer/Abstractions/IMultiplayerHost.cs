@@ -1,6 +1,8 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Area;
+using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
 using WOTRMultiplayer.Entities.Dungeon;
 using WOTRMultiplayer.Entities.GlobalMap;
@@ -14,6 +16,26 @@ namespace WOTRMultiplayer.Abstractions
 {
     public interface IMultiplayerHost : IMultiplayerActor
     {
+        bool IsRealTimeCombatActive { get; }
+
+        bool IsRealTimeCombatBarrierActive { get; }
+
+        int ResolveRealTimeDiceRoll(string key, System.Func<int> localRoll);
+
+        string ResolveRealTimeEntityId(string key, System.Func<string> localId);
+
+        System.Threading.Tasks.Task<bool> RequestRealTimeCombatModeAsync(CombatMode mode);
+
+        System.Threading.Tasks.Task BeginRealTimeRepairAsync();
+        System.Threading.Tasks.Task<bool> ForceCombatSynchronizationAsync();
+        System.Threading.Tasks.Task<string> SaveCombatAsync();
+
+        bool RequestLocalRealTimePause(bool wantsPause);
+
+        bool SetRealTimePausePolicy(PausePolicy policy);
+
+        bool SetPreferredRealTimeCombatMode(CombatMode mode);
+
         void Create(string gameId, string gamePassword, ExternalServer externalServer, NetworkGameStartUp gameStartUp);
 
         void ChangeHostedStartingPoint(string gameId, NetworkGameStartUp gameStartUp);

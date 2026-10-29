@@ -2,12 +2,44 @@
 using HarmonyLib;
 using Kingmaker.UI.MVVM._PCView.CharGen;
 using Kingmaker.UI.MVVM._VM.CharGen;
+using WOTRMultiplayer.UnityBehaviours.Leveling;
 
 namespace WOTRMultiplayer.HarmonyPatches.Leveling
 {
     [HarmonyPatch]
     public class CharGenPCViewPatches
     {
+        [HarmonyPatch(typeof(CharGenPCView), nameof(CharGenPCView.Show))]
+        [HarmonyPrefix]
+        public static bool CharGenPCView_Show_Prefix(CharGenPCView __instance)
+        {
+            var visibility = __instance.GetComponent<LevelingOwnerVisibilityBehaviour>();
+            if (!Main.Multiplayer.IsActive || Main.Multiplayer.ShouldShowLevelingUI())
+            {
+                visibility?.Restore();
+                return true;
+            }
+            visibility ??= __instance.gameObject.AddComponent<LevelingOwnerVisibilityBehaviour>();
+            visibility.Apply(__instance);
+            __instance.gameObject.SetActive(true);
+            // Skip only the visible fade and opening sound, NOT the binding,
+            // phase callbacks or synchronized leveling controller.
+            return false;
+        }
+
+        [HarmonyPatch(typeof(CharGenPCView), nameof(CharGenPCView.Hide))]
+        [HarmonyPrefix]
+        public static bool CharGenPCView_Hide_Prefix(CharGenPCView __instance)
+        {
+            var visibility = __instance.GetComponent<LevelingOwnerVisibilityBehaviour>();
+            if (visibility == null || !visibility.IsHidden) return true;
+            // Matches the game's Hide completion callback, without playing the
+            // sound of a window that was never shown here.
+            __instance.gameObject.SetActive(false);
+            visibility.Restore();
+            return false;
+        }
+
         [HarmonyPatch(typeof(CharGenVM), nameof(CharGenVM.IsOpenNextWindow))]
         [HarmonyPrefix]
         public static bool CharGenVM_IsOpenNextWindow_Prefix()

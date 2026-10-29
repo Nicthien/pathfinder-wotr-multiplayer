@@ -5,6 +5,8 @@ namespace WOTRMultiplayer.Entities.Units
 {
     public class NetworkBuff
     {
+        public System.Collections.Generic.List<NetworkBuffContextState> ContextChain { get; set; }
+
         public string Id { get; set; }
 
         public string BlueprintId { get; set; }

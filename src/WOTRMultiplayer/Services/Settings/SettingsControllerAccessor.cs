@@ -20,6 +20,12 @@ namespace WOTRMultiplayer.Services.Settings
             return value;
         }
 
+        public void SetValue<T>(WellKnownSettingKey<T> setting, T value)
+        {
+            SettingsController.GeneralSettingsProvider.SetValue(setting.Key, value);
+            _logger.LogInformation("Setting value has been updated. Key={Key}", setting.Key);
+        }
+
         public TimeSpan GetTimeSpanValue(WellKnownSettingKey<TimeSpan> key)
         {
             var value = GetValue<string>(key.Key, null);

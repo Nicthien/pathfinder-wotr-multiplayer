@@ -31,6 +31,10 @@ namespace WOTRMultiplayer.Config.Mapping
     {
         public NetworkMessagesProfile()
         {
+            CreateMap<NetworkBuffContextState, Networking.Messages.Contracts.NetworkBuffContextState>().ReverseMap();
+            CreateMap<Entities.Combat.RealTime.NetworkProjectileState, Networking.Messages.Contracts.NetworkProjectileState>().ReverseMap();
+            CreateMap<NetworkSpellbookState, Networking.Messages.Contracts.NetworkSpellbookState>().ReverseMap();
+            CreateMap<NetworkPreparedSpellState, Networking.Messages.Contracts.NetworkPreparedSpellState>().ReverseMap();
             CreateMap<NetworkVector3, Networking.Messages.Contracts.NetworkVector3>()
                 .ReverseMap();
 
@@ -276,6 +280,12 @@ namespace WOTRMultiplayer.Config.Mapping
                 .ReverseMap();
 
             CreateMap<NetworkUnitDescriptor, Networking.Messages.Contracts.NetworkUnitDescriptor>()
+                .ReverseMap();
+            CreateMap<NetworkUnitVitals, Networking.Messages.Contracts.NetworkUnitVitals>().ReverseMap();
+            CreateMap<NetworkStatValues, Networking.Messages.Contracts.NetworkStatValues>().ReverseMap();
+            CreateMap<NetworkCalculatedStat, Networking.Messages.Contracts.NetworkCalculatedStat>().ReverseMap();
+
+            CreateMap<NetworkAbilityResource, Networking.Messages.Contracts.NetworkAbilityResource>()
                 .ReverseMap();
 
             CreateMap<NetworkUnitState, Networking.Messages.Contracts.NetworkUnitState>()

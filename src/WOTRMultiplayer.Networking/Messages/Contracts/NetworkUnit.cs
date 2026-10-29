@@ -36,6 +36,30 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(9)]
         public NetworkUnitPartTacticalCombat UnitPartTacticalCombat { get; set; }
 
+        [ProtoMember(10)]
+        public string BlueprintId { get; set; }
+
+        [ProtoMember(11)]
+        public string OriginalBlueprintId { get; set; }
+
+        [ProtoMember(12)]
+        public string CasterUnitId { get; set; }
+
+        [ProtoMember(13)]
+        public string SourceAbilityBlueprintId { get; set; }
+
+        [ProtoMember(14)]
+        public string MasterUnitId { get; set; }
+
+        [ProtoMember(15)]
+        public string GroupId { get; set; }
+
+        [ProtoMember(16)]
+        public string SceneName { get; set; }
+
+        [ProtoMember(17)]
+        public bool IsSpottedByPlayer { get; set; }
+
         public override string ToString()
         {
             return Id?.ToString();

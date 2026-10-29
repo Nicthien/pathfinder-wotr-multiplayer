@@ -1,0 +1,25 @@
+# RTwP entity reconstruction research
+
+Local evidence: the installed `Assembly-CSharp.dll` from WotR 2.7.0 was inspected with ILSpyCmd 9.1.0.7988 on 2026-10-01. This is research for the experimental local mod, not a claim of working reconstruction.
+
+## Missing summoned unit
+
+`Kingmaker.Controllers.EntityCreationController.SpawnUnit(BlueprintUnit, Vector3, Quaternion, SceneEntitiesState, string uniqueId = null)` can create a unit with the host's ID. The method also consults `UnitSpawningData` for customization variation, race, gender, voice, handedness, hidden/optimized form, prefab and doll. It returns null for an invalid blueprint, unavailable scene state or prefab. The current `NetworkUnit` checkpoint contains blueprint, origin IDs, position and selected combat fields, but not the full `UnitSpawningData`, equipment, facts, spellbook, AI and summoned-unit parts. Spawning a bare blueprint at the correct coordinates would not reconstruct an equivalent combatant.
+
+The game's `Kingmaker.EntitySystem.Persistence.JsonUtility.UnitSerialization.Serialize(UnitEntityData)` calls `TurnOff`, `PreSave` and `TurnOn` around serialization. It must not be used as an ordinary per-frame RTwP snapshot operation: those calls mutate a live unit. `OwlcatJsonConvert` exposes game-specific JSON settings, but deserializing an entity still requires safe registration, view creation, reference resolution and rollback. None of that is implemented here. Protocol 24 records the source unit's `HoldingState.SceneName` so a client can reject an existing same-ID unit in the wrong scene.
+
+`EntityDataBase.PostLoad()` explicitly warns when called on an already turned-on entity, calls `TurnOff()` in that case, and re-runs fact/part loading. `SceneEntitiesState.PostLoad()` runs through the entire scene collection, registers entities and checks duplicate IDs before loading each one. Therefore, applying a serialized host entity by calling these save-load methods during an active combat is not an isolated repair operation; it needs a separate lifecycle and rollback design.
+
+## Missing area effect
+
+`Kingmaker.Controllers.AreaEffectsController.Spawn(MechanicsContext, BlueprintAbilityAreaEffect, TargetWrapper, TimeSpan?)` clones the complete mechanics context, creates an `AreaEffectView`, assigns a new ID, initializes timing/target, registers the entity in a `SceneEntitiesState`, and raises an area-effect spawn event. `AreaEffectEntityData` persists the mechanics context, blueprint, target, creation time, duration and other fields. The protocol-26 checkpoint carries blueprint/caster/owner/source IDs, timing, `HoldingState.SceneName`, the stable target unit ID or point, explicit target orientation and attachment flag. These fields let preflight reject a same-ID area with the wrong origin or target, but still do not constitute a restorable `MechanicsContext` or `TargetWrapper`. Recalling `Spawn` from them alone could recalculate rules and trigger effects twice, as well as assign the wrong ID.
+
+The game's `AreaEffectEntityData.OnPreSave()` calls `HandleUnitExit` for every occupant and clears its internal occupant list. Therefore serializing a live area through the game's save lifecycle is not a safe RTwP checkpoint capture either. A reconstruction path must capture the creation context before or at the original spawn and must account for occupant and spell-resistance state without invoking `OnPreSave` on the active entity.
+
+## Required implementation boundary
+
+Before allowing repair to create a missing unit or area, capture the host's complete creation context at the original spawn event, transfer it with epoch and entity ID, and validate the referenced scene, blueprint and caster on the client. Creation must run only inside a paused repair barrier, suppress duplicate rule effects, verify the canonical checkpoint hash, and roll back the newly created entity if application fails. Until an in-game two-instance test proves this lifecycle, missing entities must continue to fail preflight and keep saving blocked during unsuccessful fallback.
+
+The client also checks the reverse direction before applying a checkpoint: any local combat unit or area absent from the host checkpoint is reported as `extra-unit` or `extra-area`. Removing those entities automatically is not yet safe, because doing so may fire gameplay events or destroy state needed for rollback. A mismatch remains a repair/fallback failure rather than a partially applied checkpoint.
+
+The same preflight now rejects a host buff that is absent locally when the existing buff service cannot recreate its blueprint. The original service silently skipped most missing buffs, which allowed unrelated parts of a checkpoint to mutate before the hash exposed the failure. This guard is not full buff reconstruction; unsupported effects still need a game-validated creation and rollback path.

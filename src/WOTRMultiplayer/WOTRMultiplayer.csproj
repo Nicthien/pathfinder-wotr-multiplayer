@@ -2,11 +2,17 @@
 
 	<PropertyGroup>
 		<TargetFramework>net481</TargetFramework>
-		<LangVersion>latest</LangVersion>
+		<LangVersion>preview</LangVersion>
+	</PropertyGroup>
+
+    <ItemGroup><Reference Include="System.IO.Compression" /></ItemGroup>
+
+	<PropertyGroup Condition="'$(HostPresentationPrototype)' == 'true'">
+		<DefineConstants>$(DefineConstants);RTWP_HOST_PRESENTATION_PROTOTYPE</DefineConstants>
 	</PropertyGroup>
 
 	<PropertyGroup>
-		<ModFolder>$(WOTR_PATH)\Mods\00_WOTRMultiplayer</ModFolder>
+		<ModFolder>$(WOTR_PATH)\Mods\00_WOTRMultiplayerRTwP</ModFolder>
 		<ModOutputFolder>$(ModFolder)\*</ModOutputFolder>
 		<ModLocalizationFolder>$(ModFolder)\localization\*</ModLocalizationFolder>
 
@@ -127,6 +133,12 @@
 		<Reference Include="UnityEngine.AssetBundleModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
 		</Reference>
+		<Reference Include="UnityEngine.AnimationModule">
+			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
+		</Reference>
+		<Reference Include="UnityEngine.ParticleSystemModule">
+			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.ParticleSystemModule.dll</HintPath>
+		</Reference>
 		<Reference Include="UnityEngine.AudioModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
 		</Reference>
@@ -136,6 +148,11 @@
 		<Reference Include="UnityEngine.IMGUIModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
 		</Reference>
+
+        <Reference Include="UnityEngine.InputLegacyModule">
+            <HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
 		<Reference Include="UnityEngine.PhysicsModule">
 			<HintPath>$(WOTR_PATH)\Wrath_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
 		</Reference>

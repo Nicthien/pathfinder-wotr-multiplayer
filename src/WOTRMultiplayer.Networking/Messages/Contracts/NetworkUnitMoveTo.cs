@@ -7,6 +7,7 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
     [ProtoContract]
     public class NetworkUnitMoveTo
     {
+        [ProtoMember(11)] public long TurnMovement { get; set; }
         [ProtoMember(1)]
         [LogMe]
         public string InitiatorUnitId { get; set; }

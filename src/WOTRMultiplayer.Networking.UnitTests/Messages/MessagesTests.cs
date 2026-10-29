@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -149,12 +149,12 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
         {
             // Arrange
             var rootLocation = Path.GetFullPath(@"..\..\..\..\WOTRMultiplayer\Services");
-            var trees = new List<(CSharpCompilation, SemanticModel, ClassDeclarationSyntax)>
-            {
-               Create(Path.Combine(rootLocation, "MultiplayerClient.cs")),
-               Create(Path.Combine(rootLocation, "MultiplayerHost.cs")),
-               Create(Path.Combine(rootLocation, "MultiplayerActorBase.cs"))
-            };
+            var trees = new[] { "MultiplayerClient", "MultiplayerHost", "MultiplayerActorBase" }
+                .SelectMany(name => Directory.GetFiles(rootLocation, name + "*.cs"))
+                // Transport helpers also create messages. Scan production sources,
+                // never test fixtures, so a test-only creation cannot hide dead messages.
+                .Concat(Directory.GetFiles(Path.GetFullPath(@"..\..\..\..\WOTRMultiplayer.Networking"), "*.cs"))
+                .Select(Create).ToList();
 
             var allMessages = Assembly
                 .GetAssembly(typeof(BeetleXMessageTypes.ProtobufServerPacket))
@@ -177,7 +177,8 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                     var methods = t.Item3.DescendantNodes().OfType<MethodDeclarationSyntax>().ToList();
                     foreach (var method in methods)
                     {
-                        var createsMessage = method.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().Any(o =>
+                        // Include target-typed new() as well as new Message().
+                        var createsMessage = method.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>().Any(o =>
                         {
                             var type = t.Item2.GetTypeInfo(o).Type;
                             return SymbolEqualityComparer.Default.Equals(type, targetSymbol);
@@ -200,12 +201,14 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
             Assert.That(notCreatedMessages, Is.Empty, $"Some messages are never created ({notCreatedMessages.Count})");
         }
 
-        private (CSharpCompilation, SemanticModel, ClassDeclarationSyntax) Create(string path)
+        private (CSharpCompilation, SemanticModel, CompilationUnitSyntax) Create(string path)
         {
             var code = File.ReadAllText(path);
             var tree = CSharpSyntaxTree.ParseText(code);
 
-            var classDeclaration = tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First();
+            // Include every type in the file: the sender can follow limits and
+            // receiver types in the same compilation unit.
+            var compilationUnit = (CompilationUnitSyntax)tree.GetRoot();
 
             var compilation = CSharpCompilation.Create("whatever", [tree], [
                 MetadataReference.CreateFromFile(typeof(WOTRMultiplayer.Main).Assembly.Location),
@@ -213,7 +216,7 @@ namespace WOTRMultiplayer.Networking.UnitTests.Messages
                 MetadataReference.CreateFromFile(Assembly.GetExecutingAssembly().Location)
                 ]);
             var semanticModel = compilation.GetSemanticModel(tree);
-            return (compilation, semanticModel, classDeclaration);
+            return (compilation, semanticModel, compilationUnit);
         }
     }
 }

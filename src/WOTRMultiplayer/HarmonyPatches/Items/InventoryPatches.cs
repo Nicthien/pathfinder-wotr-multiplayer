@@ -23,6 +23,19 @@ namespace WOTRMultiplayer.HarmonyPatches.Items
     [HarmonyPatch]
     public class InventoryPatches
     {
+        [HarmonyPatch(typeof(ItemEntity), nameof(ItemEntity.IsUsableFromInventory), MethodType.Getter)]
+        [HarmonyPostfix]
+        public static void ItemEntity_IsUsableFromInventory_Postfix(ItemEntity __instance, ref bool __result)
+        {
+            if (__result || !Main.Multiplayer.IsActive) return;
+            var remote = Main.Multiplayer.RemoteContext?.UseInventoryItem;
+            // The originating peer already passed the out-of-combat check. If the
+            // packet reaches the authoritative host just after combat starts, replay
+            // the accepted action instead of rolling the heal back at combat sync.
+            if (remote != null && string.Equals(remote.ItemId, __instance.UniqueId,
+                System.StringComparison.OrdinalIgnoreCase)) __result = true;
+        }
+
         [HarmonyPatch(typeof(ItemSlotVM), nameof(ItemSlotVM.CopyItem))]
         [HarmonyTranspiler]
         public static IEnumerable<CodeInstruction> ItemSlotVM_CopyItem_Transpiler(IEnumerable<CodeInstruction> instructions)

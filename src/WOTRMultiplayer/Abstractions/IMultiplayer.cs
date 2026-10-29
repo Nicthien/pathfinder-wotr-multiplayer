@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System;
 using Kingmaker.GameModes;
 using Kingmaker.Items.Slots;
 using WOTRMultiplayer.Abstractions.Random;
@@ -9,6 +10,7 @@ using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.Dungeon;
 using WOTRMultiplayer.Entities.Equipment;
@@ -30,13 +32,42 @@ namespace WOTRMultiplayer.Abstractions
 {
     public interface IMultiplayer
     {
+        bool CanSaveCombatFromMenu { get; }
+        void SaveCombatFromMenu();
         RemoteExecutionContext RemoteContext { get; }
 
         IUIFactory UIFactory { get; }
 
         IValueGenerator ValueGenerator { get; }
 
+        int ResolveRealTimeDiceRoll(string key, Func<int> localRoll);
+
+        string ResolveRealTimeEntityId(string key, Func<string> localId);
+
         void Initialize();
+
+        void UpdateRealTimeCombat();
+
+        void ToggleNetworkCombatMode();
+
+        void PingWorldPosition(NetworkVector3 position);
+
+        void PublishRealTimeAuthoritativeEvent(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent);
+
+        bool IsRealTimeClientCombatActive { get; }
+
+        bool IsRealTimeCombatActive { get; }
+
+        object RealTimeCombatIdentity { get; }
+
+        bool IsRealTimeCombatBarrierActive { get; }
+
+        bool IsSavingBlockedByCombatSync { get; }
+
+        bool IsSavingBlockedAfterRealTimeDisconnect { get; }
+
+        bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null);
 
         void TerminateMultiplayer();
 
@@ -48,7 +79,7 @@ namespace WOTRMultiplayer.Abstractions
 
         void OnAfterCueShow(NetworkDialog networkDialog, string cueName, bool hasSystemAnswer);
 
-        bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId);
+        bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId, bool isCharacterSelection = false);
 
         bool OnBeforeChooseBookCharacter(string cueName, string answerName);
 
@@ -151,6 +182,8 @@ namespace WOTRMultiplayer.Abstractions
         void OnLevelingTerminated();
 
         bool CanMakeLevelingDecisions();
+
+        bool ShouldShowLevelingUI();
 
         void OnWitnessLevelingPhase(NetworkLevelingPhase networkLevelingPhase);
 
@@ -491,6 +524,10 @@ namespace WOTRMultiplayer.Abstractions
         bool OnAreaEffectTriggered(NetworkAreaEffect areaEffect);
 
         NetworkAIAction OnAfterAISelectedAction(NetworkAIAction action);
+
+        bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action);
+
+        void ReportRealTimeAIActionFault(string unitId, string actionId, string reason);
 
         void OnUnitMoveTo(NetworkUnitMoveTo unitMoveTo);
 

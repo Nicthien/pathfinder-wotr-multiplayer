@@ -6,6 +6,22 @@ namespace WOTRMultiplayer.Entities.Units
     {
         public string Id { get; set; }
 
+        public string BlueprintId { get; set; }
+
+        public string OriginalBlueprintId { get; set; }
+
+        public string CasterUnitId { get; set; }
+
+        public string SourceAbilityBlueprintId { get; set; }
+
+        public string MasterUnitId { get; set; }
+
+        public string GroupId { get; set; }
+
+        public string SceneName { get; set; }
+
+        public bool IsSpottedByPlayer { get; set; }
+
         public NetworkVector3 Position { get; set; }
 
         public float Orientation { get; set; }

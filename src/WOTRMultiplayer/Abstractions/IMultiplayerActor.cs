@@ -73,7 +73,7 @@ namespace WOTRMultiplayer.Abstractions
 
         void OnAfterCueShow(NetworkDialog networkDialog, string cueName, bool hasSystemAnswer);
 
-        bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId);
+        bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId, bool isCharacterSelection = false);
 
         bool StartDialog(NetworkDialog networkDialog);
 
@@ -148,6 +148,8 @@ namespace WOTRMultiplayer.Abstractions
         void OnLevelingTerminated();
 
         bool CanMakeLevelingDecisions();
+
+        bool ShouldShowLevelingUI();
 
         void OnLevelingWitnessPhase(NetworkLevelingPhase phase);
 

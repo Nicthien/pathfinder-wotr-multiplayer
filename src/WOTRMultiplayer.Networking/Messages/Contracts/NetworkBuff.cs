@@ -7,6 +7,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
     [ProtoContract]
     public class NetworkBuff
     {
+        [ProtoMember(14)]
+        public System.Collections.Generic.List<NetworkBuffContextState> ContextChain { get; set; }
+
         [ProtoMember(1)]
         [LogMe]
         public string Id { get; set; }

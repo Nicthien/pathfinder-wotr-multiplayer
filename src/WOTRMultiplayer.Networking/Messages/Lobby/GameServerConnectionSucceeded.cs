@@ -19,5 +19,7 @@ namespace WOTRMultiplayer.Networking.Messages.Lobby
         [ProtoMember(3)]
         [LogMe]
         public int SessionSeed { get; set; }
+
+        [ProtoMember(4)] public string RejoinToken { get; set; }
     }
 }

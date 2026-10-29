@@ -57,7 +57,10 @@ namespace WOTRMultiplayer.UI.Controllers
 
         protected abstract GameObject ReadyButtonObject { get; }
 
-        public bool IsActive => ActiveImage.activeSelf;
+        public bool IsActive => ActiveImage != null && ActiveImage.activeSelf;
+
+        // Singleton controllers must not retain views from a previous UI scene.
+        internal bool OwnsMenuItem(GameObject menuItem) => ReferenceEquals(MenuItem, menuItem);
 
         public Action<object, EventArgs> OnClicked { get; set; }
 
@@ -119,10 +122,16 @@ namespace WOTRMultiplayer.UI.Controllers
         {
             _logger.LogInformation("Trying to initialize");
 
-            if (_isInitialized)
+            if (_isInitialized && MenuItem == menuItem && ActiveImage != null)
             {
                 _logger.LogInformation("Already initialized");
                 return;
+            }
+
+            if (_isInitialized)
+            {
+                _logger.LogInformation("[MenuLifecycle] Rebuilding controller for a new menu scene.");
+                Dispose();
             }
 
             MenuItem = menuItem;
@@ -213,8 +222,16 @@ namespace WOTRMultiplayer.UI.Controllers
 
         protected virtual void DisposeInternal()
         {
-            Button.OnHover.RemoveAllListeners();
-            Button.OnLeftClick.RemoveAllListeners();
+            if (MenuItem != null)
+            {
+                var button = Button;
+                if (button != null)
+                {
+                    button.OnHover.RemoveListener(OnHover);
+                    button.OnLeftClick.RemoveListener(OnClickedInternal);
+                }
+            }
+            MenuItem = null;
             ActiveImage = null;
             _hoverImage = null;
 

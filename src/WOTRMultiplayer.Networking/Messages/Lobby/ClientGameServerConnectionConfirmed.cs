@@ -15,5 +15,7 @@ namespace WOTRMultiplayer.Networking.Messages.Lobby
         [ProtoMember(2)]
         [LogMe]
         public NetworkContentState ContentState { get; set; }
+
+        [ProtoMember(3)] public string RejoinToken { get; set; }
     }
 }

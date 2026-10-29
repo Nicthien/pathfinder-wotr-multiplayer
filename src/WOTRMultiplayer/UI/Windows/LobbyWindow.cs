@@ -18,6 +18,7 @@ namespace WOTRMultiplayer.UI.Windows
         private Action _onShow;
 
         private IDisposable _escSubscription;
+        private float _nextCombatRefreshAt;
 
         public Func<GameConnectivity> GetGameConnectivity { get; set; }
 
@@ -65,6 +66,17 @@ namespace WOTRMultiplayer.UI.Windows
         {
             _logger.LogInformation("OnHide");
             Game.Instance.UI.EscManager.Unsubscribe(Close);
+        }
+
+        private void Update()
+        {
+            if (!IsVisible || UnityEngine.Time.unscaledTime < _nextCombatRefreshAt)
+            {
+                return;
+            }
+
+            _nextCombatRefreshAt = UnityEngine.Time.unscaledTime + 0.5f;
+            _lobbyWindowController?.RefreshRealTimeCombatControls();
         }
 
         public override void OnShow()

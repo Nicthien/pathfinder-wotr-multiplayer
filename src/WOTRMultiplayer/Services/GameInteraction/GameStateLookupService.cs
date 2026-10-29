@@ -119,9 +119,25 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 return FindAbilityInSpellbook(unit, networkAbility);
             }
 
+            // Potions for another unit use the item action-bar copy constructor,
+            // not AbilityData.GetConversions(). Keep the actual item for consumption.
+            if (networkAbility.PotionForOther && networkAbility.SourceItem != null)
+            {
+                var potion = unit.Inventory.Items.FirstOrDefault(item =>
+                    string.Equals(item.UniqueId, networkAbility.SourceItem.Id, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.Blueprint.AssetGuid.ToString(), networkAbility.SourceItem.BlueprintId, StringComparison.OrdinalIgnoreCase));
+                if (potion?.Ability == null) return null;
+                var forOther = new AbilityData(potion.Ability) { PotionForOther = true };
+                if (!string.Equals(forOther.Blueprint.AssetGuid.ToString(), networkAbility.BlueprintId, StringComparison.OrdinalIgnoreCase))
+                    return null;
+                _logger.LogInformation("[AbilityReplay] Potion for other resolved from exact item. UnitId={UnitId}, ItemId={ItemId}", unit.UniqueId, potion.UniqueId);
+                return forOther;
+            }
+
             if (!string.IsNullOrEmpty(networkAbility.ConvertedFromId))
             {
-                var conversionAbility = GetAbility(unit, networkAbility.ConvertedFromId, networkAbility.BlueprintId) ?? GetItemAbility(unit, networkAbility);
+                // This ID identifies the parent, not the converted blueprint.
+                var conversionAbility = GetAbility(unit, networkAbility.ConvertedFromId, null) ?? GetItemAbility(unit, networkAbility);
                 if (conversionAbility == null)
                 {
                     _logger.LogError("Unable to find ability for conversion. UnitId={UnitId}, AbilityId={AbilityId}", unit.UniqueId, networkAbility.ConvertedFromId);
@@ -196,12 +212,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public List<AreaEffectEntityData> GetAreaEffects()
         {
-            return [.. Game.Instance.State.AreaEffects];
+            var pool = Game.Instance.State.AreaEffects;
+            return RealTimePresentationRuntime.Enabled
+                ? RealTimeAreaDiscovery.Collect(pool, pool.All) : [.. pool];
         }
 
         public AreaEffectEntityData GetAreaEffect(NetworkAreaEffect networkAreaEffect)
         {
-            var areaEffect = Game.Instance.State.AreaEffects.FirstOrDefault(a => string.Equals(a.UniqueId, networkAreaEffect.Id, StringComparison.OrdinalIgnoreCase));
+            var areaEffect = GetAreaEffects().FirstOrDefault(a => string.Equals(a.UniqueId, networkAreaEffect.Id, StringComparison.OrdinalIgnoreCase));
             return areaEffect;
         }
 
@@ -313,10 +331,36 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private AbilityData GetAbility(UnitEntityData unit, string abilityId, string abilityBlueprintId)
         {
-            var ability = unit.Abilities.Enumerable.FirstOrDefault(a => string.Equals(a.Data.UniqueId, abilityId, StringComparison.OrdinalIgnoreCase)
-                   || string.Equals(a.Data.Blueprint.AssetGuid.ToString(), abilityBlueprintId, StringComparison.OrdinalIgnoreCase));
-
-            return ability?.Data;
+            // Variants can share the parent's instance ID. The received blueprint
+            // must take precedence, otherwise a multi-summon variant can resolve
+            // to its parent (or fail lookup entirely) on the other PC.
+            bool Matches(AbilityData candidate) => !string.IsNullOrWhiteSpace(abilityBlueprintId)
+                ? string.Equals(candidate.Blueprint.AssetGuid.ToString(), abilityBlueprintId, StringComparison.OrdinalIgnoreCase)
+                : string.Equals(candidate.UniqueId, abilityId, StringComparison.OrdinalIgnoreCase);
+            var roots = unit.Abilities.Enumerable.Select(a => a.Data).ToArray();
+            var direct = roots.FirstOrDefault(Matches);
+            if (direct != null) return direct;
+            var pending = new Queue<(AbilityData Ability, int Depth)>(roots.Select(a => (a, 0)));
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (pending.Count > 0)
+            {
+                var (parent, depth) = pending.Dequeue();
+                if (depth >= 4 || parent.AbilityVariants == null
+                    || !visited.Add(parent.Blueprint.AssetGuid.ToString())) continue;
+                foreach (var variant in parent.GetConversions())
+                {
+                    if (Matches(variant))
+                    {
+                        _logger.LogInformation("Network ability variant resolved. UnitId={UnitId}, Parent={Parent}, BlueprintId={BlueprintId}, AbilityName={AbilityName}",
+                            unit.UniqueId, parent.Blueprint.AssetGuid, abilityBlueprintId, variant.NameForAcronym);
+                        return variant;
+                    }
+                    pending.Enqueue((variant, depth + 1));
+                }
+            }
+            _logger.LogWarning("Network ability and its owned variants not found. UnitId={UnitId}, AbilityId={AbilityId}, BlueprintId={BlueprintId}",
+                unit.UniqueId, abilityId, abilityBlueprintId);
+            return null;
         }
 
         private AbilityData GetSpell(List<AbilityData> spells, string abilityId, string abilityBlueprintId, int? metamagic)
@@ -392,7 +436,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (specialSpell != null)
             {
                 _logger.LogInformation("Spell has been found in special spells. UnitId={UnitId}, AbilityId={AbilityId}, SpellbookName={SpellbookName}", unit.UniqueId, networkAbility.Id, spellbook.Blueprint.Name);
-                return customSpell;
+                return specialSpell;
             }
 
             var fromAbilities = GetAbility(unit, networkAbility);

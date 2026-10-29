@@ -10,7 +10,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool PlayerUISettings_DoSpeedUp_Prefix()
         {
-            return !Main.Multiplayer.IsActive;
+            // Multiplayer enforces the same turn animation speed on both peers.
+            // Do not swallow the native Space speed-up input on top of that.
+            return true;
         }
     }
 }

@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using UnityEngine;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Extensions;
 using WOTRMultiplayer.HarmonyPatches.Combat;
 
@@ -36,16 +37,16 @@ namespace WOTRMultiplayer.HarmonyPatches.Clicks
 
         [HarmonyPatch(typeof(ClickGroundHandler), nameof(ClickGroundHandler.RunCommand))]
         [HarmonyPrefix]
-        public static void ClickGroundHandler_RunCommand_Prefix(UnitEntityData unit, ClickGroundHandler.CommandSettings settings)
+        public static bool ClickGroundHandler_RunCommand_Prefix(UnitEntityData unit, ClickGroundHandler.CommandSettings settings)
         {
             if (!Main.Multiplayer.IsActive || TurnControllerPatches.IsSimulation.Value)
             {
-                return;
+                return true;
             }
 
-            var movementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(unit);
+            var movementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(unit);
             var path = PathVisualizer.Instance?.m_CurrentPath?.vectorPath;
-            var attackMode = Game.Instance.TurnBasedCombatController.CurrentTurn?.m_AttackMode;
+            var attackMode = Game.Instance.TurnBasedCombatController?.CurrentTurn?.m_AttackMode;
             var unitMoveTo = new NetworkUnitMoveTo
             {
                 InitiatorUnitId = unit.UniqueId,
@@ -59,7 +60,23 @@ namespace WOTRMultiplayer.HarmonyPatches.Clicks
                 ApplySpeedLimitInCombat = settings.ApplySpeedLimitInCombat,
                 Position = unit.Position.ToNetworkVector3()
             };
+            if (Main.Multiplayer.IsRealTimeCombatBarrierActive)
+            {
+                Main.GetLogger<ClicksPatches>().LogWarning("Real-time movement was blocked by synchronization barrier. UnitId={UnitId}", unit.UniqueId);
+                return false;
+            }
+            if (Main.Multiplayer.IsRealTimeClientCombatActive)
+            {
+                if (!Main.Multiplayer.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move, movement: unitMoveTo))
+                {
+                    Main.GetLogger<ClicksPatches>().LogWarning("Real-time move was not accepted for transmission. UnitId={UnitId}", unit.UniqueId);
+                }
+                // The client must not start its own movement before host validation.
+                return false;
+            }
+
             Main.Multiplayer.OnUnitMoveTo(unitMoveTo);
+            return true;
         }
 
         [HarmonyPatch(typeof(ClickMapObjectHandler), nameof(ClickMapObjectHandler.OnClick), [typeof(GameObject), typeof(Vector3), typeof(int), typeof(bool), typeof(bool), typeof(bool)])]
@@ -102,7 +119,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Clicks
                 WorldPosition = worldPosition.ToNetworkVector3(),
                 MuteEvents = muteEvents,
                 VectorPath = [.. path?.vectorPath?.Select(v => v.ToNetworkVector3()) ?? []],
-                MovementLimit = Game.Instance.TurnBasedCombatController.CurrentTurn.GetMovementLimit(selectedUnit?.Data)?.ToString()
+                MovementLimit = Game.Instance.TurnBasedCombatController?.CurrentTurn?.GetMovementLimit(selectedUnit?.Data)?.ToString()
             };
         }
     }

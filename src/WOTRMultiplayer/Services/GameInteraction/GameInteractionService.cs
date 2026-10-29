@@ -119,6 +119,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public bool IsPaused => Game.Instance.IsPaused || Game.Instance.m_WillBePaused;
 
+        public bool IsWorldPaused => CombatSaving.CombatSavePauseLease.IsWorldPaused(Game.Instance);
+
         public bool IsCapitalPartyMode => Game.Instance.Player.CapitalPartyMode;
 
         public GameInteractionService(
@@ -220,6 +222,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public SaveInfo LoadSave(string path)
         {
             var save = Game.Instance.SaveManager.LoadZipSave(path);
+            if (SessionRejoinRuntime.IsClientLoad(path)) SessionRejoinRuntime.ClientSaveInfo = save;
             return save;
         }
 
@@ -253,6 +256,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                HarmonyPatches.CapitalMercenaryPatches.CaptureTransitionMercenaries();
                 var currentArea = Game.Instance.CurrentlyLoadedArea;
                 if (!string.Equals(currentArea?.AssetGuid.ToString(), networkAreaTransition.From.Id, StringComparison.OrdinalIgnoreCase))
                 {
@@ -295,20 +299,90 @@ namespace WOTRMultiplayer.Services.GameInteraction
         public void SetPause(bool isPaused)
         {
             _logger.LogInformation("Pause game. RequestedIsPaused={IsPaused}, GameIsPaused={GameIsPaused}", isPaused, Game.Instance.IsPaused);
-            if (Game.Instance.IsPaused == isPaused)
+            if (!isPaused)
             {
+                // Owlcat can schedule a pause for the next tick without setting IsPaused yet.
+                // A mode-switch Complete received in that window used to return early because
+                // IsPaused was already false, leaving m_WillBePaused armed. The client then
+                // paused by itself one frame after the host resumed and immediately diverged.
+                Game.Instance.m_WillBePaused = false;
+                Game.Instance.PauseOnLoadPendingTicks = 0;
+                if (Game.Instance.IsPaused)
+                    Game.Instance.IsPaused = false;
                 return;
             }
 
-            if (isPaused)
-            {
+            if (!Game.Instance.IsPaused)
                 Game.Instance.IsPaused = true;
-                return;
-            }
+        }
 
-            Game.Instance.m_WillBePaused = false;
-            Game.Instance.PauseOnLoadPendingTicks = 0;
-            Game.Instance.IsPaused = false;
+        public Task SetPauseAsync(bool isPaused)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    SetPause(isPaused);
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to change pause state. RequestedIsPaused={IsPaused}", isPaused);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
+        public Task SetTurnBasedCombatModeAsync(bool enabled)
+        {
+            return TrySetTurnBasedCombatModeAsync(enabled, () => true);
+        }
+
+        public Task<bool> TrySetTurnBasedCombatModeAsync(bool enabled, Func<bool> canApply)
+        {
+            if (canApply == null) throw new ArgumentNullException(nameof(canApply));
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    if (!canApply())
+                    {
+                        completion.TrySetResult(false);
+                        return;
+                    }
+                    if (enabled && RealTimePresentationRuntime.Enabled)
+                    {
+                        RealTimeBuffReplicaStore.RequireMechanicalState(Game.Instance.State.Units);
+                        RealTimeAreaReplicaFactory.RequireMechanicalState(Game.Instance.State.AreaEffects);
+                        RealTimeNativeGraphRepair.RequireMechanicalState(Game.Instance.State);
+                    }
+                    SettingsRoot.Game.TurnBased.EnableTurnBasedMode.SetValueAndConfirm(enabled);
+                    if (SettingsRoot.Game.TurnBased.EnableTurnBasedMode.GetValue() != enabled)
+                    {
+                        throw new InvalidOperationException("The game did not accept the requested combat mode.");
+                    }
+                    WOTRMultiplayer.HarmonyPatches.MenuPatches.IngameMenuPatches.RefreshCombatModeButton();
+                    completion.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to change turn-based combat mode. Enabled={Enabled}", enabled);
+                    completion.TrySetException(ex);
+                }
+            });
+            return completion.Task;
+        }
+
+        public bool RequiresRealTimeMechanicalReconstruction()
+        {
+            if (!RealTimePresentationRuntime.Enabled || Game.Instance?.State == null)
+                return false;
+            return RealTimeBuffReplicaStore.RequiresMechanicalRebuild(Game.Instance.State.Units)
+                || RealTimeAreaReplicaFactory.RequiresMechanicalRebuild(Game.Instance.State.AreaEffects)
+                || RealTimeNativeGraphRepair.RequiresRebuild(Game.Instance.State);
         }
 
         public List<NetworkCharacter> GetPartyPlayers()
@@ -907,6 +981,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             _mainThreadAccessor.Post(() =>
             {
+                using var presentation = RealTimePresentationRuntime.BeginAuthoritativePresentation();
                 // based on PartyPerceptionController.RollPerception
                 try
                 {
@@ -976,6 +1051,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             _mainThreadAccessor.Post(() =>
             {
+                using var presentation = RealTimePresentationRuntime.BeginAuthoritativePresentation();
                 try
 
                 {
@@ -1016,6 +1092,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             _mainThreadAccessor.Post(() =>
             {
+                using var presentation = RealTimePresentationRuntime.BeginAuthoritativePresentation();
                 var initiatorUnitId = _gameStateLookupService.GetUnitEntity(networkStealthPerceptionCheck.InitiatorId);
                 if (initiatorUnitId == null)
                 {
@@ -2927,9 +3004,19 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public NetworkContentState GetInstalledContent()
         {
+            string buildFingerprint = null;
+            try
+            {
+                buildFingerprint = RealTimeBuildFingerprint.Compute(Main.ModManagerSettings.ModFolder);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unable to fingerprint installed multiplayer build; lobby compatibility will fail closed");
+            }
             var state = new NetworkContentState
             {
                 GameVersion = GameVersion.Cached,
+                RealTimeBuildFingerprint = buildFingerprint,
                 DLCs = GetInstalledDLCs(),
                 Mods = GetInstalledMods()
             };

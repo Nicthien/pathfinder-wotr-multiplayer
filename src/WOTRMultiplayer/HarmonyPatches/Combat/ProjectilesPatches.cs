@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
@@ -7,6 +8,7 @@ using Kingmaker.Controllers.Projectiles;
 using Microsoft.Extensions.Logging;
 using UnityEngine;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
 using WOTRMultiplayer.Services.Random;
 
 namespace WOTRMultiplayer.HarmonyPatches.Combat
@@ -67,6 +69,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
                 var offset = Main.Multiplayer.ValueGenerator.Range(seededContext.Lifetime, identifier, minOffset, maxOffset);
 
                 var resultedPoint = pointInCircle.ToUnityVector2().normalized * offset;
+                resultedPoint = RealTimeVector2Authority.Resolve(Main.Multiplayer,
+                    $"projectile-miss:{identifier}:{minOffset.ToString("R", CultureInfo.InvariantCulture)}:{maxOffset.ToString("R", CultureInfo.InvariantCulture)}",
+                    resultedPoint);
                 Main.GetLogger<ProjectilesPatches>().LogInformation("Projectile fall on miss has been calculated. InitiatorId={InitiatorId}, TargetId={TargetId}, Point={Point}, WeaponName={WeaponName}, Identifier={Identifier}", initiatorId, targetId, resultedPoint, weaponName, identifier);
                 return resultedPoint;
             }

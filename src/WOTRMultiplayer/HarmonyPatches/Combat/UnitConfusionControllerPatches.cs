@@ -53,8 +53,9 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
             {
                 var seededContext = Main.Multiplayer.GetSeededContext();
                 var identifier = $"{nameof(UnitConfusionController)}:{nameof(RollConfusionEffect)}:{unit.UniqueId}_{seededContext.Id}";
-                var random = Main.Multiplayer.ValueGenerator.GetRandom(seededContext.Lifetime, identifier);
-                var result = ruleRollDice.DiceFormula.Roll(random);
+                var key = $"confusion:{identifier}:{ruleRollDice.DiceFormula.Rolls}:{(int)ruleRollDice.DiceFormula.Dice}";
+                var result = Main.Multiplayer.ResolveRealTimeDiceRoll(key, () =>
+                    ruleRollDice.DiceFormula.Roll(Main.Multiplayer.ValueGenerator.GetRandom(seededContext.Lifetime, identifier)));
                 Main.GetLogger<UnitConfusionControllerPatches>().LogInformation("UnitConfusionController condition has been rolled. UnitId={UnitId}, Roll={Roll}, Identifier={Identifier}", unit.UniqueId, result, identifier);
                 Main.PlayerNotification.AddCombatText(WellKnownKeys.GameNotifications.Combat.Conditions.Confusion.Key, CombatTextSeverity.Debug, result, new UnitLogParameter(unit.UniqueId));
                 ruleRollDice.m_Triggered = true;

@@ -24,9 +24,13 @@ using WOTRMultiplayer.Abstractions.UI.Controllers;
 using WOTRMultiplayer.Abstractions.UI.Windows;
 using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.Entities.Combat;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Connectivity;
+using WOTRMultiplayer.Entities.Content;
 using WOTRMultiplayer.Extensions;
 using WOTRMultiplayer.Services.Settings;
+using WOTRMultiplayer.Services;
 using WOTRMultiplayer.UI.Tooltips;
 using WOTRMultiplayer.UI.Windows;
 using WOTRMultiplayer.UnityBehaviours;
@@ -76,6 +80,8 @@ namespace WOTRMultiplayer.UI.Controllers
 
         private readonly ConcurrentDictionary<LobbyWindowOwner, GameObject> _contents = new();
         private LobbyWindowOwner _activeOwner;
+        private GameConnectivity _lastRealTimeConnectivity;
+        private string _lastRealTimeControlState;
 
         private readonly List<IDisposable> _disposables = [];
 
@@ -181,6 +187,7 @@ namespace WOTRMultiplayer.UI.Controllers
             }
 
             var lobbyContent = _uiFactory.CreateLobbyWindowContent(parent);
+            if (owner == LobbyWindowOwner.EscMenu) ConfigureScrollableLobby(lobbyContent);
             lobbyContent.SetActive(false);
             _contents.TryAdd(owner, lobbyContent);
             _logger.LogInformation("Content has been created. Owner={Owner}", owner);
@@ -198,9 +205,13 @@ namespace WOTRMultiplayer.UI.Controllers
                 _logger.LogInformation("Updating player list. PlayersCount={PlayersCount}", players.Count);
                 DisposeDisposables();
                 PlayersSectionContent.CleanupAllChildren();
+                if (_activeOwner == LobbyWindowOwner.EscMenu)
+                    PlayersSectionContent.GetComponent<LayoutElement>().minHeight =
+                        UIFactory.LobbyPlayerObjectHeight * Math.Max(1, players.Count);
+                var hostContent = players.FirstOrDefault(p => p.IsHost)?.ContentState;
                 foreach (var player in players)
                 {
-                    CreatePlayerObject(player);
+                    CreatePlayerObject(player, hostContent);
                 }
 
                 UpdateCharactersOwnership(players);
@@ -223,9 +234,11 @@ namespace WOTRMultiplayer.UI.Controllers
 
             var serverInfoContainerObject = _uiFactory.CreateDefaultGameObject(ServerInfoSectionContent.transform);
             serverInfoContainerObject.name = PlayerContainerObjectName;
-            serverInfoContainerObject.AddComponent<VerticalLayoutGroup>();
+            var serverLayout = serverInfoContainerObject.AddComponent<VerticalLayoutGroup>();
+            serverLayout.childForceExpandHeight = false;
+            serverLayout.spacing = 6f;
             var serverInfoContainerSizeFitter = serverInfoContainerObject.AddComponent<ContentSizeFitter>();
-            serverInfoContainerSizeFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            serverInfoContainerSizeFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
             serverInfoContainerSizeFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             if (connectivity.Endpoint != null)
@@ -233,6 +246,13 @@ namespace WOTRMultiplayer.UI.Controllers
                 var settings = _multiplayerSettingsService.GetSettings();
                 var endpointText = settings.HideServerAddress ? "***.***.***.***:****" : connectivity.Endpoint.ToString();
                 AddServerInfo(serverInfoContainerObject.transform, endpointText);
+            }
+
+            if (_activeOwner == LobbyWindowOwner.EscMenu)
+            {
+                _lastRealTimeConnectivity = connectivity;
+                _lastRealTimeControlState = GetRealTimeControlState();
+                AddRealTimeCombatControls(serverInfoContainerObject.transform, connectivity);
             }
 
             if (connectivity.External == null)
@@ -289,6 +309,23 @@ namespace WOTRMultiplayer.UI.Controllers
             // sadly, there is no auto-width in place. Calculating it manually based on the font/length is an option, but lazy approach with 6x of the button size should be enough, right?
             var config = new TooltipConfig { Width = (int)copyButtonRect.sizeDelta.x * 6, PreferredHeight = 60 };
             copyButton.OnHover.AddListener(x => ShowTooltip(copyButton, x, template, config));
+        }
+
+        public void RefreshRealTimeCombatControls()
+        {
+            if (_activeOwner == LobbyWindowOwner.EscMenu && _lastRealTimeConnectivity != null
+                && _lastRealTimeControlState != GetRealTimeControlState())
+            {
+                UpdateServerInfo(_lastRealTimeConnectivity);
+            }
+        }
+
+        private string GetRealTimeControlState()
+        {
+            var actor = _multiplayerActorAccessor.Current as MultiplayerActorBase;
+            var state = actor?.Game?.RealTimeCombat;
+            return state == null ? string.Empty
+                : $"{actor.Game.Combat?.Stage}:{state.Mode}:{state.PreferredMode}:{state.PreferenceSequence}:{state.Phase}:{state.PausePolicy}:{state.PauseSequence}:{state.Epoch}:{state.ResponseTimeMs / 10}:{state.MissingSnapshotReplies}:{state.RecoveryStatus}:{state.RecoveryFailure}";
         }
 
         public void UpdateCharacterOwnerDropdown(NetworkCharacter character, bool silent = false)
@@ -462,12 +499,17 @@ namespace WOTRMultiplayer.UI.Controllers
             var serverInfoObject = _uiFactory.CreateDefaultGameObject(parent.transform);
             var serverInfoElement = serverInfoObject.AddComponent<LayoutElement>();
             serverInfoElement.preferredHeight = 40;
+            serverInfoElement.minHeight = 40;
             var serverInfoBox = serverInfoObject.AddComponent<TextMeshProUGUI>();
             serverInfoBox.alignment = TextAlignmentOptions.Center;
             serverInfoBox.verticalAlignment = VerticalAlignmentOptions.Middle;
             serverInfoBox.horizontalAlignment = HorizontalAlignmentOptions.Center;
             serverInfoBox.material = _uiFactory.DefaultTextMesh.Material;
             serverInfoBox.color = color ?? _uiFactory.DefaultTextMesh.Color;
+            serverInfoBox.enableAutoSizing = true;
+            serverInfoBox.fontSizeMin = 16;
+            serverInfoBox.fontSizeMax = 24;
+            serverInfoBox.enableWordWrapping = true;
             // not sure why, but it's not actually centered for some reason
             serverInfoBox.margin = new Vector4(0f, 5f, 0f, 0f);
             if (addInProgressAnimation)
@@ -482,6 +524,184 @@ namespace WOTRMultiplayer.UI.Controllers
 
             serverInfoBox.SetText(text);
         }
+
+        private void AddRealTimeCombatControls(Transform parent, GameConnectivity connectivity)
+        {
+            var actor = _multiplayerActorAccessor.Current as MultiplayerActorBase;
+            var state = actor?.Game?.RealTimeCombat;
+            if (state == null)
+            {
+                return;
+            }
+
+            var inCombat = actor.Game.Combat?.Stage == NetworkCombatStage.Running;
+            var mode = state.Mode == CombatMode.RealTimeWithPause
+                ? Localized(WellKnownKeys.LobbyWindow.RealTime.ModeRealTime.Key)
+                : Localized(WellKnownKeys.LobbyWindow.RealTime.TurnBased.Key);
+            var phase = state.CombatEndPending ? Localized(WellKnownKeys.LobbyWindow.RealTime.Synchronizing.Key) : state.Phase switch
+            {
+                CombatSynchronizationPhase.PreparingModeSwitch or CombatSynchronizationPhase.Synchronizing => Localized(WellKnownKeys.LobbyWindow.RealTime.Synchronizing.Key),
+                CombatSynchronizationPhase.Repairing => Localized(WellKnownKeys.LobbyWindow.RealTime.Repairing.Key),
+                CombatSynchronizationPhase.FallingBackToTurnBased => Localized(WellKnownKeys.LobbyWindow.RealTime.FallingBack.Key),
+                _ => state.IsManualPauseActive ? Localized(WellKnownKeys.LobbyWindow.RealTime.Paused.Key) : mode
+            };
+            AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.CombatStatus.Key), phase));
+            var recoveryKey = state.RecoveryStatus switch
+            {
+                "preparing" => WellKnownKeys.LobbyWindow.RealTime.RecoveryPreparing.Key,
+                "rebuilding" => WellKnownKeys.LobbyWindow.RealTime.RecoveryRebuilding.Key,
+                "loading" => WellKnownKeys.LobbyWindow.RealTime.RecoveryLoading.Key,
+                "verifying" => WellKnownKeys.LobbyWindow.RealTime.RecoveryVerifying.Key,
+                "committed" => WellKnownKeys.LobbyWindow.RealTime.RecoveryCommitted.Key,
+                "reconnecting" => WellKnownKeys.LobbyWindow.RealTime.RecoveryReconnecting.Key,
+                "stopped" => WellKnownKeys.LobbyWindow.RealTime.RecoveryStopped.Key,
+                _ => null
+            };
+            if (recoveryKey != null) AddServerInfo(parent, Localized(recoveryKey));
+            if (!string.IsNullOrWhiteSpace(state.RecoveryFailure))
+                AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.RecoveryFailureCode.Key), state.RecoveryFailure));
+            AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.PausePolicy.Key), GetPausePolicyLabel(state.PausePolicy)));
+            AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.PreferredMode.Key),
+                Localized(state.PreferredMode == CombatMode.RealTimeWithPause
+                    ? WellKnownKeys.LobbyWindow.RealTime.ModeRealTime.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.TurnBased.Key)));
+            if (inCombat && state.Mode == CombatMode.RealTimeWithPause)
+            {
+                AddServerInfo(parent, string.Format(Localized(WellKnownKeys.LobbyWindow.RealTime.NetworkResponse.Key),
+                    state.ResponseTimeMs > 0 ? state.ResponseTimeMs.ToString() : "—",
+                    state.MissingSnapshotReplies));
+            }
+
+            if (_multiplayerActorAccessor.Host.IsActive)
+            {
+                AddCombatButton(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.Repair.Key), () =>
+                    _ = RepairAndRefreshAsync(connectivity));
+                if (actor.Game.Combat == null)
+                    AddServerInfo(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.ManualSyncOutsideCombat.Key));
+            }
+
+            if (state.CombatEndPending || state.Phase != CombatSynchronizationPhase.Stable)
+            {
+                return;
+            }
+
+            if (_multiplayerActorAccessor.Host.IsActive)
+            {
+                if (inCombat)
+                {
+                    AddCombatButton(parent, Localized(state.Mode == CombatMode.TurnBased
+                        ? WellKnownKeys.LobbyWindow.RealTime.SwitchToRealTime.Key
+                        : WellKnownKeys.LobbyWindow.RealTime.SwitchToTurnBased.Key), () =>
+                    {
+                        var nextMode = state.Mode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
+                        _ = ChangeModeAndRefreshAsync(nextMode, connectivity);
+                    });
+                }
+                if (!inCombat) AddCombatButton(parent, Localized(state.PreferredMode == CombatMode.TurnBased
+                    ? WellKnownKeys.LobbyWindow.RealTime.PreferRealTime.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.PreferTurnBased.Key), () =>
+                {
+                    var nextMode = state.PreferredMode == CombatMode.TurnBased ? CombatMode.RealTimeWithPause : CombatMode.TurnBased;
+                    if (_multiplayerActorAccessor.Host.SetPreferredRealTimeCombatMode(nextMode))
+                    {
+                        UpdateServerInfo(connectivity);
+                    }
+                });
+                AddCombatButton(parent, Localized(WellKnownKeys.LobbyWindow.RealTime.ChangePausePolicy.Key), () =>
+                {
+                    var nextPolicy = (PausePolicy)(((int)state.PausePolicy + 1) % 3);
+                    if (_multiplayerActorAccessor.Host.SetRealTimePausePolicy(nextPolicy))
+                    {
+                        UpdateServerInfo(connectivity);
+                    }
+                });
+            }
+
+            if (inCombat && state.Mode == CombatMode.RealTimeWithPause)
+            {
+                AddCombatButton(parent, Localized(state.IsManualPauseActive
+                    ? WellKnownKeys.LobbyWindow.RealTime.RequestResume.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.RequestPause.Key), () =>
+                {
+                    var requested = _multiplayerActorAccessor.Host.IsActive
+                        ? _multiplayerActorAccessor.Host.RequestLocalRealTimePause(!state.IsManualPauseActive)
+                        : _multiplayerActorAccessor.Client is MultiplayerClient client && client.RequestRealTimePause(!state.IsManualPauseActive);
+                    if (requested)
+                    {
+                        UpdateServerInfo(connectivity);
+                    }
+                });
+            }
+        }
+
+        private async System.Threading.Tasks.Task ChangeModeAndRefreshAsync(CombatMode mode, GameConnectivity connectivity)
+        {
+            await _multiplayerActorAccessor.Host.RequestRealTimeCombatModeAsync(mode);
+            _mainThreadAccessor.Post(() => UpdateServerInfo(connectivity));
+        }
+
+        private async System.Threading.Tasks.Task RepairAndRefreshAsync(GameConnectivity connectivity)
+        {
+            var requested = await _multiplayerActorAccessor.Host.ForceCombatSynchronizationAsync();
+            _mainThreadAccessor.Post(() => Main.PlayerNotification
+                .ShowWarningNotification(requested ? WellKnownKeys.LobbyWindow.RealTime.ManualSyncRequested.Key
+                    : WellKnownKeys.LobbyWindow.RealTime.ManualSyncUnavailable.Key, addToLog: false));
+            _mainThreadAccessor.Post(() => UpdateServerInfo(connectivity));
+        }
+
+        private void AddCombatButton(Transform parent, string label, Action action)
+        {
+            var buttonObject = _uiFactory.CreateButton(parent);
+            var layout = buttonObject.GetComponent<LayoutElement>() ?? buttonObject.AddComponent<LayoutElement>();
+            layout.minHeight = layout.preferredHeight = 48f;
+            layout.flexibleHeight = 0;
+            var text = buttonObject.GetComponentInChildren<TextMeshProUGUI>();
+            text.enableAutoSizing = true;
+            text.fontSizeMin = 16;
+            text.fontSizeMax = 24;
+            text.enableWordWrapping = true;
+            text.SetText(label);
+            var button = buttonObject.GetComponent<OwlcatButton>();
+            button.Interactable = action != null;
+            if (action != null) button.OnLeftClick.AddListener(() => action());
+        }
+
+        private static void ConfigureScrollableLobby(GameObject root)
+        {
+            // Keep the existing hierarchy: controller lookups still resolve the same sections.
+            var content = root.transform.Find(LobbyContentObjectName).GetComponent<RectTransform>();
+            content.anchorMin = new Vector2(0, 1);
+            content.anchorMax = new Vector2(1, 1);
+            content.pivot = new Vector2(0.5f, 1);
+            content.anchoredPosition = Vector2.zero;
+            content.sizeDelta = Vector2.zero;
+            var layout = content.GetComponent<VerticalLayoutGroup>();
+            layout.childForceExpandHeight = false;
+            layout.spacing = 12;
+            layout.padding = new RectOffset(12, 12, 12, 12);
+            content.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            root.AddComponent<RectMask2D>();
+            var surface = root.AddComponent<Image>();
+            surface.color = Color.clear;
+            var scroll = root.AddComponent<ScrollRect>();
+            scroll.viewport = root.GetComponent<RectTransform>();
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 30;
+            scroll.verticalNormalizedPosition = 1;
+        }
+
+        private static string GetPausePolicyLabel(PausePolicy policy) => policy switch
+        {
+            PausePolicy.HostOnly => Localized(WellKnownKeys.LobbyWindow.RealTime.HostOnly.Key),
+            PausePolicy.AnyoneConsensusResume => Localized(WellKnownKeys.LobbyWindow.RealTime.ConsensusResume.Key),
+            PausePolicy.AnyoneFreeResume => Localized(WellKnownKeys.LobbyWindow.RealTime.FreeResume.Key),
+            _ => Localized(WellKnownKeys.LobbyWindow.RealTime.Unknown.Key)
+        };
+
+        private static string Localized(string key) => new LocalizedString { Key = key };
 
         private Transform FindCharacterContainer(NetworkCharacter character)
         {
@@ -498,8 +718,11 @@ namespace WOTRMultiplayer.UI.Controllers
             return null;
         }
 
-        private void CreatePlayerObject(NetworkPlayer player)
+        private void CreatePlayerObject(NetworkPlayer player, NetworkContentState hostContent)
         {
+            player.ContentState ??= new NetworkContentState();
+            player.ContentState.DiscrepantMods ??= [];
+            player.ContentState.DiscrepantDLCs ??= [];
             var playerContainerObject = _uiFactory.CreateDefaultGameObject(PlayersSectionContent.transform);
             playerContainerObject.name = PlayerContainerObjectName;
             var horizontal = playerContainerObject.AddComponent<HorizontalLayoutGroup>();
@@ -532,11 +755,15 @@ namespace WOTRMultiplayer.UI.Controllers
                 CreatePlayerIcon("UI_journal_iconok_new2", playerContainerObject.transform, UIFactory.LobbyPlayerObjectHeight, null);
             }
 
-            if (player.ContentState.DiscrepantMods.Any() || player.ContentState.DiscrepantDLCs.Any())
+            var realTimeMismatch = RealTimeContentCompatibility.Compare(hostContent, player.ContentState);
+            if (realTimeMismatch != RealTimeContentMismatch.None
+                || player.ContentState.DiscrepantMods.Any() || player.ContentState.DiscrepantDLCs.Any())
             {
-                var isMultiplayerModDifferent = player.ContentState.DiscrepantMods.Any(x => string.Equals(x.Id, _unityModManagerSettings.ModId, StringComparison.OrdinalIgnoreCase));
+                var isMultiplayerModDifferent = realTimeMismatch != RealTimeContentMismatch.None
+                    || player.ContentState.DiscrepantMods.Any(x => string.Equals(x.Id, _unityModManagerSettings.ModId, StringComparison.OrdinalIgnoreCase));
                 var icon = isMultiplayerModDifferent ? "UI_QuestNotification_StampRed" : "UI_QuestNotification_StampYellow";
-                CreatePlayerIcon(icon, playerContainerObject.transform, UIFactory.LobbyPlayerObjectHeight, new ContentDiscrepancyTooltipTemplate(player));
+                CreatePlayerIcon(icon, playerContainerObject.transform, UIFactory.LobbyPlayerObjectHeight,
+                    new ContentDiscrepancyTooltipTemplate(player, hostContent, realTimeMismatch));
             }
         }
 
@@ -712,6 +939,7 @@ namespace WOTRMultiplayer.UI.Controllers
             portraitImage.sprite = portraitSprite;
             portraitImage.color = portraitSprite == null ? Color.clear : Color.white;
             var characterOwner = characterContainer.Find(CharacterOwnerObjectName);
+            characterOwner.gameObject.SetActive(character != null);
             characterOwner.Find(UIFactory.DropdownGameObjectName).GetComponent<TMP_Dropdown>().interactable = isDropdownInteractable && portraitSprite != null;
             characterOwner.GetComponent<CharacterDataBehaviour>().Character = character;
             characterContainer.gameObject.SetActive(true);

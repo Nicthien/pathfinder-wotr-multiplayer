@@ -26,5 +26,13 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(5)]
         [LogMe]
         public string GameVersion { get; set; }
+
+        [ProtoMember(6)]
+        [LogMe]
+        public int RealTimeProtocolVersion { get; set; }
+
+        [ProtoMember(7)]
+        [LogMe]
+        public string RealTimeBuildFingerprint { get; set; }
     }
 }

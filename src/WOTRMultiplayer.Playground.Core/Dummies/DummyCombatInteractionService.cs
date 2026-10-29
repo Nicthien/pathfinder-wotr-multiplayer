@@ -6,12 +6,19 @@ using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Units;
 
 namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyCombatInteractionService : ICombatInteractionService
     {
+        public Task<bool?> TryPresentRealTimeActionAsync(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent,
+            Func<bool> canPresent) => Task.FromResult<bool?>(canPresent() ? true : null);
+
+        public void TickRealTimePresentation(bool active) { }
+
         public bool IsCombatTurnFinished()
         {
             return false;
@@ -28,6 +35,38 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
         public NetworkCombatState GetCombatState()
         {
             return null;
+        }
+
+        public NetworkCombatState GetRealTimeCombatState()
+        {
+            return null;
+        }
+
+        public Task<NetworkCombatState> GetRealTimeCombatStateAsync()
+        {
+            return Task.FromResult<NetworkCombatState>(null);
+        }
+
+        public Task UpdateRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task<NetworkCombatState> ApplyAndReadRealTimeCombatStateAsync(NetworkCombatState networkCombatState)
+        {
+            return Task.FromResult<NetworkCombatState>(null);
+        }
+
+        public Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
+            NetworkCombatState networkCombatState, Func<bool> canApply)
+        {
+            return Task.FromResult<NetworkCombatState>(null);
+        }
+
+        public Task<NetworkCombatState> TryApplyCombatSaveStateAsync(
+            NetworkCombatState savedState, Func<bool> canApply)
+        {
+            return Task.FromResult<NetworkCombatState>(null);
         }
 
         public void InitializeCrusadeArmyCombat()
@@ -75,6 +114,23 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 
         public void UseAbility(NetworkAbilityUse networkAbilityUse)
         {
+        }
+
+        public bool ExecuteRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability)
+        {
+            return false;
+        }
+
+        public Task<bool> ExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind, NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool?> TryExecuteRealTimeCombatCommandAsync(RealTimeCommandKind kind,
+            NetworkUnitMoveTo movement, NetworkUnitAttack attack, NetworkAbilityUse ability,
+            Func<bool> canExecute)
+        {
+            return Task.FromResult<bool?>(null);
         }
 
         public Task<bool> StartCombatAsync(NetworkCombatState networkCombatState)
@@ -128,6 +184,27 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
         public bool AreThereAnyProjectilesLaunchedByParty()
         {
             return false;
+        }
+
+        public bool HasActiveRealTimeProjectiles()
+        {
+            return false;
+        }
+
+        public bool HasActiveRealTimeAtomicActions()
+        {
+            return false;
+        }
+
+        public Task<bool?> TryApplyRealTimeUnitDeathAsync(string unitId, NetworkPlayer hostPlayer,
+            Func<bool> canApply)
+        {
+            return Task.FromResult<bool?>(null);
+        }
+
+        public Task<bool> TryPauseAtProjectileSafePointAsync(Func<bool> canPause, Action pause)
+        {
+            return Task.FromResult(false);
         }
 
         public void InteractWithUnit(NetworkUnitInteractWithUnit interaction)

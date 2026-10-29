@@ -33,6 +33,8 @@ namespace WOTRMultiplayer.Entities.Combat
 
         public bool IsInitiated { get; set; }
 
+        public bool DistantPlayersRegroupAttempted { get; set; }
+
         public bool IsDataCollected { get; set; }
 
         public bool IsDataCompared { get; set; }

@@ -2,13 +2,40 @@
 
 namespace WOTRMultiplayer.Entities.AreaEffects
 {
+    using WOTRMultiplayer.Entities.Units;
     public class NetworkAreaEffect
     {
         public string Id { get; set; }
 
+        public string BlueprintId { get; set; }
+
+        public string CasterUnitId { get; set; }
+
+        public string OwnerUnitId { get; set; }
+
+        public string SourceAbilityBlueprintId { get; set; }
+
+        public string SceneName { get; set; }
+
+        public string TargetUnitId { get; set; }
+
+        public NetworkVector3 TargetPoint { get; set; }
+
+        public float? TargetOrientation { get; set; }
+
+        public bool IsAttachedToUnit { get; set; }
+
+        public long CreationGameTimeTicks { get; set; }
+
+        public long? DurationTicks { get; set; }
+
         public string Name { get; set; }
 
         public NetworkVector3 Position { get; set; }
+
+        public float Orientation { get; set; }
+
+        public List<NetworkBuffContextState> ContextChain { get; set; }
 
         public List<string> UnitsInside { get; set; } = [];
 

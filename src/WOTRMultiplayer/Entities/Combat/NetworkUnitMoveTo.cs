@@ -4,6 +4,7 @@ namespace WOTRMultiplayer.Entities.Combat
 {
     public class NetworkUnitMoveTo
     {
+        public long TurnMovement { get; set; }
         public string InitiatorUnitId { get; set; }
 
         public NetworkVector3 Position { get; set; }

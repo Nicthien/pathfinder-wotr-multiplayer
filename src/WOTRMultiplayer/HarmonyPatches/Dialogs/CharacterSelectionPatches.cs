@@ -1,8 +1,9 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
 using Kingmaker;
+using Kingmaker.Blueprints.Root;
 using Kingmaker.DialogSystem;
 using Kingmaker.DialogSystem.Blueprints;
 using Kingmaker.EntitySystem.Entities;
@@ -10,6 +11,7 @@ using Kingmaker.UI.BookEvent;
 using Kingmaker.UI.MVVM._VM.Dialog.BookEvent;
 using Kingmaker.UI.MVVM._VM.Dialog.Dialog;
 using Microsoft.Extensions.Logging;
+using WOTRMultiplayer.Entities.Dialogs;
 
 namespace WOTRMultiplayer.HarmonyPatches.Dialogs
 {
@@ -31,15 +33,27 @@ namespace WOTRMultiplayer.HarmonyPatches.Dialogs
 
         [HarmonyPatch(typeof(AnswerVM), nameof(AnswerVM.HandleChooseCharacter))]
         [HarmonyPrefix]
-        public static bool AnswerVM_HandleChooseCharacter_Prefix()
+        public static bool AnswerVM_HandleChooseCharacter_Prefix(AnswerVM __instance)
         {
             if (!Main.Multiplayer.IsActive)
             {
                 return true;
             }
 
-            var canContinue = Main.Multiplayer.CanControlDialog();
-            return canContinue;
+            if (Main.Multiplayer.CanControlCharacterSelectionWindow()) return true;
+
+            // The client votes for this answer but never opens the host's character picker.
+            var answer = __instance.Answer.Value;
+            var controller = Game.Instance.DialogController;
+            if (answer != null && controller.Dialog != null && controller.CurrentCue != null)
+            {
+                Main.Multiplayer.OnBeforeSelectDialogAnswer(new NetworkDialog
+                {
+                    Id = controller.Dialog.AssetGuid.ToString(), Name = controller.Dialog.name
+                }, controller.CurrentCue.name, answer.name, answer.IsExit() || answer.NextCue.Cues.Count == 0,
+                    null, isCharacterSelection: true);
+            }
+            return false;
         }
 
         [HarmonyPatch(typeof(BookEventVM), nameof(BookEventVM.HandleChooseCharacter))]
@@ -51,7 +65,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Dialogs
                 return true;
             }
 
-            var canContinue = Main.Multiplayer.OnBeforeChooseBookCharacter(Game.Instance.DialogController.CurrentCue.name, answer.name);
+            var isLastAnswer = answer.IsExit() || answer.NextCue.Cues.Count == 0;
+            var networkDialog = new NetworkDialog
+            {
+                Id = Game.Instance.DialogController.Dialog.AssetGuid.ToString(),
+                Name = Game.Instance.DialogController.Dialog.name
+            };
+            var canContinue = Main.Multiplayer.OnBeforeSelectDialogAnswer(networkDialog, Game.Instance.DialogController.CurrentCue.name, answer.name, isLastAnswer, null, isCharacterSelection: true);
             return canContinue;
         }
 

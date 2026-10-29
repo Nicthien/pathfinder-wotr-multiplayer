@@ -32,6 +32,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         bool IsPaused { get; }
 
+        bool IsWorldPaused { get; }
+
         bool IsCapitalPartyMode { get; }
 
         Task ShowZoneLootAsync(string areaExitId);
@@ -39,6 +41,14 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         void LeaveArea(NetworkAreaTransition areaTransition);
 
         void SetPause(bool isPaused);
+
+        Task SetPauseAsync(bool isPaused);
+
+        Task SetTurnBasedCombatModeAsync(bool enabled);
+
+        Task<bool> TrySetTurnBasedCombatModeAsync(bool enabled, Func<bool> canApply);
+
+        bool RequiresRealTimeMechanicalReconstruction();
 
         List<NetworkCharacter> GetPartyPlayers();
 

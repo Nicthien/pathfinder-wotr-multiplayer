@@ -6,11 +6,15 @@ using HarmonyLib;
 using Kingmaker;
 using Kingmaker.Assets.Code.UI._ConsoleUI.Overtips;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Globalmap.State;
+using Kingmaker.PubSubSystem;
 using Kingmaker.TurnBasedMode;
 using Kingmaker.UI._ConsoleUI.Overtips;
 using Kingmaker.UI.Common;
 using Kingmaker.UI.Selection;
+using Kingmaker.View.MapObjects;
 using Microsoft.Extensions.Logging;
+using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.MapObjects;
 using WOTRMultiplayer.Extensions;
 
@@ -108,21 +112,66 @@ namespace WOTRMultiplayer.HarmonyPatches.MapObjects
 
         [HarmonyPatch(typeof(AreaTransitionOvertipView), nameof(AreaTransitionOvertipView.OnClick))]
         [HarmonyPrefix]
-        public static void AreaTransitionOvertipView_OnClick_Prefix(AreaTransitionOvertipView __instance)
+        public static bool AreaTransitionOvertipView_OnClick_Prefix(AreaTransitionOvertipView __instance)
         {
             if (!Main.Multiplayer.IsActive)
             {
+                return true;
+            }
+
+            var transition = __instance.MapObjectView?.Data?.Get<AreaTransitionPart>();
+            if (transition == null) return true;
+
+            if (!Main.Multiplayer.CanInitiateAreaTransitions())
+            {
+                // A client click is a request to the authoritative host. Reuse the
+                // map-object interaction message, but do not start an independent
+                // local walk/transition that can strand only part of the party.
+                if (Main.Multiplayer.RemoteContext?.Overtip == null)
+                {
+                    var units = Game.Instance.Player.PartyAndPets
+                        .Where(u => Main.Multiplayer.IsControlledByLocalPlayer(u.UniqueId))
+                        .Select(c => c.View).ToList();
+                    Main.Multiplayer.OnInteractWithMapObjectOvertip(new NetworkOvertip
+                    {
+                        MapObject = Main.Mapper.Map<NetworkMapObject>(__instance.MapObjectView.Data),
+                        Units = [.. units.Select(x => x.Data.UniqueId)]
+                    });
+                }
+                return false;
+            }
+
+            StartAuthoritativePartyTransition(transition);
+            return false;
+        }
+
+        private static void StartAuthoritativePartyTransition(AreaTransitionPart transition)
+        {
+            if (Kingmaker.UI.MapObjectOvertip.AreaTransitionController.CanNotMove(transition, false)) return;
+            var restrictionUnit = Game.Instance.Player.PartyAndPets.FirstOrDefault(unit => unit.IsDirectlyControllable)
+                ?? Game.Instance.Player.MainCharacter.Value;
+            if (!transition.CheckRestrictions(restrictionUnit)) return;
+
+            var action = transition.Blueprint?.Actions?.FirstOrDefault(entry =>
+                entry.Condition == null || entry.Condition.Check(null));
+            if (action != null)
+            {
+                CapitalMercenaryPatches.CaptureTransitionMercenaries();
+                Main.Multiplayer.OnAreaTransition(new NetworkAreaTransition
+                {
+                    AreaExitId = transition.View.UniqueId,
+                    IsActionsTransition = true,
+                    From = Main.Mapper.Map<NetworkArea>(Game.Instance.CurrentlyLoadedArea),
+                    To = Main.Mapper.Map<NetworkArea>(transition.AreaEnterPoint)
+                });
+                action.Actions.Run();
                 return;
             }
 
-            var units = Game.Instance.Player.PartyAndPets.Where(u => Main.Multiplayer.IsControlledByLocalPlayer(u.UniqueId)).Select(c => c.View).ToList();
-            var networkOvertip = new NetworkOvertip
-            {
-                MapObject = Main.Mapper.Map<NetworkMapObject>(__instance.MapObjectView.Data),
-                Units = [.. units.Select(x => x.Data.UniqueId)]
-            };
-
-            Main.Multiplayer.OnInteractWithMapObjectOvertip(networkOvertip);
+            // Preserve the native exit pipeline: it is responsible for presenting
+            // the collect-all loot window and then raising PartyLeaveArea itself.
+            EventBus.RaiseEvent<ILootInterractionHandler>(handler =>
+                handler.HandleZoneLootInterraction(transition));
         }
 
         private static void SelectAllCharactersControlledByLocalPlayer()

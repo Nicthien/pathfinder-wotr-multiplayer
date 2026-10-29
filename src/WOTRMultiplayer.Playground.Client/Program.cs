@@ -43,7 +43,8 @@ namespace WOTRMultiplayer.Playground.Client
                 serviceProvider.GetService<IFileSystemService>(),
                 serviceProvider.GetService<INetworkClientConnection>(),
                 serviceProvider.GetService<IValueGenerator>(),
-                serviceProvider.GetService<IMapper>());
+                serviceProvider.GetService<IMapper>(),
+                serviceProvider.GetService<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>());
 
             var verbs = CommandLineHelper.LoadVerbs();
             Parser.Default.ParseArguments(["--help"], verbs);

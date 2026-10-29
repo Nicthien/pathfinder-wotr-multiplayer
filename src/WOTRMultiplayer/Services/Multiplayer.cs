@@ -16,6 +16,7 @@ using WOTRMultiplayer.Entities.Area;
 using WOTRMultiplayer.Entities.AreaEffects;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.Crusades;
+using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Dialogs;
 using WOTRMultiplayer.Entities.Dungeon;
 using WOTRMultiplayer.Entities.Equipment;
@@ -31,6 +32,7 @@ using WOTRMultiplayer.Entities.SpellbookManagement;
 using WOTRMultiplayer.Entities.Spells;
 using WOTRMultiplayer.Entities.Vendor;
 using WOTRMultiplayer.Services.GameInteraction.Contexts;
+using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services.Random;
 
 namespace WOTRMultiplayer.Services
@@ -50,6 +52,17 @@ namespace WOTRMultiplayer.Services
         public bool IsActive => _multiplayerActorAccessor.Current != null && _multiplayerActorAccessor.Current.IsActive;
 
         public bool IsInCombat => _multiplayerActorAccessor.Current != null && _multiplayerActorAccessor.Current.IsInCombat;
+
+        public bool CanSaveCombatFromMenu => CombatSaving.CombatSaveActivation.Enabled
+            && _multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive && host.IsInCombat
+            && host.Game.RealTimeCombat.Mode == CombatMode.TurnBased && !host.IsSavingBlockedByCombatSync
+            && !CombatSaving.CombatSavePauseLease.Active && !CombatSaving.CombatSaveLoadState.Active;
+
+        public void SaveCombatFromMenu()
+        {
+            if (CanSaveCombatFromMenu && _multiplayerActorAccessor.Host is MultiplayerHost host)
+                host.RequestCombatSaveFromMenu();
+        }
 
         public RemoteExecutionContext RemoteContext => _gameInteractionService.RemoteContext;
 
@@ -87,6 +100,93 @@ namespace WOTRMultiplayer.Services
 
             UIFactory.InitializeMultiplayerWindow();
             _hotkeysService.Initialize();
+        }
+
+        public void UpdateRealTimeCombat()
+        {
+            if (_multiplayerActorAccessor.Current is MultiplayerActorBase movementActor)
+                movementActor.TickTurnMovement();
+            if (_multiplayerActorAccessor.Client is MultiplayerClient saveClient) saveClient.TickCombatSave();
+            if (RealTimePresentationRuntime.Enabled
+                && _multiplayerActorAccessor.Client is MultiplayerClient presentationClient)
+                presentationClient.TickRealTimePresentation();
+            if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
+            {
+                host.TickCombatSaveRestore();
+                host.PublishRealTimeCombatSnapshot();
+            }
+        }
+
+        public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
+
+        public void ToggleNetworkCombatMode()
+        {
+            if (CombatSaving.CombatSavePauseLease.Active || CombatSaving.CombatSaveLoadState.Active) return;
+            if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
+                host.ToggleCombatModeFromHotkey();
+            else
+                _logger.LogInformation("Combat mode hotkey ignored: only the host can change network combat mode.");
+        }
+
+        public void PingWorldPosition(NetworkVector3 position)
+        {
+            var actor = _multiplayerActorAccessor.Current;
+            if (actor == null || !actor.IsActive || actor.IsInLobby || position == null) return;
+            actor.OnPing(new Entities.Ping.NetworkPing
+            {
+                Type = Entities.Ping.NetworkPingType.WorldPosition,
+                WorldPosition = position
+            });
+        }
+
+        // A combat object survives repair epochs, but not a new encounter or load.
+        public object RealTimeCombatIdentity => _multiplayerActorAccessor.Current is MultiplayerActorBase actor
+            ? actor.Game?.Combat : null;
+
+        public void PublishRealTimeAuthoritativeEvent(
+            WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent)
+        {
+            if (RealTimePresentationRuntime.Enabled
+                && _multiplayerActorAccessor.Host is MultiplayerHost host)
+                host.PublishRealTimeAuthoritativeEvent(authoritativeEvent);
+        }
+
+        public bool IsRealTimeCombatActive => _multiplayerActorAccessor.Host.IsRealTimeCombatActive
+            || _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
+
+        public bool IsRealTimeCombatBarrierActive => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsRealTimeCombatBarrierActive)
+            || _multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive;
+
+        public bool IsSavingBlockedByCombatSync => (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsSavingBlockedByCombatSync)
+            || _multiplayerActorAccessor.Client.IsSavingBlockedByCombatSync;
+
+        public bool IsSavingBlockedAfterRealTimeDisconnect => _multiplayerActorAccessor.Client.IsSavingBlockedAfterRealTimeDisconnect;
+
+        public int ResolveRealTimeDiceRoll(string key, Func<int> localRoll)
+        {
+            if (_multiplayerActorAccessor.Host.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Host.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Host.ResolveRealTimeDiceRoll(key, localRoll);
+            if (_multiplayerActorAccessor.Client.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Client.ResolveRealTimeDiceRoll(key, localRoll);
+            return localRoll();
+        }
+
+        public string ResolveRealTimeEntityId(string key, Func<string> localId)
+        {
+            if (_multiplayerActorAccessor.Host.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Host.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Host.ResolveRealTimeEntityId(key, localId);
+            if (_multiplayerActorAccessor.Client.IsRealTimeCombatActive
+                && !_multiplayerActorAccessor.Client.IsRealTimeCombatBarrierActive)
+                return _multiplayerActorAccessor.Client.ResolveRealTimeEntityId(key, localId);
+            return localId();
+        }
+
+        public bool SubmitRealTimeCombatCommand(RealTimeCommandKind kind, NetworkUnitMoveTo movement = null, NetworkUnitAttack attack = null, NetworkAbilityUse ability = null)
+        {
+            return _multiplayerActorAccessor.Client.SubmitRealTimeCombatCommand(kind, movement, attack, ability);
         }
 
         public void TerminateMultiplayer()
@@ -196,7 +296,7 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        public bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId)
+        public bool OnBeforeSelectDialogAnswer(NetworkDialog networkDialog, string cueName, string answerName, bool isExitAnswer, string manualUnitSelectionId, bool isCharacterSelection = false)
         {
             try
             {
@@ -205,7 +305,7 @@ namespace WOTRMultiplayer.Services
                     return true;
                 }
 
-                var shouldContinueExecution = _multiplayerActorAccessor.Current.OnBeforeSelectDialogAnswer(networkDialog, cueName, answerName, isExitAnswer, manualUnitSelectionId);
+                var shouldContinueExecution = _multiplayerActorAccessor.Current.OnBeforeSelectDialogAnswer(networkDialog, cueName, answerName, isExitAnswer, manualUnitSelectionId, isCharacterSelection);
                 return shouldContinueExecution;
             }
             catch (Exception ex)
@@ -308,6 +408,7 @@ namespace WOTRMultiplayer.Services
 
         public bool CanTickCombatController()
         {
+            if (CombatSaving.CombatSavePauseLease.Active || CombatSaving.CombatSaveLoadState.Active) return false;
             try
             {
                 if (_multiplayerActorAccessor.Current == null)
@@ -420,6 +521,12 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
+                if (_multiplayerActorAccessor.Host is MultiplayerHost realTimeHost && realTimeHost.IsRealTimeCombatActive)
+                {
+                    realTimeHost.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.UseAbility, ability: networkAbilityUse);
+                    return;
+                }
+
                 if (_multiplayerActorAccessor.Current == null)
                 {
                     return;
@@ -1525,6 +1632,8 @@ namespace WOTRMultiplayer.Services
             }
         }
 
+        public bool ShouldShowLevelingUI() => _multiplayerActorAccessor.Current?.ShouldShowLevelingUI() ?? true;
+
         public bool CanMakeLevelingDecisions()
         {
             try
@@ -1909,6 +2018,18 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
+                if (_multiplayerActorAccessor.Host is MultiplayerHost realTimeHost && realTimeHost.IsRealTimeCombatActive)
+                {
+                    realTimeHost.RequestLocalRealTimePause(wantsPause: !isPaused);
+                    return false;
+                }
+
+                if (_multiplayerActorAccessor.Client.IsRealTimeCombatActive)
+                {
+                    _multiplayerActorAccessor.Client.RequestRealTimePause(wantsPause: !isPaused);
+                    return false;
+                }
+
                 if (_multiplayerActorAccessor.Current == null)
                 {
                     return true;
@@ -1970,6 +2091,12 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
+                if (_multiplayerActorAccessor.Host is MultiplayerHost realTimeHost && realTimeHost.IsRealTimeCombatActive)
+                {
+                    realTimeHost.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.Attack, attack: networkUnitAttack);
+                    return;
+                }
+
                 if (_multiplayerActorAccessor.Current == null)
                 {
                     return;
@@ -4057,6 +4184,21 @@ namespace WOTRMultiplayer.Services
             }
         }
 
+        public bool TryConsumeAuthoritativeRealTimeAIAction(string unitId, out NetworkAIAction action)
+        {
+            return _multiplayerActorAccessor.Client.TryConsumeAuthoritativeRealTimeAIAction(unitId, out action);
+        }
+
+        public void ReportRealTimeAIActionFault(string unitId, string actionId, string reason)
+        {
+            if (RealTimeNativeLoadLease.RecordFault(reason))
+            {
+                _logger.LogError("Native reconstruction rejected a client mutation. Unit={Unit}, Action={Action}, Reason={Reason}", unitId, actionId, reason);
+                return;
+            }
+            _multiplayerActorAccessor.Client.ReportRealTimeAIActionFault(unitId, actionId, reason);
+        }
+
         public void OnAreaLoaded()
         {
             try
@@ -4079,6 +4221,12 @@ namespace WOTRMultiplayer.Services
         {
             try
             {
+                if (_multiplayerActorAccessor.Host is MultiplayerHost realTimeHost && realTimeHost.IsRealTimeCombatActive)
+                {
+                    realTimeHost.PublishLocalRealTimeCombatCommand(RealTimeCommandKind.Move, movement: unitMoveTo);
+                    return;
+                }
+
                 if (_multiplayerActorAccessor.Current == null)
                 {
                     return;

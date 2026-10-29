@@ -32,6 +32,8 @@ using WOTRMultiplayer.Entities.Spells;
 using WOTRMultiplayer.Entities.Units;
 using WOTRMultiplayer.Entities.Units.Parts;
 using WOTRMultiplayer.Extensions;
+using WOTRMultiplayer.Services;
+using WOTRMultiplayer.Services.GameInteraction;
 
 namespace WOTRMultiplayer.Config.Mapping
 {
@@ -62,7 +64,7 @@ namespace WOTRMultiplayer.Config.Mapping
             CreateMap<UnitPartNegativeLevels.Data, NetworkUnitNegativeLevelsData>().ConstructUsing(Create)
                 .ForAllMembers(x => x.Ignore());
 
-            CreateMap<AreaEffectEntityData, NetworkAreaEffect>().ConstructUsing(x => Create(x))
+            CreateMap<AreaEffectEntityData, NetworkAreaEffect>().ConstructUsing((x, context) => Create(x, context))
                 .ForAllMembers(x => x.Ignore());
 
             CreateMap<SettlementState, NetworkKingdomSettlement>().ConstructUsing(x => Create(x))
@@ -338,7 +340,7 @@ namespace WOTRMultiplayer.Config.Mapping
             return kingdomSettlement;
         }
 
-        private NetworkAreaEffect Create(AreaEffectEntityData areaEffectEntityData)
+        private NetworkAreaEffect Create(AreaEffectEntityData areaEffectEntityData, ResolutionContext context)
         {
             if (areaEffectEntityData == null)
             {
@@ -348,8 +350,36 @@ namespace WOTRMultiplayer.Config.Mapping
             var areaEffect = new NetworkAreaEffect
             {
                 Id = areaEffectEntityData.UniqueId,
+                BlueprintId = areaEffectEntityData.Blueprint.AssetGuid.ToString(),
+                CasterUnitId = areaEffectEntityData.Context?.MaybeCaster?.UniqueId,
+                OwnerUnitId = areaEffectEntityData.Context?.MaybeOwner?.UniqueId,
+                SourceAbilityBlueprintId = areaEffectEntityData.Context?.SourceAbility?.AssetGuid.ToString(),
+                SceneName = areaEffectEntityData.HoldingState?.SceneName,
+                TargetUnitId = areaEffectEntityData.m_Target?.IsUnit == true
+                    ? areaEffectEntityData.m_Target.UnitRef.Id : null,
+                TargetPoint = areaEffectEntityData.m_Target != null && !areaEffectEntityData.m_Target.IsUnit
+                    ? areaEffectEntityData.m_Target.m_Point.ToNetworkVector3() : null,
+                TargetOrientation = areaEffectEntityData.m_Target?.m_Orientation,
+                IsAttachedToUnit = areaEffectEntityData.m_OnUnit,
+                CreationGameTimeTicks = areaEffectEntityData.m_CreationTime.Ticks,
+                DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
                 Name = areaEffectEntityData.Blueprint.name,
-                Position = areaEffectEntityData.m_Position.ToNetworkVector3(),
+                Orientation = RealTimePresentationRuntime.Enabled
+                    && (Main.Multiplayer?.IsRealTimeCombatActive == true
+                        || WOTRMultiplayer.Services.CombatSaving.CombatSaveActivation.Enabled && RealTimeCaptureScope.Active)
+                    && areaEffectEntityData.View != null
+                        ? areaEffectEntityData.View.transform.eulerAngles.y : areaEffectEntityData.m_Rotation,
+                ContextChain = RealTimePresentationRuntime.Enabled && RealTimeCaptureScope.Active
+                        ? RealTimeBuffContextCapture.Capture(areaEffectEntityData.Context, context.Mapper) : null,
+                // Attached zones move their view without refreshing m_Position.
+                // Native PreSave copies the view transform to these cached fields.
+                // Combat capture must compare that same effective transform in TB too.
+                Position = (RealTimePresentationRuntime.Enabled
+                    && (Main.Multiplayer?.IsRealTimeCombatActive == true
+                        || WOTRMultiplayer.Services.CombatSaving.CombatSaveActivation.Enabled && RealTimeCaptureScope.Active)
+                    && areaEffectEntityData.View != null
+                        ? areaEffectEntityData.View.transform.position
+                        : areaEffectEntityData.m_Position).ToNetworkVector3(),
                 UnitsInside = [.. areaEffectEntityData.m_UnitsInside.Select(x => x.Reference.UniqueId)],
                 Type = NetworkAreaEffectType.Common
             };
@@ -373,7 +403,7 @@ namespace WOTRMultiplayer.Config.Mapping
             var part = new NetworkUnitNegativeLevelsData
             {
                 Count = negativeLevels.Count,
-                Duration = negativeLevels.EndTime.HasValue ? buffBaseTime - negativeLevels.EndTime.Value : null,
+                Duration = negativeLevels.EndTime.HasValue ? negativeLevels.EndTime.Value - buffBaseTime : null,
                 EnergyDrainType = negativeLevels.Type,
                 SavingThrowType = negativeLevels.SavingThrowType
             };
@@ -404,11 +434,19 @@ namespace WOTRMultiplayer.Config.Mapping
                 IsHidden = buff.Hidden
             };
 
-            if (buff.Context.ParentContext is AbilityExecutionContext abilityContext)
+            if (RealTimePresentationRuntime.Enabled && RealTimeCaptureScope.Active)
+                networkBuff.ContextChain = WOTRMultiplayer.Services.GameInteraction.RealTimeBuffContextCapture.Capture(buff.Context, context.Mapper);
+
+            if (buff.Context?.ParentContext is AbilityExecutionContext abilityContext)
             {
-                networkBuff.SourceAbility = context.Mapper.Map<NetworkAbility>(abilityContext.Ability);
+                networkBuff.SourceAbility = WOTRMultiplayer.Services.GameInteraction.RealTimeBuffContextCapture
+                    .CaptureAbility(abilityContext, context.Mapper);
                 networkBuff.SourceAbilityParams = context.Mapper.Map<NetworkAbilityParams>(abilityContext.m_Params);
-                networkBuff.SourceAbilityCasterId = abilityContext.Ability?.Caster?.Unit.UniqueId;
+                // AbilityData.Caster is a transient runtime wrapper and can be
+                // rebuilt differently by a same-area native load. The mechanics
+                // context owns the canonical caster reference on both the host
+                // and client, including ordinary moving snapshots.
+                networkBuff.SourceAbilityCasterId = abilityContext.MaybeCaster?.UniqueId;
             }
 
             return networkBuff;
@@ -471,7 +509,9 @@ namespace WOTRMultiplayer.Config.Mapping
                 return null;
             }
 
-            var sourceAbility = GetSourceAbility(abilityData);
+            // Command replay may normalize converted spells; a captured context
+            // must retain the actual executing ability and its blueprint.
+            var sourceAbility = RealTimeCaptureScope.Active ? abilityData : GetSourceAbility(abilityData);
             var ability = new NetworkAbility
             {
                 Id = sourceAbility.UniqueId,

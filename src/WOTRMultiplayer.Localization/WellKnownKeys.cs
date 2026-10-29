@@ -383,6 +383,322 @@ public static class WellKnownKeys
     [Description("lobbyWindow")]
     public static class LobbyWindow
     {
+        [Description("realTime")]
+        public static class RealTime
+        {
+            [Description("combatStatus")]
+            public static class CombatStatus
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("pausePolicy")]
+            public static class PausePolicy
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("preferredMode")]
+            public static class PreferredMode
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("networkResponse")]
+            public static class NetworkResponse
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("modeRealTime")]
+            public static class ModeRealTime
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("turnBased")]
+            public static class TurnBased
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("synchronizing")]
+            public static class Synchronizing
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("repairing")]
+            public static class Repairing
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("fallingBack")]
+            public static class FallingBack
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("paused")]
+            public static class Paused
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("hostOnly")]
+            public static class HostOnly
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("consensusResume")]
+            public static class ConsensusResume
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("freeResume")]
+            public static class FreeResume
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("unknown")]
+            public static class Unknown
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("switchToRealTime")]
+            public static class SwitchToRealTime
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("switchToTurnBased")]
+            public static class SwitchToTurnBased
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("preferRealTime")]
+            public static class PreferRealTime
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("preferTurnBased")]
+            public static class PreferTurnBased
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("changePausePolicy")]
+            public static class ChangePausePolicy
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("repair")]
+            public static class Repair
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("manualSyncRequested")]
+            public static class ManualSyncRequested
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("manualSyncUnavailable")]
+            public static class ManualSyncUnavailable
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("manualSyncOutsideCombat")]
+            public static class ManualSyncOutsideCombat
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombat")]
+            public static class SaveCombat
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatLoadFailed")]
+            public static class SaveCombatLoadFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatReady")]
+            public static class SaveCombatReady
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatWorking")]
+            public static class SaveCombatWorking
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatSaved")]
+            public static class SaveCombatSaved
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatRecovering")]
+            public static class SaveCombatRecovering
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatBusy")]
+            public static class SaveCombatBusy
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatWaitAction")]
+            public static class SaveCombatWaitAction
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatWaitTurn")]
+            public static class SaveCombatWaitTurn
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatSync")]
+            public static class SaveCombatSync
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatTimeout")]
+            public static class SaveCombatTimeout
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatPeerRefused")]
+            public static class SaveCombatPeerRefused
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatSessionChanged")]
+            public static class SaveCombatSessionChanged
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatNativeRefused")]
+            public static class SaveCombatNativeRefused
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatTransition")]
+            public static class SaveCombatTransition
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatFailed")]
+            public static class SaveCombatFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveCombatLocked")]
+            public static class SaveCombatLocked
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("requestResume")]
+            public static class RequestResume
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("requestPause")]
+            public static class RequestPause
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryPreparing")]
+            public static class RecoveryPreparing
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryRebuilding")]
+            public static class RecoveryRebuilding
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryLoading")]
+            public static class RecoveryLoading
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryVerifying")]
+            public static class RecoveryVerifying
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryCommitted")]
+            public static class RecoveryCommitted
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryReconnecting")]
+            public static class RecoveryReconnecting
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("modeUnavailable")]
+            public static class ModeUnavailable
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("modeQueued")]
+            public static class ModeQueued
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryStopped")]
+            public static class RecoveryStopped
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("recoveryFailureCode")]
+            public static class RecoveryFailureCode
+            {
+                public static string Key { get; set; }
+            }
+        }
+
         [Description("server")]
         public static class Server
         {
@@ -517,6 +833,34 @@ public static class WellKnownKeys
                 public static class Title
                 {
                     public static string Key { get; set; }
+                }
+
+                [Description("compatibility")]
+                public static class Compatibility
+                {
+                    [Description("title")]
+                    public static class Title
+                    {
+                        public static string Key { get; set; }
+                    }
+
+                    [Description("gameVersion")]
+                    public static class GameVersion
+                    {
+                        public static string Key { get; set; }
+                    }
+
+                    [Description("protocolVersion")]
+                    public static class ProtocolVersion
+                    {
+                        public static string Key { get; set; }
+                    }
+
+                    [Description("buildFingerprint")]
+                    public static class BuildFingerprint
+                    {
+                        public static string Key { get; set; }
+                    }
                 }
 
                 [Description("DLCs")]
@@ -834,6 +1178,22 @@ public static class WellKnownKeys
             public static class Title
             {
                 public static string Key { get; set; }
+            }
+
+            [Description("regroupDistantPlayersOnCombatStart")]
+            public static class RegroupDistantPlayersOnCombatStart
+            {
+                [Description("title")]
+                public static class Title
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("tooltip")]
+                public static class Tooltip
+                {
+                    public static string Key { get; set; }
+                }
             }
 
             [Description("hideServerAddress")]
@@ -1213,6 +1573,42 @@ public static class WellKnownKeys
             {
                 public static string Key { get; set; }
             }
+
+            [Description("waitingForAgreement")]
+            public static class WaitingForAgreement
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("soloAfterDisconnect")]
+            public static class SoloAfterDisconnect
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("rejoinSync")]
+            public static class RejoinSync
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("rejoinWaiting")]
+            public static class RejoinWaiting
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("rejoinFailed")]
+            public static class RejoinFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("agreementChooseCharacter")]
+            public static class AgreementChooseCharacter
+            {
+                public static string Key { get; set; }
+            }
         }
 
         [Description("rolls")]
@@ -1454,6 +1850,118 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("finalSyncFailed")]
+            public static class FinalSyncFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveBlockedDuringSynchronization")]
+            public static class SaveBlockedDuringSynchronization
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("saveBlockedAfterDisconnect")]
+            public static class SaveBlockedAfterDisconnect
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("realTimeCommandRejected")]
+            public static class RealTimeCommandRejected
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("realTimeCommandRejection")]
+            public static class RealTimeCommandRejection
+            {
+                [Description("inactive")]
+                public static class Inactive
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("barrier")]
+                public static class Barrier
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("epoch")]
+                public static class Epoch
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("sequence")]
+                public static class Sequence
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("sender")]
+                public static class Sender
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("session")]
+                public static class Session
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("save")]
+                public static class Save
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("commandId")]
+                public static class CommandId
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("malformed")]
+                public static class Malformed
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("unknownUnit")]
+                public static class UnknownUnit
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("ownership")]
+                public static class Ownership
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("game")]
+                public static class Game
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("stateChanged")]
+                public static class StateChanged
+                {
+                    public static string Key { get; set; }
+                }
+
+                [Description("unknown")]
+                public static class Unknown
+                {
+                    public static string Key { get; set; }
+                }
+            }
+
             [Description("start")]
             public static class Start
             {
@@ -1539,6 +2047,12 @@ public static class WellKnownKeys
                     public static string Key { get; set; }
                 }
 
+                [Description("endSyncFailed")]
+                public static class EndSyncFailed
+                {
+                    public static string Key { get; set; }
+                }
+
                 [Description("clientOrderDesync")]
                 public static class ClientOrderDesync
                 {
@@ -1610,6 +2124,12 @@ public static class WellKnownKeys
 
             [Description("loading")]
             public static class Loading
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("eventDisplayFailed")]
+            public static class EventDisplayFailed
             {
                 public static string Key { get; set; }
             }

@@ -17,5 +17,7 @@ namespace WOTRMultiplayer.Entities.Combat
         public string MovementLimit { get; set; }
 
         public string AttackMode { get; set; }
+
+        public NetworkVector3 CasterPosition { get; set; }
     }
 }

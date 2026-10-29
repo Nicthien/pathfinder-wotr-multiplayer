@@ -76,6 +76,9 @@ namespace WOTRMultiplayer.Services.Settings
         [Description("miscellaneous")]
         public static class Miscellaneous
         {
+            [Description("regroup-distant-players-on-combat-start")]
+            public static WellKnownSettingKey<bool> RegroupDistantPlayersOnCombatStart { get; } = new(true);
+
             [Description("hide-server-address")]
             public static WellKnownSettingKey<bool> HideServerAddress { get; } = new(false);
 
@@ -93,7 +96,7 @@ namespace WOTRMultiplayer.Services.Settings
             public static WellKnownSettingKey<KeyBindingPair> Ping { get; } = new(new KeyBindingPair { GameModesGroup = Kingmaker.UI.KeyboardAccess.GameModesGroup.All, Binding1 = new KeyBindingData { IsShiftDown = true, Key = UnityEngine.KeyCode.T } });
 
             [Description("show-lobby")]
-            public static WellKnownSettingKey<KeyBindingPair> ShowLobby { get; } = new(new KeyBindingPair { GameModesGroup = Kingmaker.UI.KeyboardAccess.GameModesGroup.All, Binding1 = new KeyBindingData { Key = UnityEngine.KeyCode.F2 } });
+            public static WellKnownSettingKey<KeyBindingPair> ShowLobby { get; } = new(new KeyBindingPair { GameModesGroup = Kingmaker.UI.KeyboardAccess.GameModesGroup.All, Binding1 = new KeyBindingData { IsCtrlDown = true, IsShiftDown = true, Key = UnityEngine.KeyCode.F2 } });
 
             [Description("force-unpause")]
             public static WellKnownSettingKey<KeyBindingPair> ForceUnpause { get; } = new(new KeyBindingPair { GameModesGroup = Kingmaker.UI.KeyboardAccess.GameModesGroup.All, Binding1 = new KeyBindingData { IsCtrlDown = true, IsShiftDown = true, Key = UnityEngine.KeyCode.F12 } });
