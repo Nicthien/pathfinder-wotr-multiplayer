@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -62,7 +62,7 @@ namespace WOTRMultiplayer.Networking
         public async Task<T> SendAndWaitForAsync<T>(IAwaitableRequest message)
             where T : IAwaitableResponse
         {
-            var taskCompletion = new TaskCompletionSource<IAwaitableResponse>();
+            var taskCompletion = new TaskCompletionSource<IAwaitableResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             var timeoutTask = Task.Delay(_defaultAwaiterTimeout);
 
             var awaiterKey = message.GetKey();

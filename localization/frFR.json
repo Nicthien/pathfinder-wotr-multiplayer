@@ -99,7 +99,17 @@
         "recoveryFailureCode": "Code de diagnostic : {0}"
       },
       "server": { "title": "Serveur", "external": { "gameCode": { "title": "Code de partie" }, "state": { "connecting": "connexion", "gettingCode": "obtention du code" }, "errors": { "generic": "Erreur" } } },
-      "players": { "title": "Joueurs" }, "characters": { "title": "Personnages" },
+      "players": { "title": "Joueurs" },
+      "advancedControls": {
+        "title": "Contrôles avancés",
+        "items": {
+          "dialogs": { "title": "Dialogues" },
+          "globalMap": { "title": "Carte mondiale" },
+          "crusadeArmyCombat": { "title": "Combats de croisade" },
+          "vendorDeal": { "title": "Marchands" }
+        }
+      },
+      "characters": { "title": "Personnages" },
       "tooltips": {
         "contentDiscrepancy": {
           "title": "Différence de contenu — {0}",
@@ -112,7 +122,13 @@
           "DLCs": { "title": "Contenus téléchargeables", "reasons": { "missing": "Manquant", "extra": "Supplémentaire" } },
           "mods": { "title": "Mods", "reasons": { "missing": "Manquant", "extra": "Supplémentaire", "disabled": "Désactivé", "versionMismatch": "Versions différentes" } }
         },
-        "copyCode": { "title": "Copier" }, "players": { "color": { "header": "Couleur du joueur", "description": "Le choix de couleur sera disponible ultérieurement" } }
+        "copyCode": { "title": "Copier" }, "players": { "color": { "header": "Couleur du joueur" } },
+        "advancedControls": {
+          "title": {
+            "header": "Contrôles avancés",
+            "description": "Choisissez quel joueur contrôle chaque partie du jeu"
+          }
+        }
       }
     },
     "settings": {
@@ -188,11 +204,14 @@
         "completed": "{0} — niveau augmenté", "terminated": "{0} — montée de niveau interrompue",
         "classMismatch": "La classe {0} sélectionnée est introuvable.\nVérifiez que les DLC et les mods de gameplay sont identiques.",
         "archetypeMismatch": "L'archétype {0} sélectionné est introuvable.\nVérifiez que les DLC et les mods de gameplay sont identiques.",
+        "synchronizationFailed": "La progression du personnage n'a pas pu être synchronisée. La sauvegarde est bloquée. Revenez au menu principal et rechargez une sauvegarde sûre de l'hôte.",
+        "ownerChangeBlocked": "Terminez ou annulez la progression de ce personnage avant de changer son propriétaire.",
         "featureMismatch": "L'aptitude {0} sélectionnée est introuvable.\nVérifiez que les DLC et les mods de gameplay sont identiques."
       },
       "session": {
         "playerJoinedShort": "{0} a rejoint la partie", "playerJoinedFull": "{0} a rejoint la partie. Chargez une sauvegarde pour jouer ensemble.",
-        "playerLeft": "{0} a quitté la partie", "characterOwnerChanged": "{0} contrôle maintenant {1}", "loadingSave": "{0} a lancé le chargement d'une sauvegarde"
+        "playerLeft": "{0} a quitté la partie", "characterOwnerChanged": "{0} contrôle maintenant {1}",
+        "advancedControlChanged": "La fonction « {0} » est désormais contrôlée par {1}", "loadingSave": "{0} a lancé le chargement d'une sauvegarde"
       },
       "spellBook": {
         "noSpellSlotPermission": "Seul le propriétaire du personnage peut modifier ses sorts.", "memorizedSpell": "{1} a mémorisé {0}",

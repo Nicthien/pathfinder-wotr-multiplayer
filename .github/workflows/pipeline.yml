@@ -56,7 +56,7 @@ jobs:
       WOTR_PATH: ../../libs
       LOCALIZATION_PATH: ".\\localization"
       BUILD_PATH: ".\\src\\WOTRMultiplayer\\bin\\Release\\net481"
-      RELEASE_OUTPUT_PATH: ".\\__releases\\00_WOTRMultiplayer"
+      RELEASE_OUTPUT_PATH: ".\\__releases\\00_WOTRMultiplayerRTwP"
       REFS_OUTPUT_PATH: ".\\__refs"
       CURRENT_VERSION: ${{needs.get-version.outputs.releaseVersion}}
       ASSEMBLY_VERSION: ${{needs.get-version.outputs.assemblyVersion}}
@@ -73,7 +73,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.x
+          dotnet-version: 9.0.318
       - name: Checkout libs
         uses: actions/checkout@v4
         with:
@@ -236,7 +236,7 @@ jobs:
         run: |
           mkdir -p artifacts/__repack
           cd artifacts
-          zip -r "__repack/wotr-multiplayer-${{ env.CURRENT_VERSION }}.zip" 00_WOTRMultiplayer
+          zip -r "__repack/wotr-multiplayer-${{ env.CURRENT_VERSION }}.zip" 00_WOTRMultiplayerRTwP
       - name: Create draft release
         uses: softprops/action-gh-release@v3
         with:

@@ -110,6 +110,62 @@ namespace WOTRMultiplayer.UnitTests.Services
             finally { SceneEntitiesState.OnRemoved -= callback; }
         }
 
+        [TestCase("missing", false)]
+        [TestCase("missing", true)]
+        [TestCase("disposed", false)]
+        [TestCase("disposed", true)]
+        [TestCase("detached", false)]
+        [TestCase("detached", true)]
+        public void RemovalRecreatesOnlyTheProxyLostDuringNativeLoad(string stale, bool commit)
+        {
+            var service = new EntityService(); var scene = new SceneEntitiesState("room"); var area = Replica();
+            Register(service, scene, area);
+            var previous = area.Proxy;
+            if (stale == "missing")
+                ((System.Collections.IDictionary)HarmonyLib.AccessTools.Field(typeof(EntityService), "m_Entities")
+                    .GetValue(service)).Remove(area.UniqueId);
+            else if (stale == "disposed") previous.Dispose();
+            else previous.Entity = null;
+
+            using (var removal = RealTimeAreaReplicaStore.RemoveReplica(service, scene, area))
+            {
+                Assert.That(scene.AllEntityData, Is.Empty);
+                Assert.That(area.HoldingState, Is.Null);
+                Assert.That(area.Proxy, Is.Null);
+                if (commit) removal.Commit();
+            }
+
+            if (commit)
+            {
+                Assert.That(service.GetEntity("zone"), Is.Null);
+                Assert.That(previous.IsDisposed, Is.EqualTo(stale == "disposed"));
+            }
+            else
+            {
+                Assert.That(area.Proxy, Is.SameAs(previous));
+                Assert.That(area.Proxy.Entity, stale == "missing" ? Is.SameAs(area) : Is.Null);
+                Assert.That(service.GetEntity("zone"), Is.Null);
+                Assert.That(scene.AllEntityData.Single(), Is.SameAs(area));
+            }
+        }
+
+        [Test]
+        public void RemovalRejectsAProxyOwnedByAnotherEntityWithoutMutation()
+        {
+            var service = new EntityService(); var scene = new SceneEntitiesState("room"); var area = Replica();
+            Register(service, scene, area);
+            var proxy = area.Proxy;
+            var other = Replica("other");
+            proxy.Entity = other;
+
+            Assert.Throws<InvalidOperationException>(() => RealTimeAreaReplicaStore.RemoveReplica(service, scene, area));
+            Assert.That(proxy.Entity, Is.SameAs(other));
+            Assert.That(service.GetProxy("zone"), Is.SameAs(proxy));
+            Assert.That(area.Proxy, Is.SameAs(proxy));
+            Assert.That(area.HoldingState, Is.SameAs(scene));
+            Assert.That(scene.AllEntityData.Single(), Is.SameAs(area));
+        }
+
         [TestCase("ordinary")]
         [TestCase("scene")]
         [TestCase("duplicate")]

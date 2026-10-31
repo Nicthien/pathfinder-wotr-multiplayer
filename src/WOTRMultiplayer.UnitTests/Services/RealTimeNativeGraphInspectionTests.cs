@@ -8,6 +8,7 @@ using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.EntitySystem.Stats;
 using Kingmaker.UnitLogic;
+using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Buffs;
 using Kingmaker.UnitLogic.Commands;
 using Kingmaker.UnitLogic.Parts;
@@ -63,6 +64,19 @@ namespace WOTRMultiplayer.UnitTests.Services
             owner.Facts.List.Add(fact);
             return fact;
         }
+        private static Ability AbilityFact(EntityDataBase owner, string id)
+        {
+            var fact = Bare<Ability>();
+            Field(fact, "<UniqueId>k__BackingField", id);
+            Field(fact, "<Manager>k__BackingField", owner.Facts);
+            Field(fact, "<IsPostLoadExecuted>k__BackingField", true);
+            Field(fact, "Components", new List<EntityFactComponent>());
+            var blueprint = Bare<Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility>();
+            blueprint.AssetGuid = Kingmaker.Blueprints.BlueprintGuid.Parse("11111111111111111111111111111111");
+            Field(fact, "<Blueprint>k__BackingField", blueprint);
+            owner.Facts.List.Add(fact);
+            return fact;
+        }
         private static EntityFactComponent Component(Buff fact)
         {
             var component = Bare<TestComponent>();
@@ -80,6 +94,21 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
         private static void Require(UnitEntityData unit, AreaEffectEntityData area)
             => RealTimeNativeGraphInspection.RequireState(new[] { unit }, new[] { area }, () => true);
+
+        [Test]
+        public void CaptureAcceptsDistinctAbilityFactsSharingTheirNativeRuntimeId()
+        {
+            var unit = Unit(); var area = Area();
+            var first = AbilityFact(unit, "FA_712997505_1");
+            var second = AbilityFact(unit, first.UniqueId);
+
+            var topology = RealTimeNativeGraphInspection.CaptureState(
+                new[] { unit }, new[] { area }, () => true);
+
+            Assert.That(topology.Entities[0].Facts.Count, Is.EqualTo(2));
+            Assert.That(topology.Entities[0].Facts.Select(fact => fact.Id),
+                Is.EqualTo(new[] { first.UniqueId, second.UniqueId }));
+        }
 
         [Test]
         public void CapturePreservesNativeOrderAndDetectsACompletelyMissingComponent()

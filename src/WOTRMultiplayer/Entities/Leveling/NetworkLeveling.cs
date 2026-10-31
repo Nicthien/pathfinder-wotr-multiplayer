@@ -8,6 +8,10 @@ namespace WOTRMultiplayer.Entities.Leveling
 
         public NetworkLevelingType Type { get; set; }
 
+        public WOTRMultiplayer.Networking.Messages.Game.NetworkLevelingIdentity Identity { get; set; }
+        public bool IsForced { get; set; }
+        public bool AwaitingHostIdentity { get; set; }
+
         public HashSet<long> PlayerReadiness { get; set; } = [];
 
         public int PhaseIndex { get; set; }

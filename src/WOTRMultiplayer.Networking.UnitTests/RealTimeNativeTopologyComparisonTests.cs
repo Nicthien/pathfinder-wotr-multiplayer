@@ -60,6 +60,34 @@ namespace WOTRMultiplayer.Networking.UnitTests
             Assert.That(RealTimeNativeTopologyComparison.Difference(expected, actual), Is.Null);
         }
 
+        [Test]
+        public void DuplicateAbilityRuntimeIdsAreComparedBySemanticMultiplicity()
+        {
+            var expected = Source();
+            var facts = expected.Entities[0].Facts;
+            facts[0].RuntimeType = RealTimeNativeTopologyComparison.AbilityRuntimeType;
+            facts[1].RuntimeType = RealTimeNativeTopologyComparison.AbilityRuntimeType;
+            facts[1].Id = facts[0].Id;
+            facts[1].BlueprintId = facts[0].BlueprintId;
+            var actual = Serializer.DeepClone(expected);
+
+            Assert.DoesNotThrow(() => RealTimeNativeTopologyComparison.RequireValid(actual));
+            Assert.That(RealTimeNativeTopologyComparison.Difference(expected, actual), Is.Null);
+            actual.Entities[0].Facts.RemoveAt(1);
+            Assert.That(RealTimeNativeTopologyComparison.Difference(expected, actual), Does.Contain("facts-inventory"));
+        }
+
+        [Test]
+        public void DuplicateAbilityIdCannotCollideWithAnotherFactType()
+        {
+            var topology = Source();
+            var facts = topology.Entities[0].Facts;
+            facts[0].RuntimeType = RealTimeNativeTopologyComparison.AbilityRuntimeType;
+            facts[1].Id = facts[0].Id;
+
+            Assert.Throws<InvalidDataException>(() => RealTimeNativeTopologyComparison.RequireValid(topology));
+        }
+
         [TestCase("missing-entity")]
         [TestCase("extra-entity")]
         [TestCase("entity-id")]

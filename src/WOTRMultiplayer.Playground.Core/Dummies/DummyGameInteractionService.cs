@@ -29,6 +29,8 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyGameInteractionService : IGameInteractionService
     {
+        public bool IsWorldPaused => IsPaused;
+        public bool RequiresRealTimeMechanicalReconstruction() => false;
         public RemoteExecutionContext RemoteContext => null;
 
         public GameModeType CurrentGameMode => GameModeType.None;

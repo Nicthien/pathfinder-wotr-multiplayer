@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Linq;
@@ -129,6 +129,8 @@ namespace WOTRMultiplayer.Services.Random
             _logger.LogInformation("Seeded generators have been cleared. Lifetimes={Lifetimes}", lifetimesToRemove);
         }
 
+        private readonly object _uniqueIdLock = new();
+
         public string GenerateUniqueId(IdType idType, string gameId, string identifier)
         {
             try
@@ -136,22 +138,28 @@ namespace WOTRMultiplayer.Services.Random
                 var counter = _entityCounters.GetOrAdd(gameId ?? "main-menu", k => new IdCounters());
                 var fullIdentifier = idType + identifier;
                 var hashed = _hashService.Murmur3(fullIdentifier).ToString();
-
-                if (!counter.NameIdentifiers.TryGetValue(hashed, out uint nameCounter))
-                {
-                    nameCounter = 0;
-                }
-
                 var prefix = idType.GetAttributeOfType<DescriptionAttribute>()?.Description ?? idType.ToString();
-                string id;
-                do
-                {
-                    nameCounter += 1;
-                    id = $"{prefix}_{hashed}_{nameCounter}";
-                }
-                while (_gameInteractionService.GetEntity(id) != null);
 
-                counter.NameIdentifiers.AddOrUpdate(hashed, nameCounter, (key, existing) => nameCounter);
+                // Counter read-modify-write must be atomic: callers are currently on the
+                // main thread, but nothing enforces that and a concurrent caller would
+                // silently mint duplicate ids.
+                string id;
+                lock (_uniqueIdLock)
+                {
+                    if (!counter.NameIdentifiers.TryGetValue(hashed, out uint nameCounter))
+                    {
+                        nameCounter = 0;
+                    }
+
+                    do
+                    {
+                        nameCounter += 1;
+                        id = $"{prefix}_{hashed}_{nameCounter}";
+                    }
+                    while (_gameInteractionService.GetEntity(id) != null);
+
+                    counter.NameIdentifiers.AddOrUpdate(hashed, nameCounter, (key, existing) => nameCounter);
+                }
                 if (CombatSaving.CombatSaveActivation.Enabled && CombatSaving.CombatSaveCaptureScope.Active)
                     _logger.LogWarning("[CombatSave] Identifier generated while held. Type={Type}, Identifier={Identifier}, Id={Id}, Capture={Capture}, Stack={Stack}",
                         idType, identifier, id, CombatSaving.CombatSaveCaptureScope.Active, Environment.StackTrace);

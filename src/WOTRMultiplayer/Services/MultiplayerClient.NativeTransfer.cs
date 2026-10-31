@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
@@ -208,7 +209,10 @@ namespace WOTRMultiplayer.Services
             });
         }
 
-        private async void PauseNativeCheckpointReceive(NotifyRealTimeNativeCheckpoint prepare)
+         private void PauseNativeCheckpointReceive(NotifyRealTimeNativeCheckpoint prepare)
+            => SafeFireAndForget(() => PauseNativeCheckpointReceiveAsync(prepare));
+
+         private async Task PauseNativeCheckpointReceiveAsync(NotifyRealTimeNativeCheckpoint prepare)
         {
             _nativePausePending = true;
             try
@@ -244,7 +248,11 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void RunNativeCheckpointLoad(RealTimeNativeLoadOperation operation,
+         private void RunNativeCheckpointLoad(RealTimeNativeLoadOperation operation,
+            NotifyRealTimeNativeCheckpoint manifest, Func<bool> authorized)
+            => SafeFireAndForget(() => RunNativeCheckpointLoadAsync(operation, manifest, authorized));
+
+         private async Task RunNativeCheckpointLoadAsync(RealTimeNativeLoadOperation operation,
             NotifyRealTimeNativeCheckpoint manifest, Func<bool> authorized)
         {
             try
@@ -272,7 +280,11 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void VerifyNativeCheckpointReference(NotifyRealTimeNativeCheckpoint request,
+         private void VerifyNativeCheckpointReference(NotifyRealTimeNativeCheckpoint request,
+            NotifyRealTimeNativeCheckpoint manifest)
+            => SafeFireAndForget(() => VerifyNativeCheckpointReferenceAsync(request, manifest));
+
+         private async Task VerifyNativeCheckpointReferenceAsync(NotifyRealTimeNativeCheckpoint request,
             NotifyRealTimeNativeCheckpoint manifest)
         {
             bool Authorized()
@@ -314,7 +326,10 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void CommitNativeCheckpointReference(NotifyRealTimeNativeCheckpoint request, NotifyRealTimeNativeCheckpoint manifest)
+         private void CommitNativeCheckpointReference(NotifyRealTimeNativeCheckpoint request, NotifyRealTimeNativeCheckpoint manifest)
+            => SafeFireAndForget(() => CommitNativeCheckpointReferenceAsync(request, manifest));
+
+         private async Task CommitNativeCheckpointReferenceAsync(NotifyRealTimeNativeCheckpoint request, NotifyRealTimeNativeCheckpoint manifest)
         {
             _nativeCommitPending = true;
             var operation = _nativeLoadOperation;

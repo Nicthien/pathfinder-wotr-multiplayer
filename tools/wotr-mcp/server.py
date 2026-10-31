@@ -264,6 +264,23 @@ async def start_nearest_combat(instance: str = "host", enemy_id: str = "") -> di
 
 
 @server.tool()
+async def submit_move(unit_id: str, distance: float = 2.0) -> dict[str, Any]:
+    """Submit a normal client movement command in an isolated real-time combat."""
+    return await asyncio.to_thread(
+        _call, "client", "submit_move", {"unitId": unit_id, "distance": distance}, 30.0
+    )
+
+
+@server.tool()
+async def submit_attack(unit_id: str, enemy_id: str = "") -> dict[str, Any]:
+    """Submit a normal client attack command against the nearest or selected hostile."""
+    arguments = {"unitId": unit_id}
+    if enemy_id:
+        arguments["enemyId"] = enemy_id
+    return await asyncio.to_thread(_call, "client", "submit_attack", arguments, 30.0)
+
+
+@server.tool()
 async def compare_instances(position_tolerance: float = 0.75) -> dict[str, Any]:
     """Compare live host/client area, pause, combat and party state and report every divergence."""
     host, client = await asyncio.gather(get_state("host"), get_state("client"))
@@ -303,6 +320,14 @@ async def set_combat_mode(mode: str) -> dict[str, Any]:
 async def force_combat_sync() -> dict[str, Any]:
     """Ask the host to run the mod's normal forced combat synchronization workflow."""
     return await asyncio.to_thread(_call, "host", "force_sync", {}, 90.0)
+
+
+@server.tool()
+async def inject_hp_divergence(unit_id: str, hp: int) -> dict[str, Any]:
+    """Change one party unit's HP only on the isolated client to exercise recovery."""
+    return await asyncio.to_thread(
+        _call, "client", "inject_hp_divergence", {"unitId": unit_id, "hp": hp}, 30.0
+    )
 
 
 @server.tool()

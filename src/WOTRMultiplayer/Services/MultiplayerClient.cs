@@ -48,6 +48,7 @@ namespace WOTRMultiplayer.Services
     {
         private readonly INetworkClientConnection _networkClient;
         private readonly IMainThreadAccessor _mainThreadAccessor;
+        protected override IMainThreadAccessor MainThreadAccessor => _mainThreadAccessor;
         private readonly SemaphoreSlim _realTimeSnapshotGate = new(1, 1);
         private readonly SemaphoreSlim _turnEndSynchronizationGate = new(1, 1);
         private List<string> _excludedCombatUnits = new();
@@ -96,7 +97,7 @@ namespace WOTRMultiplayer.Services
             && Game.RealTimeCombat != null && (Game.RealTimeCombat.CombatEndPending
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable);
 
-        public bool IsSavingBlockedByCombatSync => _disconnectedDuringRealTimeCombat || _turnEndSynchronizationFailed
+        public bool IsSavingBlockedByCombatSync => IsSavingBlockedByLevelingSync || _disconnectedDuringRealTimeCombat || _turnEndSynchronizationFailed
             || WaitingForHostCombatEnd
             || IsActive && Game?.RealTimeCombat != null
                 && (Game.RealTimeCombat.BlocksSaving
@@ -481,6 +482,7 @@ namespace WOTRMultiplayer.Services
             {
                 var selectAnswer = new ClientDialogCueAnswerSelected
                 {
+                    VoteRoundId = Game.DialogState.VoteRoundId,
                     Dialog = Mapper.Map<Networking.Messages.Contracts.NetworkDialog>(networkDialog),
                     CueName = cueName,
                     AnswerName = answerName,
@@ -829,6 +831,7 @@ namespace WOTRMultiplayer.Services
 
         protected override void Send(object message)
         {
+            StampLevelingMessage(message);
             _networkClient.Broadcast(message);
         }
 
@@ -1103,7 +1106,10 @@ namespace WOTRMultiplayer.Services
             DialogInteraction.PlayUnableToSelectCueAnimation(message.AnswerName);
         }
 
-        private async void OnNotifyArmyCombatTurnSynchronizationRequired(long receivedFrom, NotifyArmyCombatTurnSynchronizationRequired message)
+         private void OnNotifyArmyCombatTurnSynchronizationRequired(long receivedFrom, NotifyArmyCombatTurnSynchronizationRequired message)
+            => SafeFireAndForget(() => OnNotifyArmyCombatTurnSynchronizationRequiredAsync(receivedFrom, message));
+
+         private async Task OnNotifyArmyCombatTurnSynchronizationRequiredAsync(long receivedFrom, NotifyArmyCombatTurnSynchronizationRequired message)
         {
             var units = Mapper.Map<List<NetworkUnit>>(message.Units);
 
@@ -1155,7 +1161,10 @@ namespace WOTRMultiplayer.Services
             GameInteraction.SetNewGameCampaign(campaign);
         }
 
-        private async void OnNotifyCombatInitiated(long receivedFrom, NotifyCombatInitiated message)
+         private void OnNotifyCombatInitiated(long receivedFrom, NotifyCombatInitiated message)
+            => SafeFireAndForget(() => OnNotifyCombatInitiatedAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatInitiatedAsync(long receivedFrom, NotifyCombatInitiated message)
         {
             SetPauseCooldown();
 
@@ -1189,7 +1198,10 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void OnNotifyCombatUnitsExcluded(long receivedFrom, NotifyCombatUnitsExcluded message)
+         private void OnNotifyCombatUnitsExcluded(long receivedFrom, NotifyCombatUnitsExcluded message)
+            => SafeFireAndForget(() => OnNotifyCombatUnitsExcludedAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatUnitsExcludedAsync(long receivedFrom, NotifyCombatUnitsExcluded message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || Game?.Combat == null) return;
             _excludedCombatUnits = message.Units.ToList();
@@ -1198,7 +1210,10 @@ namespace WOTRMultiplayer.Services
             Send(confirmation);
         }
 
-        private async void OnNotifyCombatDataDiscrepancyDetected(long receivedFrom, NotifyCombatDataDiscrepancyDetected message)
+         private void OnNotifyCombatDataDiscrepancyDetected(long receivedFrom, NotifyCombatDataDiscrepancyDetected message)
+            => SafeFireAndForget(() => OnNotifyCombatDataDiscrepancyDetectedAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatDataDiscrepancyDetectedAsync(long receivedFrom, NotifyCombatDataDiscrepancyDetected message)
         {
             var unavailableUnits = await CombatInteraction.EnsureUnitsInCombatAsync(message.Units);
             var confirmation = new NotifyCombatDataDiscrepancyConfirmed
@@ -1322,7 +1337,10 @@ namespace WOTRMultiplayer.Services
             GlobalMapInteraction.ChangeKingdomNavigation(navigation);
         }
 
-        private async void OnNotifyCombatTurnEndSynchronizationRequired(long receivedFrom, NotifyCombatTurnEndSynchronizationRequired message)
+         private void OnNotifyCombatTurnEndSynchronizationRequired(long receivedFrom, NotifyCombatTurnEndSynchronizationRequired message)
+            => SafeFireAndForget(() => OnNotifyCombatTurnEndSynchronizationRequiredAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatTurnEndSynchronizationRequiredAsync(long receivedFrom, NotifyCombatTurnEndSynchronizationRequired message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null
                 || message.SynchronizationSequence <= 0)
@@ -1437,7 +1455,10 @@ namespace WOTRMultiplayer.Services
             SetCombatTurnStage(NetworkCombatTurnStage.Ended);
         }
 
-        private async void OnNotifyRealTimeCombatSnapshot(long receivedFrom, NotifyRealTimeCombatSnapshot message)
+         private void OnNotifyRealTimeCombatSnapshot(long receivedFrom, NotifyRealTimeCombatSnapshot message)
+            => SafeFireAndForget(() => OnNotifyRealTimeCombatSnapshotAsync(receivedFrom, message));
+
+         private async Task OnNotifyRealTimeCombatSnapshotAsync(long receivedFrom, NotifyRealTimeCombatSnapshot message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null) return;
             await _realTimeSnapshotGate.WaitAsync();
@@ -1565,7 +1586,10 @@ namespace WOTRMultiplayer.Services
                     message.Epoch, message.Sequence, message.Key);
         }
 
-        private async void OnNotifyRealTimeUnitKilled(long receivedFrom, NotifyRealTimeUnitKilled message)
+         private void OnNotifyRealTimeUnitKilled(long receivedFrom, NotifyRealTimeUnitKilled message)
+            => SafeFireAndForget(() => OnNotifyRealTimeUnitKilledAsync(receivedFrom, message));
+
+         private async Task OnNotifyRealTimeUnitKilledAsync(long receivedFrom, NotifyRealTimeUnitKilled message)
         {
             if (RealTimePresentationRuntime.Enabled) return;
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null
@@ -1680,7 +1704,10 @@ namespace WOTRMultiplayer.Services
                     "presentation-sequence-gap");
         }
 
-        private async void OnNotifyRealTimeAuthoritativeEvent(long receivedFrom, NotifyRealTimeAuthoritativeEvent message)
+         private void OnNotifyRealTimeAuthoritativeEvent(long receivedFrom, NotifyRealTimeAuthoritativeEvent message)
+            => SafeFireAndForget(() => OnNotifyRealTimeAuthoritativeEventAsync(receivedFrom, message));
+
+         private async Task OnNotifyRealTimeAuthoritativeEventAsync(long receivedFrom, NotifyRealTimeAuthoritativeEvent message)
         {
             if (!RealTimePresentationRuntime.Enabled || receivedFrom != NetworkConstants.HostPlayerId
                 || message == null) return;
@@ -1740,7 +1767,10 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)
+         private void OnNotifyRealTimeCombatCommandAccepted(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)
+            => SafeFireAndForget(() => OnNotifyRealTimeCombatCommandAcceptedAsync(receivedFrom, message));
+
+         private async Task OnNotifyRealTimeCombatCommandAcceptedAsync(long receivedFrom, NotifyRealTimeCombatCommandAccepted message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || message == null) return;
             await _realTimeSnapshotGate.WaitAsync();
@@ -1918,7 +1948,10 @@ namespace WOTRMultiplayer.Services
             _ = ApplyOutsideCombatPreferenceAsync(() => IsActive);
         }
 
-        private async void OnNotifyRealTimeModeTransition(long receivedFrom, NotifyRealTimeModeTransition message)
+         private void OnNotifyRealTimeModeTransition(long receivedFrom, NotifyRealTimeModeTransition message)
+            => SafeFireAndForget(() => OnNotifyRealTimeModeTransitionAsync(receivedFrom, message));
+
+         private async Task OnNotifyRealTimeModeTransitionAsync(long receivedFrom, NotifyRealTimeModeTransition message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId) return;
             await _realTimeSnapshotGate.WaitAsync();
@@ -2244,7 +2277,10 @@ namespace WOTRMultiplayer.Services
             });
         }
 
-        private async void OnNotifyRealTimeRepair(long receivedFrom, NotifyRealTimeRepair message)
+         private void OnNotifyRealTimeRepair(long receivedFrom, NotifyRealTimeRepair message)
+            => SafeFireAndForget(() => OnNotifyRealTimeRepairAsync(receivedFrom, message));
+
+         private async Task OnNotifyRealTimeRepairAsync(long receivedFrom, NotifyRealTimeRepair message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId) return;
             await _realTimeSnapshotGate.WaitAsync();
@@ -2533,7 +2569,10 @@ namespace WOTRMultiplayer.Services
             });
         }
 
-        private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
+         private void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
+            => SafeFireAndForget(() => OnNotifyCombatLocalTurnEndedAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatLocalTurnEndedAsync(long receivedFrom, NotifyCombatLocalTurnEnded message)
         {
             if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: false))
             {
@@ -2555,7 +2594,10 @@ namespace WOTRMultiplayer.Services
             CombatInteraction.EndCombatTurn(message.UnitId);
         }
 
-        private async void OnNotifyAIActionExecuted(long receivedFrom, NotifyAIActionSelected message)
+         private void OnNotifyAIActionExecuted(long receivedFrom, NotifyAIActionSelected message)
+            => SafeFireAndForget(() => OnNotifyAIActionExecutedAsync(receivedFrom, message));
+
+         private async Task OnNotifyAIActionExecutedAsync(long receivedFrom, NotifyAIActionSelected message)
         {
             if (Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause
                 && receivedFrom != NetworkConstants.HostPlayerId)
@@ -2684,7 +2726,10 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void OnNotifyGlobalMapCommonPopupShown(long receivedFrom, NotifyGlobalMapCommonPopupShown message)
+         private void OnNotifyGlobalMapCommonPopupShown(long receivedFrom, NotifyGlobalMapCommonPopupShown message)
+            => SafeFireAndForget(() => OnNotifyGlobalMapCommonPopupShownAsync(receivedFrom, message));
+
+         private async Task OnNotifyGlobalMapCommonPopupShownAsync(long receivedFrom, NotifyGlobalMapCommonPopupShown message)
         {
             if (!GlobalMapPresentationScope.Matches(message.Scope))
             {
@@ -2951,7 +2996,10 @@ namespace WOTRMultiplayer.Services
             GlobalMapInteraction.StartCrusadeArmyBattleResultsManualCombat();
         }
 
-        private async void OnNotifyTacticalCombatInitialized(long receivedFrom, NotifyTacticalCombatInitialized tacticalCombatInitialized)
+         private void OnNotifyTacticalCombatInitialized(long receivedFrom, NotifyTacticalCombatInitialized tacticalCombatInitialized)
+            => SafeFireAndForget(() => OnNotifyTacticalCombatInitializedAsync(receivedFrom, tacticalCombatInitialized));
+
+         private async Task OnNotifyTacticalCombatInitializedAsync(long receivedFrom, NotifyTacticalCombatInitialized tacticalCombatInitialized)
         {
             await WaitWhileTrue(() => Game.ArmyCombat == null || !CombatInteraction.IsInCrusadeTacticalCombat(), "Crusade army combat has not been started yet");
 
@@ -3167,19 +3215,33 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyLevelingStarted(long playerId, NotifyLevelingStarted characterLevelingStarted)
         {
+            DispatchLevelingMessage(() => ApplyLevelingStarted(playerId, characterLevelingStarted));
+        }
+
+        private void ApplyLevelingStarted(long playerId, NotifyLevelingStarted characterLevelingStarted)
+        {
+            if (HasLevelingSynchronizationFailure) return;
+            var identity = characterLevelingStarted.Leveling;
+            if (playerId != NetworkConstants.HostPlayerId || !IsCurrentLevelingIdentity(identity)
+                || identity.UnitId != characterLevelingStarted.UnitId || identity.Type != characterLevelingStarted.Type)
+                return;
             if (!Enum.TryParse<NetworkLevelingType>(characterLevelingStarted.Type, true, out var levelingType))
             {
                 Logger.LogError("Invalid leveling type value. Value={Value}", characterLevelingStarted.Type);
                 return;
             }
 
-            if (DeferRemoteLeveling(playerId, characterLevelingStarted.UnitId, levelingType))
+            if (characterLevelingStarted.IsForced)
+            {
+                ReceiveForcedLeveling(identity, levelingType);
+                return;
+            }
+            if (DeferRemoteLeveling(identity.OwnerId, characterLevelingStarted.UnitId, levelingType, identity))
             {
                 return;
             }
 
-            InitiateLeveling(characterLevelingStarted.UnitId, levelingType);
-            LevelingInteraction.StartLeveling(Game.Leveling.UnitId, Game.Leveling.Type);
+            StartOrQueueOwnedLeveling(identity, levelingType);
         }
 
         private void OnNotifyInvalidCombatTurnStarted(long playerId, NotifyInvalidCombatTurnStarted message)
@@ -3264,7 +3326,10 @@ namespace WOTRMultiplayer.Services
         }
 
         private NetworkCombatTurn _startSyncAppliedTurn, _startSyncInFlightTurn, _startSyncFailedTurn;
-        private async void OnNotifyCombatTurnStartSynchronizationRequired(long playerId, NotifyCombatTurnStartSynchronizationRequired message)
+         private void OnNotifyCombatTurnStartSynchronizationRequired(long playerId, NotifyCombatTurnStartSynchronizationRequired message)
+            => SafeFireAndForget(() => OnNotifyCombatTurnStartSynchronizationRequiredAsync(playerId, message));
+
+         private async Task OnNotifyCombatTurnStartSynchronizationRequiredAsync(long playerId, NotifyCombatTurnStartSynchronizationRequired message)
         {
             var session = Game; var combat = Game?.Combat; var turn = combat?.Turn;
             bool Current() => IsActive && ReferenceEquals(Game, session) && ReferenceEquals(Game?.Combat, combat)
@@ -3311,7 +3376,10 @@ namespace WOTRMultiplayer.Services
             finally { if (ReferenceEquals(_startSyncInFlightTurn, turn)) _startSyncInFlightTurn = null; }
         }
 
-        private async void OnNotifyCombatTurnStarted(long playerId, NotifyCombatTurnStarted message)
+         private void OnNotifyCombatTurnStarted(long playerId, NotifyCombatTurnStarted message)
+            => SafeFireAndForget(() => OnNotifyCombatTurnStartedAsync(playerId, message));
+
+         private async Task OnNotifyCombatTurnStartedAsync(long playerId, NotifyCombatTurnStarted message)
         {
             if (Game.Combat?.Turn == null)
             {
@@ -3360,7 +3428,10 @@ namespace WOTRMultiplayer.Services
             TryAcknowledgeCombatSaveTurnAlignment();
         }
 
-        private async void OnNotifyCombatInitializationRequired(long playerId, NotifyCombatInitializationRequired message)
+         private void OnNotifyCombatInitializationRequired(long playerId, NotifyCombatInitializationRequired message)
+            => SafeFireAndForget(() => OnNotifyCombatInitializationRequiredAsync(playerId, message));
+
+         private async Task OnNotifyCombatInitializationRequiredAsync(long playerId, NotifyCombatInitializationRequired message)
         {
             if (playerId != NetworkConstants.HostPlayerId) return;
             await WaitWhileTrue(() => Game.Combat == null || Game.CurrentArea == null || Game.CurrentArea.Seed == 0, "Combat has not been started on client yet. Waiting until start");
@@ -3394,7 +3465,10 @@ namespace WOTRMultiplayer.Services
             Send(confirmation);
         }
 
-        private async void OnNotifyDialogStarted(long playerId, NotifyDialogStarted started)
+         private void OnNotifyDialogStarted(long playerId, NotifyDialogStarted started)
+            => SafeFireAndForget(() => OnNotifyDialogStartedAsync(playerId, started));
+
+         private async Task OnNotifyDialogStartedAsync(long playerId, NotifyDialogStarted started)
         {
             await WaitWhileTrue(() => Game.DialogState != null && Game.DialogState.IsSelectingAnswer, "Waiting until the previous answer has been processed");
 
@@ -3435,7 +3509,10 @@ namespace WOTRMultiplayer.Services
             DialogInteraction.SelectDialogAnswer(message.AnswerName, message.ManualUnitSelectionId);
         }
 
-        private async void OnNotifyDialogCueAnswerSuggested(long playerId, NotifyDialogCueAnswerSuggested message)
+         private void OnNotifyDialogCueAnswerSuggested(long playerId, NotifyDialogCueAnswerSuggested message)
+            => SafeFireAndForget(() => OnNotifyDialogCueAnswerSuggestedAsync(playerId, message));
+
+         private async Task OnNotifyDialogCueAnswerSuggestedAsync(long playerId, NotifyDialogCueAnswerSuggested message)
         {
             await WaitWhileTrue(() => Game.DialogState == null || !string.Equals(Game.DialogState.CurrentCueName, message.CueName, StringComparison.OrdinalIgnoreCase), "Waiting for dialog to initialize before suggesting cue answer");
 
@@ -3454,7 +3531,11 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void RetryDialogCueWitness(NetworkDialogState state,
+         private void RetryDialogCueWitness(NetworkDialogState state,
+            Networking.Messages.Contracts.NetworkDialog dialog, string cueName)
+            => SafeFireAndForget(() => RetryDialogCueWitnessAsync(state, dialog, cueName));
+
+         private async Task RetryDialogCueWitnessAsync(NetworkDialogState state,
             Networking.Messages.Contracts.NetworkDialog dialog, string cueName)
         {
             if (state == null || dialog == null || state.WitnessRetryScheduled) return;

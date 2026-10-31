@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,12 +13,13 @@ namespace WOTRMultiplayer.Networking.Consuming
     public class MessageConsumer : IMessageConsumer
     {
         private readonly ConcurrentDictionary<Type, SortedList<int, Action<long, object>>> _consumers = [];
-        private readonly BlockingCollection<NetworkMessageMetadata> _messages = [];
+        private BlockingCollection<NetworkMessageMetadata> _messages = [];
         private readonly object _actionLock = new();
         private readonly ILogger<MessageConsumer> _logger;
 
         private CancellationTokenSource _cancellation;
         private bool _isRunning = false;
+        private long _generation;
 
         public MessageConsumer(ILogger<MessageConsumer> logger)
         {
@@ -27,8 +28,12 @@ namespace WOTRMultiplayer.Networking.Consuming
 
         public void Reset()
         {
-            _cancellation?.Cancel();
-            _isRunning = false;
+            lock (_actionLock)
+            {
+                _cancellation?.Cancel();
+                _isRunning = false;
+                _messages = [];
+            }
         }
 
         public void On<TMessage>(Action<long, TMessage> messageHandler, MessageHandlerPriority messageHandlerPriority)
@@ -54,23 +59,26 @@ namespace WOTRMultiplayer.Networking.Consuming
                     if (!_isRunning)
                     {
                         _isRunning = true;
-                        _cancellation?.Dispose();
                         _cancellation = new CancellationTokenSource();
-                        Task.Run(Consume, _cancellation.Token);
+                        var cancellation = _cancellation;
+                        var messages = _messages;
+                        var generation = Interlocked.Increment(ref _generation);
+                        Task.Run(() => Consume(generation, cancellation, messages), cancellation.Token);
                     }
                 }
             }
         }
 
-        private void Consume()
+        private void Consume(long generation, CancellationTokenSource cancellation,
+            BlockingCollection<NetworkMessageMetadata> messages)
         {
             _logger.LogInformation("Message consumer has been started");
 
             try
             {
-                foreach (var metadata in _messages.GetConsumingEnumerable(_cancellation.Token))
+                foreach (var metadata in messages.GetConsumingEnumerable(cancellation.Token))
                 {
-                    if (_cancellation.Token.IsCancellationRequested)
+                    if (cancellation.Token.IsCancellationRequested)
                     {
                         continue;
                     }
@@ -106,11 +114,20 @@ namespace WOTRMultiplayer.Networking.Consuming
             }
             catch (Exception ex)
             {
+                // Logged instead of rethrown: nothing observes this task, and a dead
+                // consumer must not leave the pump stopped until the next Reset.
                 _logger.LogError(ex, "Unhandled consumer error");
-                throw;
             }
 
             _logger.LogWarning("Message consumer has been terminated");
+
+            lock (_actionLock)
+            {
+                if (generation == _generation)
+                {
+                    _isRunning = false;
+                }
+            }
         }
     }
 }

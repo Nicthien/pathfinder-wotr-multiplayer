@@ -18,6 +18,9 @@ namespace WOTRMultiplayer.Entities.Dialogs
 
         public bool IsSelectingAnswer { get; set; }
 
+        public long? SelectionRequestedBy { get; set; }
+        public string RequestedAnswerName { get; set; }
+
         public bool IsCueWitnessedByAll { get; set; }
 
         public bool HasSystemAnswer { get; set; }

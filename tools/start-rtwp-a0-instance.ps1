@@ -37,16 +37,19 @@ if (Test-Path -LiteralPath $stable) {
 if (-not (Test-Path -LiteralPath $experimental)) {
     throw "La variante expérimentale A0 n'est pas active. Préparez un essai contrôlé avant de la basculer."
 }
-$runningInstances = @(Get-CimInstance Win32_Process | Where-Object {
-    -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
-    [string]::Equals(
-        [IO.Path]::GetFullPath($_.ExecutablePath),
-        [IO.Path]::GetFullPath($executable),
-        [StringComparison]::OrdinalIgnoreCase)
-})
-if ($runningInstances.Count -gt 0) {
-    $runningPids = ($runningInstances | ForEach-Object ProcessId) -join ', '
-    throw "Une instance $Profile utilise déjà cette installation isolée (PID : $runningPids). Arrêtez-la avant d'en lancer une autre."
+# One concurrent instance per profile: the lock stores the game PID, so two
+# different profiles may share the game installation (WOTR_RTWP_TEST_PROFILE
+# isolates saves, logs and cache per profile). A lock whose process has exited
+# is stale and gets taken over.
+$lockPath = Join-Path $profilePath '.rtwp-instance.lock'
+if (Test-Path -LiteralPath $lockPath -PathType Leaf) {
+    $lockedPid = 0
+    if ([int]::TryParse((Get-Content -LiteralPath $lockPath -Raw), [ref]$lockedPid)) {
+        $alive = Get-Process -Id $lockedPid -ErrorAction SilentlyContinue
+        if ($null -ne $alive) {
+            throw "Le profil $Profile est déjà lancé (PID : $lockedPid). Arrêtez cette instance avant d'en démarrer une autre."
+        }
+    }
 }
 $logPath = Join-Path $profilePath 'Player.log'
 $previousProfile = $env:WOTR_RTWP_TEST_PROFILE
@@ -75,6 +78,7 @@ try {
     $process = Start-Process -FilePath $executable -WorkingDirectory $GamePath -ArgumentList @(
         '-logFile', "`"$logPath`"", '-screen-fullscreen', '0', '-screen-width', '1280', '-screen-height', '720'
     ) -PassThru
+    Set-Content -LiteralPath $lockPath -Value $process.Id -Encoding ASCII
 }
 finally {
     $env:WOTR_RTWP_TEST_PROFILE = $previousProfile

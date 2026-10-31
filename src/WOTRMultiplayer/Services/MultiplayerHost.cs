@@ -53,6 +53,7 @@ namespace WOTRMultiplayer.Services
         private readonly INetworkHostConnection _networkHost;
         private readonly IHashService _hashService;
         private readonly IMainThreadAccessor _mainThreadAccessor;
+        protected override IMainThreadAccessor MainThreadAccessor => _mainThreadAccessor;
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), ulong> _realTimeSnapshotHashes = new();
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), DateTime> _realTimeSnapshotSentAt = new();
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
@@ -165,7 +166,7 @@ namespace WOTRMultiplayer.Services
             && Game.RealTimeCombat != null && (_rejoin != null || _waitingForRealTimePeer || Game.RealTimeCombat.CombatEndPending
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable);
 
-        public bool IsSavingBlockedByCombatSync => IsActive && (_turnEndSynchronizationFailed
+        public bool IsSavingBlockedByCombatSync => IsSavingBlockedByLevelingSync || IsActive && (_turnEndSynchronizationFailed
             || Game?.RealTimeCombat != null && (Game.RealTimeCombat.BlocksSaving
                 || Game.Combat?.Stage == NetworkCombatStage.Running
                     && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause));
@@ -976,6 +977,15 @@ namespace WOTRMultiplayer.Services
                     return;
                 }
 
+                if (IsLevelingOwnershipLocked(actualCharacter.UnitId))
+                {
+                    Logger.LogWarning("Character ownership change blocked while progression synchronization is pending. UnitId={UnitId}", actualCharacter.UnitId);
+                    PlayerNotification.ShowWarningNotification(HasLevelingSynchronizationFailure
+                        ? WellKnownKeys.GameNotifications.Leveling.SynchronizationFailed.Key
+                        : WellKnownKeys.GameNotifications.Leveling.OwnerChangeBlocked.Key);
+                    return;
+                }
+
                 actualCharacter.Owner = actualPlayer;
                 Logger.LogInformation("New character owner. CharacterName={CharacterName}, PlayerId={PlayerId}", actualCharacter.Name, actualPlayer.Id);
 
@@ -1121,6 +1131,8 @@ namespace WOTRMultiplayer.Services
             {
                 Game.DialogState.AnswerSuggestions.Clear();
                 Game.DialogState.PendingVoteAnswer = null;
+                Game.DialogState.SelectionRequestedBy = null;
+                Game.DialogState.RequestedAnswerName = null;
                 Game.DialogState.VoteCommitted = false;
                 Game.DialogState.VoteRequiresCharacterSelection = false;
                 Game.DialogState.IsSelectingAnswer = false;
@@ -1164,6 +1176,8 @@ namespace WOTRMultiplayer.Services
                 }
                 else
                 {
+                    if (dialogState.PendingVoteAnswer?.AnswerName == answerName)
+                        manualUnitSelectionId ??= dialogState.PendingVoteAnswer.ManualUnitSelectionId;
                     dialogState.PendingVoteAnswer = new NetworkDialogAnswer
                     {
                         AnswerName = answerName, CueName = cueName, ManualUnitSelectionId = manualUnitSelectionId
@@ -1190,15 +1204,21 @@ namespace WOTRMultiplayer.Services
                 Game.DialogState.IsSelectingAnswer = false;
                 Game.DialogState.IsCueWitnessedByAll = false;
 
-                return true;
+                return false;
             }
 
-            if (!HasControlOverFeature(NetworkPlayerControlledFeature.Dialogs))
+            var remoteController = dialogState.SelectionRequestedBy;
+            var remoteAuthorized = remoteController.HasValue
+                && dialogState.RequestedAnswerName == answerName
+                && Game.FeatureControllers.TryGetValue(NetworkPlayerControlledFeature.Dialogs, out var controller)
+                && controller == remoteController.Value && GetSyncedPlayers().Any(player => player.Id == controller);
+            if (!HasControlOverFeature(NetworkPlayerControlledFeature.Dialogs) && !remoteAuthorized)
             {
                 Logger.LogInformation("Making cue answer suggestion due to lack of dialog control. DialogId={DialogId}, DialogName={DialogName}, CueName={CueName} Answer={Answer}, IsExitAnswer={IsExitAnswer}, ManualUnitSelectionId={ManualUnitSelectionId}",
                     networkDialog.Id, networkDialog.Name, cueName, answerName, isExitAnswer, manualUnitSelectionId);
 
                 MakeCueAnswerSuggestion(cueName, answerName);
+                dialogState.IsSelectingAnswer = false;
                 return false;
             }
 
@@ -1210,6 +1230,7 @@ namespace WOTRMultiplayer.Services
             }
 
             dialogState.VoteCommitted = true;
+            dialogState.SelectionRequestedBy = null;
 
             // The game performs its dialog stat check later, so the answer
             // is sent immediately only when it closes the dialog.
@@ -1626,6 +1647,7 @@ namespace WOTRMultiplayer.Services
         {
             lock (ActionLock)
             {
+                if (HasLevelingSynchronizationFailure) return false;
                 if (!CanControlLeveling(Game.LocalPlayerId, unitId, levelingType))
                 {
                     Logger.LogInformation("[LevelingOwnerUI] Request ignored: character belongs to another connected player. UnitId={UnitId}", unitId);
@@ -2441,11 +2463,13 @@ namespace WOTRMultiplayer.Services
 
         protected override void Send(object message)
         {
+            StampLevelingMessage(message);
             _networkHost.Broadcast(message);
         }
 
         protected override void Send(long playerId, object message)
         {
+            StampLevelingMessage(message);
             _networkHost.Send(playerId, message);
         }
 
@@ -2605,27 +2629,44 @@ namespace WOTRMultiplayer.Services
 
         private void OnClientDialogCueAnswerSelected(long receivedFrom, ClientDialogCueAnswerSelected message)
         {
-            var remoteDialog = Mapper.Map<NetworkDialog>(message.Dialog);
-            if (!IsOnSameDialogState(Game.DialogState, remoteDialog, message.CueName) || Game.DialogState.IsSelectingAnswer)
+            if (message == null) return;
+            var session = Game;
+            var state = Game?.DialogState;
+            _mainThreadAccessor.Post(() =>
             {
-                return;
-            }
-
-            if (TrySelectDialogCueAnswer(Game.DialogState.Dialog, Game.DialogState.CurrentCueName, message.AnswerName, message.IsExitAnswer, message.ManualUnitSelectionId))
-            {
-                Game.DialogState.IsSelectingAnswer = true;
-                SendSelectedAnswer();
-                DialogInteraction.SelectDialogAnswer(message.AnswerName, message.ManualUnitSelectionId);
-                return;
-            }
-
-            var denied = new NotifyDialogCueAnswerSelectionDenied
-            {
-                Dialog = message.Dialog,
-                AnswerName = message.AnswerName,
-                CueName = message.CueName
-            };
-            Send(receivedFrom, denied);
+                if (!ReferenceEquals(Game, session) || !ReferenceEquals(Game?.DialogState, state) || state == null)
+                    return;
+                var authorized = Game.FeatureControllers.TryGetValue(NetworkPlayerControlledFeature.Dialogs, out var controller)
+                    && controller == receivedFrom && GetSyncedPlayers().Any(player => player.Id == receivedFrom);
+                if (!authorized || !IsOnSameDialogState(state, Mapper.Map<NetworkDialog>(message.Dialog), message.CueName)
+                    || message.VoteRoundId != state.VoteRoundId || state.IsSelectingAnswer || state.VoteCommitted
+                    || string.IsNullOrWhiteSpace(message.AnswerName) || GetPlayersWhoHaveNotSeenCueYet(message.CueName).Count > 0)
+                {
+                    Send(receivedFrom, new NotifyDialogCueAnswerSelectionDenied
+                        { Dialog = message.Dialog, AnswerName = message.AnswerName, CueName = message.CueName });
+                    return;
+                }
+                if (!state.HasSystemAnswer)
+                {
+                    state.SelectionRequestedBy = receivedFrom;
+                    state.RequestedAnswerName = message.AnswerName;
+                    state.PendingVoteAnswer = new NetworkDialogAnswer
+                        { CueName = message.CueName, AnswerName = message.AnswerName, ManualUnitSelectionId = message.ManualUnitSelectionId };
+                    UpdateCueAnswerSuggestions(receivedFrom, message.CueName, message.AnswerName);
+                    if (!HasUnanimousDialogVote(message.AnswerName)) return;
+                }
+                state.PendingVoteAnswer = new NetworkDialogAnswer
+                    { CueName = message.CueName, AnswerName = message.AnswerName, ManualUnitSelectionId = message.ManualUnitSelectionId };
+                state.SelectionRequestedBy = receivedFrom;
+                state.RequestedAnswerName = message.AnswerName;
+                state.IsSelectingAnswer = true;
+                // The normal host prefix validates and prepares the answer. Publication
+                // follows host execution (or its exit path), never this request receipt.
+                DialogInteraction.SelectDialogAnswer(message.AnswerName, message.ManualUnitSelectionId,
+                    () => ReferenceEquals(Game, session) && ReferenceEquals(Game?.DialogState, state)
+                        && state.CurrentCueName == message.CueName && state.VoteRoundId == message.VoteRoundId
+                        && state.SelectionRequestedBy == receivedFrom);
+            });
         }
 
         private void OnClientArmyCombatTurnSynchronized(long receivedFrom, ClientArmyCombatTurnSynchronized message)
@@ -2639,7 +2680,10 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void OnClientInvalidUnitTurnStartRequested(long receivedFrom, ClientInvalidUnitTurnStartRequested message)
+         private void OnClientInvalidUnitTurnStartRequested(long receivedFrom, ClientInvalidUnitTurnStartRequested message)
+            => SafeFireAndForget(() => OnClientInvalidUnitTurnStartRequestedAsync(receivedFrom, message));
+
+         private async Task OnClientInvalidUnitTurnStartRequestedAsync(long receivedFrom, ClientInvalidUnitTurnStartRequested message)
         {
             var player = GetPlayer(receivedFrom);
             if (player == null)
@@ -2663,7 +2707,10 @@ namespace WOTRMultiplayer.Services
             await CombatInteraction.KillUnitAndResetTurnAsync(player, message.UnitId);
         }
 
-        private async void OnNotifyCombatInitiated(long receivedFrom, NotifyCombatInitiated message)
+         private void OnNotifyCombatInitiated(long receivedFrom, NotifyCombatInitiated message)
+            => SafeFireAndForget(() => OnNotifyCombatInitiatedAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatInitiatedAsync(long receivedFrom, NotifyCombatInitiated message)
         {
             SetPauseCooldown();
 
@@ -3731,7 +3778,10 @@ namespace WOTRMultiplayer.Services
             return true;
         }
 
-        private async void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
+         private void OnNotifyCombatLocalTurnEnded(long receivedFrom, NotifyCombatLocalTurnEnded message)
+            => SafeFireAndForget(() => OnNotifyCombatLocalTurnEndedAsync(receivedFrom, message));
+
+         private async Task OnNotifyCombatLocalTurnEndedAsync(long receivedFrom, NotifyCombatLocalTurnEnded message)
         {
             if (!CombatTurnMessageGate.IsCurrentEndMessage(Game?.Combat?.Turn?.UnitId, message.UnitId, receivedFrom, message.PlayerId, validateSender: true))
             {
@@ -3854,6 +3904,7 @@ namespace WOTRMultiplayer.Services
             var levelingType = Mapper.Map<NetworkLevelingType>(message.Type);
             lock (ActionLock)
             {
+                if (HasLevelingSynchronizationFailure) return;
                 if (!CanControlLeveling(playerId, message.UnitId, levelingType))
                 {
                     Logger.LogWarning("[LevelingOwnerUI] Unauthorized leveling request rejected. PlayerId={PlayerId}, UnitId={UnitId}", playerId, message.UnitId);
@@ -3878,7 +3929,10 @@ namespace WOTRMultiplayer.Services
             }
         }
 
-        private async void OnRandomEncounterContextRequest(long receivedFrom, RandomEncounterContextRequest request)
+         private void OnRandomEncounterContextRequest(long receivedFrom, RandomEncounterContextRequest request)
+            => SafeFireAndForget(() => OnRandomEncounterContextRequestAsync(receivedFrom, request));
+
+         private async Task OnRandomEncounterContextRequestAsync(long receivedFrom, RandomEncounterContextRequest request)
         {
             var randomEncounterIndex = request.SleepPhase - 1;
             var timeout = Task.Delay(request.Timeout);
@@ -3978,7 +4032,10 @@ namespace WOTRMultiplayer.Services
             Game.Combat.PlayersFinishedStartupSequence.TryAdd(playerId, true);
         }
 
-        private async void OnClientDialogStartRequested(long playerId, ClientDialogStartRequested message)
+         private void OnClientDialogStartRequested(long playerId, ClientDialogStartRequested message)
+            => SafeFireAndForget(() => OnClientDialogStartRequestedAsync(playerId, message));
+
+         private async Task OnClientDialogStartRequestedAsync(long playerId, ClientDialogStartRequested message)
         {
             var dialog = Mapper.Map<NetworkDialog>(message.Dialog);
             var hasBeenStarted = await DialogInteraction.StartDialogAsync(dialog);
@@ -4525,7 +4582,7 @@ namespace WOTRMultiplayer.Services
             if (!Game.DialogState.CueViews.TryGetValue(cueName ?? string.Empty, out var cueViews))
             {
                 Logger.LogWarning("Specified cue doesn't exist in the views history. CueName={CueName}", cueName);
-                return [];
+                return GetSyncedPlayers();
             }
 
             var players = GetSyncedPlayers().Where(p => !cueViews.Contains(p.Id)).ToList();
@@ -4692,7 +4749,9 @@ namespace WOTRMultiplayer.Services
             var message = new NotifyLevelingStarted
             {
                 UnitId = unitId,
-                Type = type.ToString()
+                Type = type.ToString(),
+                IsForced = Game.Leveling?.IsForced == true && Game.Leveling.UnitId == unitId && Game.Leveling.Type == type,
+                Leveling = GetLevelingIdentityForStart(unitId, type)
             };
             if (playerId.HasValue)
             {

@@ -4,6 +4,9 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 {
     public interface ILevelingInteractionService
     {
+        System.IDisposable EnterReplayScope(System.Func<bool> authorized);
+        System.IDisposable EnterReplayScope(System.Func<bool> authorized, System.Action<System.Exception> onFailure);
+
         bool IsLevelingUIReady { get; }
 
         bool IsBackgroundLevelingReady { get; }

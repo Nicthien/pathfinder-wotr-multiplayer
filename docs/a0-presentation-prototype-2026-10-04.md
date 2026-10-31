@@ -86,7 +86,7 @@ Deux profils vides ont été préparés sous `local-artifacts\runtime-profiles\h
 
 Un contrôle de démarrage sans sauvegarde a montré que deux processus peuvent charger simultanément la variante 0.4.16.2 et `WOTR_AIVO` avec des `Player.log` et dossiers de sauvegardes distincts. Il a aussi révélé une `Sharing violation` sur `GameLogFull.txt`, que le jeu ouvre encore dans son dossier global sous `AppData`. Ce contrôle a été interrompu à la demande de Nicolas pendant la génération de voix ; il ne valide ni le menu, ni le réseau, ni un combat. Aucun nouveau lancement ne sera effectué sans accord explicite.
 
-**Travail restant avant l'essai A0 :** isoler ou sérialiser le journal global sans modifier le projet de doublage, puis placer explicitement une copie de sauvegarde dédiée. Le test moteur devra être repris seulement lorsque la production de voix sera terminée et avec l'accord explicite de Nicolas.
+**Travail restant avant l'essai A0 :** ~~isoler ou sérialiser le journal global sans modifier le projet de doublage~~ fait : en compilation prototype, le bootstrap redirige `BuildModeUtility.GetLogsDir()` vers `<profil>\Logs`, donc chaque instance écrit son `GameLogFull.txt` dans son propre profil ; reste à placer explicitement une copie de sauvegarde dédiée. Le test moteur devra être repris seulement lorsque la production de voix sera terminée et avec l'accord explicite de Nicolas.
 
 ## Prochaine porte de validation
 

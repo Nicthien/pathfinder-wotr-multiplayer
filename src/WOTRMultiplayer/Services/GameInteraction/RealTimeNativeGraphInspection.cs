@@ -148,13 +148,26 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     || entity.Facts.List == null || entity.Parts == null || !ReferenceEquals(entity.Parts.Owner, entity)
                     || Parts.GetValue(entity.Parts) is not IList<EntityPart> parts)
                     throw Invalid(id, "manager-owner-or-storage");
-                var factIds = new HashSet<string>(StringComparer.Ordinal);
+                var factIds = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (var fact in entity.Facts.List)
                 {
                     Node(fact, id, "fact");
-                    if (fact.IsDisposed || !fact.IsPostLoadExecuted || !ReferenceEquals(fact.Manager, entity.Facts)
-                        || string.IsNullOrWhiteSpace(fact.UniqueId) || !factIds.Add(fact.UniqueId) || fact.Components == null)
-                        throw Invalid(id, "fact-owner-lifecycle-or-id");
+                    var runtimeType = fact.GetType().FullName;
+                    if (fact.IsDisposed)
+                        throw Invalid(id, $"fact-disposed:{runtimeType}:{fact.UniqueId}");
+                    if (!fact.IsPostLoadExecuted)
+                        throw Invalid(id, $"fact-postload:{runtimeType}:{fact.UniqueId}");
+                    if (!ReferenceEquals(fact.Manager, entity.Facts))
+                        throw Invalid(id, $"fact-owner:{runtimeType}:{fact.UniqueId}");
+                    if (string.IsNullOrWhiteSpace(fact.UniqueId))
+                        throw Invalid(id, $"fact-id:{runtimeType}");
+                    if (factIds.TryGetValue(fact.UniqueId, out var previousRuntimeType)
+                        && (previousRuntimeType != runtimeType
+                            || !RealTimeNativeTopologyComparison.AllowsDuplicateFactIds(runtimeType)))
+                        throw Invalid(id, $"fact-duplicate-id:{runtimeType}:{fact.UniqueId}");
+                    factIds[fact.UniqueId] = runtimeType;
+                    if (fact.Components == null)
+                        throw Invalid(id, $"fact-components:{fact.GetType().FullName}:{fact.UniqueId}");
                     foreach (var component in fact.Components)
                     {
                         Node(component, id, "component");

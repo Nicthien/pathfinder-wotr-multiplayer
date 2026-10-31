@@ -414,6 +414,8 @@
                 "terminated": "{0} - leveling has been terminated",
                 "classMismatch": "Selected {0} class is missing.\nMake sure game content (DLCs/Mods) is the same",
                 "archetypeMismatch": "Selected {0} archetype is missing.\nMake sure game content (DLCs/Mods) is the same",
+                "synchronizationFailed": "Character progression could not be synchronized. Saving is blocked. Return to the main menu and reload a safe host save.",
+                "ownerChangeBlocked": "Finish or cancel this character's progression before changing its owner.",
                 "featureMismatch": "Selected {0} feature is missing.\nMake sure game content (DLCs/Mods) is the same"
             },
             "session": {

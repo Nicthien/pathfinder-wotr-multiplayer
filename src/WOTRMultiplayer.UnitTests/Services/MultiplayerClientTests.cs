@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using AutoMapper;
 using System.Threading.Tasks;
 using System.Threading;
@@ -27,6 +27,30 @@ namespace WOTRMultiplayer.UnitTests.Services
     [TestFixture]
     public partial class MultiplayerClientTests
     {
+        private NetworkGame _identityGame;
+        private readonly System.Collections.Generic.Dictionary<string, NetworkLevelingIdentity> _identities = new();
+
+        private NetworkLevelingIdentity TestLeveling(string unitId, NetworkLevelingType type = NetworkLevelingType.Leveling)
+        {
+            if (!ReferenceEquals(_identityGame, _multiplayerClient.Game))
+            {
+                _identityGame = _multiplayerClient.Game;
+                _identities.Clear();
+            }
+            var key = unitId + ":" + type;
+            if (!_identities.TryGetValue(key, out var identity))
+                _identities[key] = identity = new NetworkLevelingIdentity
+                {
+                    Id = Guid.NewGuid().ToString("N"), UnitId = unitId, Type = type.ToString(),
+                    SessionId = _identityGame.Id, LoadedSaveSeed = _identityGame.LoadedSaveSeed,
+                    OwnerId = _identityGame.Characters.Find(character => character.UnitId == unitId)?.Owner?.Id ?? -1
+                };
+            return identity;
+        }
+
+        private NotifyLevelingStarted LevelingStart(string unitId, NetworkLevelingType type)
+            => new() { UnitId = unitId, Type = type.ToString(), Leveling = TestLeveling(unitId, type) };
+
         private MultiplayerClient _multiplayerClient;
 
         private ILogger<MultiplayerClient> _logger;
@@ -354,6 +378,9 @@ namespace WOTRMultiplayer.UnitTests.Services
             Fake.GetFakeManager(_networkClient).AddRuleFirst(new NetworkReceiverFakeRule<INetworkConnection>());
 
             _valueGenerator = A.Fake<IValueGenerator>();
+            _mainThreadAccessor = A.Fake<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>();
+            A.CallTo(() => _mainThreadAccessor.Post(A<Action>._))
+                .Invokes((Action action) => action());
 
             _multiplayerClient = new MultiplayerClient(
                 _logger,
@@ -368,7 +395,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 _fileSystemService,
                 _networkClient,
                 _valueGenerator,
-                _mapper, _mainThreadAccessor = A.Fake<WOTRMultiplayer.Abstractions.Unity.IMainThreadAccessor>());
+                _mapper, _mainThreadAccessor);
         }
 
         [Test]
@@ -384,11 +411,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient);
 
-            handler(-1, new NotifyLevelingStarted
-            {
-                UnitId = "host-unit",
-                Type = NetworkLevelingType.Leveling.ToString()
-            });
+            handler(-1, LevelingStart("host-unit", NetworkLevelingType.Leveling));
 
             Assert.That(_multiplayerClient.Game.Leveling, Is.Null);
             A.CallTo(() => _levelingInteractionService.StartLeveling(A<string>._, A<NetworkLevelingType>._))
@@ -408,11 +431,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             };
             var handler = FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient);
 
-            handler(-1, new NotifyLevelingStarted
-            {
-                UnitId = "client-unit",
-                Type = NetworkLevelingType.Leveling.ToString()
-            });
+            handler(-1, LevelingStart("client-unit", NetworkLevelingType.Leveling));
 
             Assert.That(_multiplayerClient.Game.Leveling?.UnitId, Is.EqualTo("client-unit"));
             A.CallTo(() => _levelingInteractionService.StartLeveling("client-unit", NetworkLevelingType.Leveling))
@@ -439,15 +458,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             });
 
             FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient)(-1,
-                new NotifyLevelingStarted
-                {
-                    UnitId = "host-unit",
-                    Type = NetworkLevelingType.Leveling.ToString()
-                });
+                LevelingStart("host-unit", NetworkLevelingType.Leveling));
             FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
-                new NotifyLevelingNameChanged { Name = "RemoteName" });
+                new NotifyLevelingNameChanged { Name = "RemoteName", Leveling = TestLeveling("host-unit") });
             FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
-                new NotifyLevelingCompleted());
+                new NotifyLevelingCompleted { Leveling = TestLeveling("host-unit") });
 
             Assert.That(replayCompleted.Wait(TimeSpan.FromSeconds(3)), Is.True);
             A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling(
@@ -456,8 +471,9 @@ namespace WOTRMultiplayer.UnitTests.Services
                 "host-unit", NetworkLevelingType.Leveling)).MustNotHaveHappened();
         }
 
-        [Test]
-        public void SimultaneousOwnedLevelUps_QueueAndReplayTheRemoteResultAfterLocalCompletion()
+        [TestCase(NetworkLevelingType.Leveling)]
+        [TestCase(NetworkLevelingType.MythicLeveling)]
+        public void SimultaneousOwnedLevelUps_QueueAndReplayTheRemoteResultAfterLocalCompletion(NetworkLevelingType localType)
         {
             var host = new NetworkPlayer(-1) { IsHost = true };
             var client = new NetworkPlayer(42);
@@ -470,7 +486,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                     new NetworkCharacter { UnitId = "host-unit", Owner = host },
                     new NetworkCharacter { UnitId = "client-unit", Owner = client }
                 ],
-                Leveling = new NetworkLeveling("client-unit", NetworkLevelingType.Leveling)
+                Leveling = new NetworkLeveling("client-unit", localType)
             };
             A.CallTo(() => _levelingInteractionService.IsBackgroundLevelingReady).Returns(true);
             using var replayCompleted = new ManualResetEventSlim();
@@ -481,15 +497,11 @@ namespace WOTRMultiplayer.UnitTests.Services
             });
 
             FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient)(-1,
-                new NotifyLevelingStarted
-                {
-                    UnitId = "host-unit",
-                    Type = NetworkLevelingType.Leveling.ToString()
-                });
+                LevelingStart("host-unit", NetworkLevelingType.Leveling));
             FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
-                new NotifyLevelingNameChanged { Name = "RemoteName" });
+                new NotifyLevelingNameChanged { Name = "RemoteName", Leveling = TestLeveling("host-unit") });
             FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
-                new NotifyLevelingCompleted());
+                new NotifyLevelingCompleted { Leveling = TestLeveling("host-unit") });
 
             A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling("host-unit", NetworkLevelingType.Leveling))
                 .MustNotHaveHappened();
@@ -501,6 +513,177 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustHaveHappenedOnceExactly();
             A.CallTo(() => _levelingInteractionService.SetLevelingName("RemoteName"))
                 .MustHaveHappenedOnceExactly();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void TwoRemoteLevelUps_ReplaySequentiallyInsteadOfReplacingEachOther(bool sameOwner)
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            var other = new NetworkPlayer(99);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Players = [host, client, other],
+                Characters =
+                [
+                    new NetworkCharacter { UnitId = "host-unit-a", Owner = host },
+                    new NetworkCharacter { UnitId = "host-unit-b", Owner = sameOwner ? host : other }
+                ]
+            };
+            A.CallTo(() => _levelingInteractionService.IsBackgroundLevelingReady).Returns(true);
+            var completions = 0;
+            using var secondStarted = new ManualResetEventSlim();
+            using var allCompleted = new ManualResetEventSlim();
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling("host-unit-b", NetworkLevelingType.Leveling))
+                .Invokes(() => secondStarted.Set());
+            A.CallTo(() => _levelingInteractionService.CompleteLeveling()).Invokes(() =>
+            {
+                completions++;
+                _multiplayerClient.Game.Leveling = null;
+                if (completions == 2) allCompleted.Set();
+            });
+            var start = FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient);
+
+            start(-1, LevelingStart("host-unit-a", NetworkLevelingType.Leveling));
+            start(-1, LevelingStart("host-unit-b", NetworkLevelingType.Leveling));
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling(A<string>._, A<NetworkLevelingType>._))
+                .MustNotHaveHappened();
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
+                new NotifyLevelingNameChanged { Name = "RemoteA", Leveling = TestLeveling("host-unit-a") });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
+                new NotifyLevelingCompleted { Leveling = TestLeveling("host-unit-a") });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
+                new NotifyLevelingNameChanged { Name = "RemoteB", Leveling = TestLeveling("host-unit-b") });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
+                new NotifyLevelingCompleted { Leveling = TestLeveling("host-unit-b") });
+
+            Assert.That(secondStarted.Wait(TimeSpan.FromSeconds(3)), Is.True);
+            Assert.That(allCompleted.Wait(TimeSpan.FromSeconds(3)), Is.True);
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling("host-unit-a", NetworkLevelingType.Leveling))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _levelingInteractionService.StartBackgroundLeveling("host-unit-b", NetworkLevelingType.Leveling))
+                .MustHaveHappenedOnceExactly();
+            A.CallTo(() => _levelingInteractionService.SetLevelingName("RemoteA")).MustHaveHappenedOnceExactly();
+            A.CallTo(() => _levelingInteractionService.SetLevelingName("RemoteB")).MustHaveHappenedOnceExactly();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void DeferredLevelUp_RejectsUnrelatedIdentityAndOldLoadedWorld(bool oldWorld)
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42, Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "host-unit", Owner = host }],
+                Leveling = new NetworkLeveling("local-unit", NetworkLevelingType.MythicLeveling)
+            };
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient)(-1,
+                LevelingStart("host-unit", NetworkLevelingType.Leveling));
+            var identity = TestLeveling("host-unit");
+            var unrelated = new NetworkLevelingIdentity
+            {
+                Id = oldWorld ? identity.Id : Guid.NewGuid().ToString("N"),
+                UnitId = identity.UnitId, Type = identity.Type, OwnerId = identity.OwnerId,
+                SessionId = identity.SessionId, LoadedSaveSeed = oldWorld ? 999 : identity.LoadedSaveSeed
+            };
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
+                new NotifyLevelingCompleted { Leveling = unrelated });
+            Assert.That(_multiplayerClient.Game.Leveling.UnitId, Is.EqualTo("local-unit"));
+            A.CallTo(() => _levelingInteractionService.CompleteLeveling()).MustNotHaveHappened();
+        }
+
+        [Test]
+        public void DeferredLevelUp_DoesNotReplayAfterSessionReplacement()
+        {
+            var host = new NetworkPlayer(-1) { IsHost = true };
+            var client = new NetworkPlayer(42);
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                LocalPlayerId = 42,
+                Players = [host, client],
+                Characters = [new NetworkCharacter { UnitId = "host-unit", Owner = host }]
+            };
+            A.CallTo(() => _levelingInteractionService.IsBackgroundLevelingReady).Returns(false);
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingStarted>(_networkClient)(-1,
+                LevelingStart("host-unit", NetworkLevelingType.Leveling));
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingNameChanged>(_networkClient)(-1,
+                new NotifyLevelingNameChanged { Name = "OldSessionName", Leveling = TestLeveling("host-unit") });
+            FakeUtils.GetNetworkReceiverHandler<NotifyLevelingCompleted>(_networkClient)(-1,
+                new NotifyLevelingCompleted { Leveling = TestLeveling("host-unit") });
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp());
+
+            A.CallTo(() => _levelingInteractionService.StartLeveling(A<string>._, A<NetworkLevelingType>._))
+                .MustNotHaveHappened();
+            A.CallTo(() => _levelingInteractionService.SetLevelingName(A<string>._)).MustNotHaveHappened();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task PostedLevelingAction_IsRevalidatedBeforeExecution(bool replaceSession)
+        {
+            var game = _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp());
+            var sessionType = typeof(MultiplayerActorBase).GetNestedType(
+                "DeferredLevelingSession", System.Reflection.BindingFlags.NonPublic);
+            var deferred = Activator.CreateInstance(sessionType, true);
+            sessionType.GetProperty("Session").SetValue(deferred, game);
+            sessionType.GetProperty("UnitId").SetValue(deferred, "old-unit");
+            sessionType.GetProperty("Type").SetValue(deferred, NetworkLevelingType.Leveling);
+            typeof(MultiplayerActorBase).GetField("_activeDeferredLeveling",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(_multiplayerClient, deferred);
+            var posted = new System.Collections.Generic.Queue<Action>();
+            A.CallTo(() => _mainThreadAccessor.Post(A<Action>._))
+                .Invokes((Action action) => posted.Enqueue(action));
+            var run = typeof(MultiplayerActorBase).GetMethod("RunDeferredLevelingActionAsync",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var task = (Task<bool>)run.Invoke(_multiplayerClient,
+                new object[] { deferred, (Action)(() => _levelingInteractionService.SetLevelingName("OldSessionName")) });
+            if (replaceSession) _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp());
+
+            posted.Dequeue().Invoke();
+
+            Assert.That(await task, Is.EqualTo(!replaceSession));
+            if (replaceSession)
+                A.CallTo(() => _levelingInteractionService.SetLevelingName(A<string>._)).MustNotHaveHappened();
+            else
+                A.CallTo(() => _levelingInteractionService.SetLevelingName("OldSessionName")).MustHaveHappenedOnceExactly();
+        }
+
+        [Test]
+        public void OldReplayFinally_DoesNotClearNewActiveReplay()
+        {
+            var game = _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp());
+            var sessionType = typeof(MultiplayerActorBase).GetNestedType(
+                "DeferredLevelingSession", System.Reflection.BindingFlags.NonPublic);
+            object Deferred(string unitId)
+            {
+                var deferred = Activator.CreateInstance(sessionType, true);
+                sessionType.GetProperty("Session").SetValue(deferred, game);
+                sessionType.GetProperty("UnitId").SetValue(deferred, unitId);
+                sessionType.GetProperty("Type").SetValue(deferred, NetworkLevelingType.Leveling);
+                return deferred;
+            }
+            var oldReplay = Deferred("old-unit");
+            var newReplay = Deferred("new-unit");
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            typeof(MultiplayerActorBase).GetField("_activeDeferredLeveling", flags)
+                .SetValue(_multiplayerClient, newReplay);
+            typeof(MultiplayerActorBase).GetField("_replayingDeferredLeveling", flags)
+                .SetValue(_multiplayerClient, true);
+
+            typeof(MultiplayerActorBase).GetMethod("ReplayDeferredLevelingAsync", flags)
+                .Invoke(_multiplayerClient, [oldReplay]);
+
+            Assert.That(typeof(MultiplayerActorBase).GetField("_activeDeferredLeveling", flags)
+                .GetValue(_multiplayerClient), Is.SameAs(newReplay));
+            Assert.That(typeof(MultiplayerActorBase).GetField("_replayingDeferredLeveling", flags)
+                .GetValue(_multiplayerClient), Is.True);
         }
 
         [Test]

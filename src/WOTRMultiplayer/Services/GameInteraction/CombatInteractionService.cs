@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -369,7 +369,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task<List<string>> EnsureUnitsInCombatAsync(List<string> units)
         {
-            var tcs = new TaskCompletionSource<List<string>>();
+            var tcs = new TaskCompletionSource<List<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
             var unavailableUnits = new List<string>();
 
             _mainThreadAccessor.Post(() =>
@@ -1270,7 +1270,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task ForceResetCombatAsync()
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try
@@ -1306,7 +1306,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task ExcludeUnitsFromCombatAsync(List<string> units)
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             _mainThreadAccessor.Post(() =>
             {
@@ -1370,7 +1370,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task KillUnitAndResetTurnAsync(NetworkPlayer player, string unitId)
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try
@@ -1674,7 +1674,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task UpdateArmyCombatUnitsAsync(List<NetworkUnit> units)
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try
@@ -1757,7 +1757,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task<bool> StartCombatAsync(NetworkCombatState networkCombatState)
         {
-            var taskCompletion = new TaskCompletionSource<bool>();
+            var taskCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             _mainThreadAccessor.Post(() =>
             {
@@ -1932,7 +1932,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task<bool> UpdateUnitsAsync(List<NetworkUnit> networkUnits, bool updatePosition)
         {
-            var taskCompletion = new TaskCompletionSource<bool>();
+            var taskCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 try

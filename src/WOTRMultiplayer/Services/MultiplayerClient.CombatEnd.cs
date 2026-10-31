@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.Combat;
@@ -34,7 +35,10 @@ namespace WOTRMultiplayer.Services
             return true; // Only the host can close an RTwP encounter.
         }
 
-        private async void OnNotifyRealTimeCombatEnd(long receivedFrom, NotifyRealTimeCombatEnd frame)
+         private void OnNotifyRealTimeCombatEnd(long receivedFrom, NotifyRealTimeCombatEnd frame)
+            => SafeFireAndForget(() => OnNotifyRealTimeCombatEndAsync(receivedFrom, frame));
+
+         private async Task OnNotifyRealTimeCombatEndAsync(long receivedFrom, NotifyRealTimeCombatEnd frame)
         {
             if (!RealTimePresentationRuntime.Enabled || receivedFrom != NetworkConstants.HostPlayerId || frame == null
                 || !Guid.TryParseExact(frame.EndId, "N", out _) || !Enum.IsDefined(typeof(RealTimeCombatEndStage), frame.Stage)

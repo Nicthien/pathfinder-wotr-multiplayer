@@ -108,6 +108,48 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
+        public async Task NativeRecovery_ArchiveCapturePrecedesPostCaptureReference()
+        {
+            if (!RealTimePresentationRuntime.Enabled) return;
+            var (host, client, hostNetwork, clientNetwork, queued, clientCombat) =
+                CreatePair(nativeRecovery: true);
+            var hostCombat = (ICombatInteractionService)typeof(MultiplayerActorBase)
+                .GetProperty("CombatInteraction", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(host);
+            var calls = new List<string>();
+            A.CallTo(() => hostCombat.GetRealTimeNativeReferenceState(A<bool>._))
+                .ReturnsLazily(() =>
+                {
+                    calls.Add("reference");
+                    return new NetworkCombatState
+                    {
+                        NativeTopology = new Networking.Messages.Contracts.NetworkNativeTopology()
+                    };
+                });
+            var capture = host.NativeCheckpointCapture;
+            host.NativeCheckpointCapture = (session, checkpoint, authorized) =>
+            {
+                calls.Add("archive");
+                return capture(session, checkpoint, authorized);
+            };
+
+            Assert.That(await host.RequestRealTimeCombatModeAsync(CombatMode.RealTimeWithPause), Is.True);
+            Pump(queued, hostNetwork, clientNetwork);
+            A.CallTo(() => clientCombat.GetRealTimeCombatStateAsync())
+                .Returns(Task.FromResult(new NetworkCombatState
+                    { Units = [new NetworkUnit { Id = "mismatch" }] }));
+            await host.BeginRealTimeRepairAsync();
+            await PumpRecovery(queued, hostNetwork, clientNetwork, host, client);
+
+            Assert.That(host.LastNativeTransferFailure, Is.Null,
+                $"transfer={host.LastNativeTransferFailure};recovery={host.LastNativeRecoveryFailure};calls={string.Join(",", calls)}");
+            AssertRecovered(host, client, clientCombat);
+            var archiveIndex = calls.IndexOf("archive");
+            Assert.That(archiveIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(calls.Skip(archiveIndex + 1), Does.Contain("reference"));
+        }
+
+        [Test]
         public void NativeRecovery_ParticipantSelectionSkipsCorpsesAndBystanders()
         {
             var reference = new NetworkCombatState

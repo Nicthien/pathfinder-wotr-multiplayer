@@ -26,7 +26,10 @@ namespace WOTRMultiplayer.Services
             PlayerNotification.ShowWarningNotification(WellKnownKeys.LobbyWindow.RealTime.ModeQueued.Key);
         }
 
-        private async void TickRequestedCombatMode()
+         private void TickRequestedCombatMode()
+            => SafeFireAndForget(() => TickRequestedCombatModeAsync());
+
+         private async Task TickRequestedCombatModeAsync()
         {
             if (!_queuedCombatMode.HasValue) return;
             if (!IsActive || !ReferenceEquals(Game, _queuedCombatModeSession)

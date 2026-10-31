@@ -1,4 +1,4 @@
-﻿using ProtoBuf;
+using ProtoBuf;
 using WOTRMultiplayer.Logging.Attributes;
 using WOTRMultiplayer.Networking.Messages.Contracts;
 
@@ -6,8 +6,11 @@ namespace WOTRMultiplayer.Networking.Messages.Game
 {
     [ProtoContract]
     [MessageType((int)MessageTypes.Game.NotifyLevelingSkillPointIncreased)]
-    public class NotifyLevelingSkillPointIncreased : IForwardableMessage
+    public class NotifyLevelingSkillPointIncreased : IForwardableMessage, ILevelingMessage
     {
+        [ProtoMember(100)]
+        public NetworkLevelingIdentity Leveling { get; set; }
+
         [ProtoMember(1)]
         [LogMe]
         public NetworkLevelingSkillPoint Skill { get; set; }

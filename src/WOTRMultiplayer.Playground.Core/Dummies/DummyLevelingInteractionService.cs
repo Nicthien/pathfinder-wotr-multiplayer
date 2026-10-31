@@ -5,6 +5,12 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyLevelingInteractionService : ILevelingInteractionService
     {
+        public bool IsLevelingUIReady => false;
+        public bool IsBackgroundLevelingReady => false;
+        public void StartBackgroundLeveling(string unitId, NetworkLevelingType levelingType)
+            => throw new System.NotSupportedException("No native leveling in playground");
+        public System.IDisposable EnterReplayScope(System.Func<bool> authorized) => null;
+        public System.IDisposable EnterReplayScope(System.Func<bool> authorized, System.Action<System.Exception> onFailure) => null;
         public void ChangeLevelingBirthDay(NetworkLevelingSequenceDirection direction)
         {
         }

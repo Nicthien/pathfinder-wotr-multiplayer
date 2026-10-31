@@ -23,7 +23,11 @@ le composant.
 - `get_state` et `compare_instances` : état réseau, combat, pause, zone,
   positions et PV de l'équipe ;
 - `set_pause` : pause/reprise par le chemin multijoueur normal ;
+- `submit_move` et `submit_attack` : commandes normales du client en combat RTwP,
+  sans téléportation ni exécution mécanique locale ;
 - `set_combat_mode` et `force_combat_sync` : commandes réservées à l'hôte ;
+- `inject_hp_divergence` : modification locale des PV d'un personnage sur le
+  client isolé, en combat RTwP stable, pour éprouver la réparation ou le repli ;
 - `save_combat` et `load_save` : workflows synchronisés du mod, limités aux
   sauvegardes du profil hôte isolé ;
 - `list_saves` et `wait_for_state` : inspection et attente déterministe.

@@ -13,6 +13,25 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyCombatInteractionService : ICombatInteractionService
     {
+        // The playground has no native world: never certify native reconstruction.
+        public Task<bool> TryFinalizeRealTimeCombatAsync(Func<bool> canFinalize, Action finalize) => Task.FromResult(false);
+        public NetworkCombatState GetRealTimeNativeReferenceState(bool retainHistoricalCombatUnits = false) => null;
+        public int RegroupDistantPlayersForCombat(IReadOnlyCollection<string> playerControlledUnitIds, float minimumDistance) => 0;
+        public void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply)
+        {
+            if (canApply()) StartTurnBasedCombatTurn(unitId, onInvalidUnit);
+        }
+        public Task<NetworkCombatState> TryApplyAndReadRealTimeCombatStateAsync(
+            NetworkCombatState state, Func<bool> canApply, bool reconcileTurnBasedBuffs) => Task.FromResult<NetworkCombatState>(null);
+        public Task<NetworkCombatState> TryRestoreNativeReferenceStateAsync(object world, object owner,
+            NetworkCombatState reference, Func<bool> authorized) => Task.FromResult<NetworkCombatState>(null);
+        public Task<bool> TryCommitNativeReferenceStateAsync(object world, object owner,
+            NetworkCombatState reference, Func<bool> authorized) => Task.FromResult(false);
+        public void ClearRealTimePresentationForNativeLoad() { }
+        public Task WaitForTurnBasedModeStabilizationAsync() => Task.FromException(new NotSupportedException("No native combat in playground"));
+        public Task RetireExcludedDuplicatesAsync(List<string> excluded, List<NetworkUnit> confirmed, Func<bool> canApply)
+            => Task.FromException(new NotSupportedException("No native entities in playground"));
+
         public Task<bool?> TryPresentRealTimeActionAsync(
             WOTRMultiplayer.Networking.Messages.Game.NotifyRealTimeAuthoritativeEvent authoritativeEvent,
             Func<bool> canPresent) => Task.FromResult<bool?>(canPresent() ? true : null);

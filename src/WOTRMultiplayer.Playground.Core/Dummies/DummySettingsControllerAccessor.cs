@@ -7,6 +7,8 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummySettingsControllerAccessor : ISettingsControllerAccessor
     {
+        private readonly Dictionary<string, object> _values = new();
+        public void SetValue<T>(WellKnownSettingKey<T> key, T value) => _values[key.Key] = value;
         private readonly Dictionary<string, string> _defaultStringKeys = new()
         {
             { WellKnownSettings.General.PlayerName.Key, $"Playground-{Guid.NewGuid()}" }
@@ -23,6 +25,7 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 
         public T GetValue<T>(WellKnownSettingKey<T> key)
         {
+            if (_values.TryGetValue(key.Key, out var configured)) return (T)configured;
             if (!_defaultStringKeys.TryGetValue(key.Key, out var value))
             {
                 return key.DefaultValue;

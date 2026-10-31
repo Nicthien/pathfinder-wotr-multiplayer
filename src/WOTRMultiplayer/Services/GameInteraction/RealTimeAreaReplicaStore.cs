@@ -103,16 +103,28 @@ namespace WOTRMultiplayer.Services.GameInteraction
             lock (service.m_EntitiesLock)
             {
                 var index = scene.AllEntityData.IndexOf(area);
-                if (index < 0 || !ReferenceEquals(area.HoldingState, scene)
-                    || !service.m_Entities.TryGetValue(area.UniqueId, out var proxy) || proxy.IsDisposed
-                    || !ReferenceEquals(proxy.Entity, area) || !ReferenceEquals(area.Proxy, proxy))
+                if (index < 0 || !ReferenceEquals(area.HoldingState, scene))
                     throw new InvalidOperationException("unregistered-area-replica-removal");
+                var registered = service.m_Entities.TryGetValue(area.UniqueId, out var proxy);
+                if (registered && proxy.Entity != null && !ReferenceEquals(proxy.Entity, area))
+                    throw new InvalidOperationException("area-proxy-owned-by-other-entity");
+                var valid = registered && !proxy.IsDisposed && ReferenceEquals(proxy.Entity, area)
+                    && ReferenceEquals(area.Proxy, proxy);
+                var replacedProxy = valid ? null : proxy;
+                var originalAreaProxy = area.Proxy;
+                var originalProxyEntity = proxy?.Entity;
+                if (!valid)
+                {
+                    proxy = new EntityService.Proxy(area.UniqueId);
+                    service.m_Entities[area.UniqueId] = proxy;
+                }
                 service.m_Cache.Remove(area);
                 scene.AllEntityData.RemoveAt(index);
                 area.HoldingState = null; area.Proxy = null; proxy.Entity = null;
-                // Keep the same unresolved proxy until verification/commit so
-                // existing references can be restored by identity on rollback.
-                return new Removal(service, scene, area, proxy, index);
+                // Keep or recreate the unresolved proxy until verification/commit
+                // so the replica can be restored by identity on rollback.
+                return new Removal(service, scene, area, proxy, index,
+                    replacedProxy, originalAreaProxy, originalProxyEntity);
             }
         }
 
@@ -122,12 +134,20 @@ namespace WOTRMultiplayer.Services.GameInteraction
             private readonly SceneEntitiesState _scene;
             private readonly AreaEffectEntityData _area;
             private readonly EntityService.Proxy _proxy;
+            private readonly EntityService.Proxy _replacedProxy;
+            private readonly EntityService.Proxy _originalAreaProxy;
+            private readonly EntityDataBase _originalProxyEntity;
             private readonly int _index;
             private bool _committed;
             private Registration _replacement;
             internal Removal(EntityService service, SceneEntitiesState scene, AreaEffectEntityData area,
-                EntityService.Proxy proxy, int index)
-            { _service = service; _scene = scene; _area = area; _proxy = proxy; _index = index; }
+                EntityService.Proxy proxy, int index, EntityService.Proxy replacedProxy,
+                EntityService.Proxy originalAreaProxy, EntityDataBase originalProxyEntity)
+            {
+                _service = service; _scene = scene; _area = area; _proxy = proxy; _index = index;
+                _replacedProxy = replacedProxy; _originalAreaProxy = originalAreaProxy;
+                _originalProxyEntity = originalProxyEntity;
+            }
             public void ValidateForCommit()
             {
                 if (_service == null) throw new ObjectDisposedException(nameof(Removal));
@@ -176,7 +196,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 ValidatePendingRemoval();
                 lock (_service.m_EntitiesLock)
                 {
-                    _proxy.Entity = _area; _area.Proxy = _proxy; _area.HoldingState = _scene;
+                    var restoredProxy = _replacedProxy ?? _proxy;
+                    _service.m_Entities[_area.UniqueId] = restoredProxy;
+                    restoredProxy.Entity = _originalProxyEntity;
+                    _area.Proxy = _originalAreaProxy; _area.HoldingState = _scene;
                     _scene.AllEntityData.Insert(Math.Min(_index, _scene.AllEntityData.Count), _area);
                     _service.m_Cache.Add(_area);
                     _service = null;

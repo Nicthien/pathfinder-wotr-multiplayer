@@ -978,6 +978,9 @@ namespace WOTRMultiplayer.UI.Controllers
 
             _logger.LogInformation("Character owner changed. CharacterName={CharacterName}, CharacterId={CharacterId}, PlayerId={PlayerId}, PlayerName={PlayerName}", character.Name, character.UnitId, playerOption.Player.Id, playerOption.Player.Name);
             OnCharacterOwnerChanged?.Invoke(character, playerOption.Player);
+            // The actor may refuse a transfer while this unit (or its pet) is
+            // progressing. Restore the authoritative value without another event.
+            UpdateCharacterOwnerDropdown(character, silent: true);
         }
 
         private Sprite GetPortraitSprite(NetworkCharacter character)

@@ -8,6 +8,9 @@ namespace WOTRMultiplayer.Networking.Messages.Game
     [MessageType((int)MessageTypes.Game.ClientDialogCueAnswerSelected)]
     public class ClientDialogCueAnswerSelected
     {
+        [ProtoMember(6)]
+        public string VoteRoundId { get; set; }
+
         [ProtoMember(1)]
         [LogMe]
         public string CueName { get; set; }

@@ -13,6 +13,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         void SelectDialogAnswer(string answerName, string manualUnitSelectionId);
 
+        void SelectDialogAnswer(string answerName, string manualUnitSelectionId, System.Func<bool> authorized);
+
         void SetDialogContinueButtonState(bool isEnabled);
 
         Task<bool> StartDialogAsync(NetworkDialog networkDialog);

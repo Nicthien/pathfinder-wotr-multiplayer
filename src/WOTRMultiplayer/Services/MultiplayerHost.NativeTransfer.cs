@@ -234,6 +234,20 @@ namespace WOTRMultiplayer.Services
             var sourceSession = Game;
             var sourceCombat = Game?.Combat;
             var sourceState = Game?.RealTimeCombat;
+            if (!await PauseAtRealTimeRepairSafePointAsync(
+                    sourceSession, sourceState, sourceState.Epoch, barrierOwned))
+                throw new InvalidOperationException("native-transfer-initial-safe-point-unavailable");
+            var checkpointId = Guid.NewGuid().ToString("N");
+            bool CaptureAuthorized()
+            {
+                lock (ActionLock)
+                    return _nativeTransfer == null && barrierOwned()
+                        && ReferenceEquals(Game, sourceSession)
+                        && ReferenceEquals(Game?.Combat, sourceCombat)
+                        && ReferenceEquals(Game?.RealTimeCombat, sourceState);
+            }
+            using var source = await CaptureCurrentNativeCheckpointAsync(checkpointId, CaptureAuthorized);
+            var archive = await Task.Run(() => RealTimeNativeCheckpointCodec.Encode(source));
             var reference = await CaptureStableNativeReferenceAsync(
                 sourceSession, sourceCombat, sourceState, barrierOwned,
                 retainedCombatUnitIds);
@@ -277,7 +291,7 @@ namespace WOTRMultiplayer.Services
                                 LoadedSaveSeed = Game.LoadedSaveSeed,
                                 Epoch = Game.RealTimeCombat.Epoch,
                                 LastIncludedSequence = Game.RealTimeCombat.LastAuthoritativeSequence,
-                                CheckpointId = Guid.NewGuid().ToString("N"),
+                                CheckpointId = checkpointId,
                                 BuildFingerprint = fingerprint,
                                 CanonicalStateHash = hash,
                                 Stage = (int)RealTimeNativeCheckpointStage.Prepare
@@ -304,14 +318,12 @@ namespace WOTRMultiplayer.Services
                 // accepted before the repair barrier can enter its running phase
                 // during that network round-trip even though the world was safe
                 // when Prepare was published. Re-check and, when necessary,
-                // briefly resume only that already accepted work before capture.
+                // briefly resume only that already accepted work before the final
+                // reference comparison.
                 if (!await PauseAtRealTimeRepairSafePointAsync(
                         transfer.Session, transfer.State, transfer.Prepare.Epoch,
                         () => IsCurrentNativeTransfer(transfer)))
                     throw new InvalidOperationException("native-transfer-post-prepare-safe-point-unavailable");
-                bool Authorized() { lock (ActionLock) return IsCurrentNativeTransfer(transfer); }
-                using var source = await CaptureCurrentNativeCheckpointAsync(transfer.Prepare.CheckpointId, Authorized);
-                var archive = await Task.Run(() => RealTimeNativeCheckpointCodec.Encode(source));
                 var installed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _mainThreadAccessor.Post(() =>
                 {

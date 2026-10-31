@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -101,11 +101,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
 
         public void SelectDialogAnswer(string answerName, string manualUnitSelectionId)
+            => SelectDialogAnswer(answerName, manualUnitSelectionId, null);
+
+        public void SelectDialogAnswer(string answerName, string manualUnitSelectionId, Func<bool> authorized)
         {
             _mainThreadAccessor.Post(() =>
             {
                 try
                 {
+                    if (authorized != null && !authorized()) return;
                     var answerBlueprint = Game.Instance.DialogController.Answers.FirstOrDefault(a => string.Equals(a.name, answerName, StringComparison.OrdinalIgnoreCase));
                     if (answerBlueprint == null)
                     {
@@ -117,7 +121,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
                     if (!answers.Any())
                     {
-                        DoSelectAnswer(answerBlueprint, manualUnitSelectionId);
+                        if (authorized == null || authorized()) DoSelectAnswer(answerBlueprint, manualUnitSelectionId);
                         return;
                     }
 
@@ -134,7 +138,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         if (string.Equals(view.ViewModel.Answer.Value.name, answerName, StringComparison.OrdinalIgnoreCase))
                         {
                             var selectedAnswerBehavior = answer.gameObject.AddComponent<SelectedDialogAnswerBehavior>();
-                            selectedAnswerBehavior.Begin(settings.DialogSelectedAnswerAnimationDuration, () => DoSelectAnswer(answerBlueprint, manualUnitSelectionId));
+                            selectedAnswerBehavior.Begin(settings.DialogSelectedAnswerAnimationDuration, () =>
+                            {
+                                if (authorized == null || authorized()) DoSelectAnswer(answerBlueprint, manualUnitSelectionId);
+                            });
                             continue;
                         }
 
@@ -205,7 +212,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             // trying to start a dialog if one is not already in progress
             // clients can't start dialogs on their own unless it's scripted, so this only happens once the dialog has been confirmed by the host
-            var hasStartedDialogTask = new TaskCompletionSource<bool>();
+            var hasStartedDialogTask = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mainThreadAccessor.Post(() =>
             {
                 _logger.LogInformation("Trying to start dialog. Id={Id}, Name={Name}, TargetUnitId={TargetUnitId}, InitiatorUnitId={InitiatorUnitId}, MapObjectId={MapObjectId}, SpeakerKey={SpeakerKey}",

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Stats;
@@ -42,6 +42,56 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private readonly IUISyncCountersService _uiSyncCountersService;
         private CharGenVM _backgroundCharGen;
         private LevelUpController _backgroundLevelUpController;
+        private Func<bool> _backgroundAuthorization;
+        [ThreadStatic] private static Func<bool> _replayAuthorization;
+        [ThreadStatic] private static Action<Exception> _replayFailure;
+
+        public IDisposable EnterReplayScope(Func<bool> authorized)
+            => EnterReplayScope(authorized, null);
+
+        public IDisposable EnterReplayScope(Func<bool> authorized, Action<Exception> onFailure)
+        {
+            var previous = _replayAuthorization;
+            var previousFailure = _replayFailure;
+            _replayAuthorization = authorized;
+            _replayFailure = onFailure;
+            return new ReplayScope(() => { _replayAuthorization = previous; _replayFailure = previousFailure; });
+        }
+
+        private sealed class ReplayScope(Action dispose) : IDisposable
+        {
+            public void Dispose() => dispose();
+        }
+
+        private static void RejectGuardedApplication(string reason)
+        {
+            // A missing target is an application failure too, even when legacy
+            // unscoped UI callers only logged it and returned.
+            if (_replayFailure != null) throw new InvalidOperationException(reason);
+        }
+
+        private void Post(Action action)
+        {
+            var authorized = _replayAuthorization;
+            var onFailure = _replayFailure;
+            _mainThreadAccessor.Post(() =>
+            {
+                if (authorized != null && !authorized()) return;
+                try
+                {
+                    if (_backgroundAuthorization != null && !_backgroundAuthorization())
+                        FinishBackgroundLeveling(commit: false);
+                    using (EnterReplayScope(authorized, onFailure)) action();
+                }
+                catch (Exception error)
+                {
+                    // Once application started, even a callback that cleared its
+                    // current progression may have failed after partial mutation.
+                    onFailure?.Invoke(error);
+                    throw;
+                }
+            });
+        }
 
         public bool IsLevelingUIReady => _backgroundCharGen != null || _uiAccessor.CharGenView?.ViewModel != null;
         public bool IsBackgroundLevelingReady => _backgroundCharGen != null;
@@ -64,7 +114,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void StartLeveling(string unitId, NetworkLevelingType levelingType)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -72,6 +122,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (unit == null)
                     {
                         _logger.LogError("Unable to start leveling due to missing unit. UnitId={UnitId}, Type={Type}", unitId, levelingType);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -95,7 +146,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void StartBackgroundLeveling(string unitId, NetworkLevelingType levelingType)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -111,6 +162,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         _ or NetworkLevelingType.MythicLeveling => LevelUpState.CharBuildMode.Mythic,
                     };
                     var config = LevelUpConfig.Create(unit, mode);
+                    _backgroundAuthorization = _replayAuthorization;
                     _backgroundLevelUpController = config.StartController();
                     using (_backgroundLevelUpController.EnterApplyingPlanScope())
                     {
@@ -137,6 +189,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             var controller = _backgroundLevelUpController;
             _backgroundCharGen = null;
             _backgroundLevelUpController = null;
+            _backgroundAuthorization = null;
             try
             {
                 if (commit) controller?.Commit();
@@ -150,7 +203,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingClassArchetype(NetworkLevelingArchetype levelingArchetype)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -158,6 +211,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogWarning("Unable to select leveling class archetype due to missing viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -172,6 +226,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel.SelectedClassVM.Value == null)
                     {
                         _logger.LogWarning("Class must be selected to select archetype");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -180,6 +235,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (archetype == null)
                     {
                         _playerNotificationService.ShowWarningNotification(WellKnownKeys.GameNotifications.Leveling.ArchetypeMismatch.Key, args: levelingArchetype.Name);
+                        RejectGuardedApplication("leveling-archetype-missing");
                         return;
                     }
 
@@ -200,7 +256,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectMythicLevelingClass(string mythicClassId)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -209,6 +265,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogError("Can't select mythic class due to missing mythic leveling phase viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -224,13 +281,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
         public void SelectLevelingPortrait(NetworkLevelingPortrait levelingPortrait)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogWarning("Can't select leveling portrait due to missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -238,6 +296,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogError("Can't select leveling portrait due to missing portrait phase viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -247,6 +306,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         if (!viewModel.PortraitGroupVms.TryGetValue(category, out var group))
                         {
                             _logger.LogError("Unable to find requested portrait category. Name={Name}, Category={Category}", levelingPortrait.Name, category);
+                            RejectGuardedApplication("leveling-application-incomplete");
                             return;
                         }
 
@@ -254,6 +314,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         if (portrait == null)
                         {
                             _logger.LogError("Unable to find requested portrait. Name={Name}, Category={Category}", levelingPortrait.Name, levelingPortrait.Category);
+                            RejectGuardedApplication("leveling-application-incomplete");
                             return;
                         }
 
@@ -293,13 +354,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingVoice(NetworkLevelingVoice levelingVoice)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogWarning("Can't select leveling voice due to missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -307,6 +369,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (view == null)
                     {
                         _logger.LogError("Can't select leveling voice due to missing voice phase view");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -316,6 +379,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (voice == null)
                     {
                         _logger.LogError("Unable to find leveling voice. Id={Id}, GenderId={GenderId}", levelingVoice.Id, levelingVoice.GenderId);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -334,13 +398,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingGender(string genderId)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogWarning("Can't select leveling gender due to missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -348,6 +413,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogError("Can't select leveling gender due to missing race phase viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -355,6 +421,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (gender == null)
                     {
                         _logger.LogError("Unable to find leveling gender. GenderId={GenderId}", genderId);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -371,13 +438,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingRace(string raceId)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogWarning("Can't select leveling race due to missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -385,6 +453,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogError("Can't select leveling race due to missing race phase viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -392,6 +461,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (race == null)
                     {
                         _logger.LogError("Unable to find leveling race. RaceId={RaceId}", raceId);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -408,7 +478,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingWarpaintColorAppearance(NetworkLevelingWarpaint levelingWarpaint)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -425,7 +495,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingWarpaintAppearance(NetworkLevelingWarpaint levelingWarpaint)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -442,7 +512,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingTattooColorAppearance(NetworkLevelingTattoo levelingTattoo)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -459,7 +529,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingTattooAppearance(NetworkLevelingTattoo levelingTattoo)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -476,7 +546,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingScarAppearance(int index)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -490,7 +560,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingSecondaryOutfitColorAppearance(string textureName)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -505,7 +575,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingPrimaryOutfitColorAppearance(string textureName)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -520,7 +590,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingHornsColorAppearance(string textureName)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -535,7 +605,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingHornsAppearance(int index)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -549,7 +619,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingHairStyleAppearance(int index)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -563,7 +633,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingHairColorAppearance(string textureName)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -578,7 +648,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingFaceAppearance(int index)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -592,7 +662,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingBodyTypeAppearance(int index)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -606,7 +676,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingEyesColorAppearance(string textureName)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -621,7 +691,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingBodyColorAppearance(string textureName)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 var view = GetCharGenAppearancePhaseView();
                 if (view == null)
@@ -636,13 +706,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingAlignment(string alignmentId)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogWarning("Can't select leveling alignment due to missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -650,6 +721,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogError("Can't select leveling alignment due to missing alignment phase viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -657,6 +729,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (alignment == null)
                     {
                         _logger.LogError("Unable to find leveling alignment. AlignmentId={AlignmentId}", alignmentId);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -673,7 +746,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingClass(NetworkLevelingClass levelingClass)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -681,6 +754,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (viewModel == null)
                     {
                         _logger.LogWarning("Unable to select leveling class due to missing viewmodel");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -688,6 +762,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (selectedClass == null)
                     {
                         _playerNotificationService.ShowWarningNotification(WellKnownKeys.GameNotifications.Leveling.ClassMismatch.Key, args: levelingClass.Name);
+                        RejectGuardedApplication("leveling-class-missing");
                         return;
                     }
 
@@ -703,7 +778,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SelectLevelingFeature(NetworkLevelingFeature networkLevelingFeature)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -728,6 +803,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         _playerNotificationService.ShowWarningNotification(WellKnownKeys.GameNotifications.Leveling.FeatureMismatch.Key, args: networkLevelingFeature.Name);
                         _logger.LogError("Unable to find requested feature in the list. FeatureName={FeatureName}, FeatureId={FeatureId}", networkLevelingFeature.Name, networkLevelingFeature.Id);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
                     requestedFeatureVM.SetSelected(true);
@@ -742,7 +818,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
         }
         public void SelectLevelingSpell(NetworkLevelingSpell networkLevelingSpell)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -756,6 +832,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (spellToAdd == null)
                     {
                         _logger.LogError("Unable to add missing leveling spell. SpellName={SpellName}, SpellId={SpellId}", networkLevelingSpell.Name, networkLevelingSpell.Id);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -771,7 +848,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void RemoveLevelingSpell(NetworkLevelingSpell networkLevelingSpell)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -785,6 +862,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (spellToRemove == null)
                     {
                         _logger.LogError("Unable to remove missing leveling spell. SpellName={SpellName}, SpellId={SpellId}", networkLevelingSpell.Name, networkLevelingSpell.Id);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -800,7 +878,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void IncreaseLevelingSkillPoint(NetworkLevelingSkillPoint networkLevelingSkillPoint)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -829,7 +907,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void DecreaseLevelingSkillPoint(NetworkLevelingSkillPoint networkLevelingSkillPoint)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -857,13 +935,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void ChangeLevelingRacialAbilityScoreBonus(NetworkLevelingSequenceDirection direction)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogError("Unable to get leveling ability score vm due too missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -871,6 +950,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (view == null)
                     {
                         _logger.LogError("Can't change leveling racial bonus due to missing ability score phase view");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -896,13 +976,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SetLevelingName(string name)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogError("Unable to get leveling name vm due too missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -910,6 +991,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (view == null)
                     {
                         _logger.LogError("Can't change leveling name due to missing ability score phase view");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -927,13 +1009,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void ChangeLevelingBirthDay(NetworkLevelingSequenceDirection direction)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogError("Unable to get leveling birth day vm due too missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -941,6 +1024,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (view == null)
                     {
                         _logger.LogError("Can't change leveling birth day due to missing ability score phase view");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -966,13 +1050,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void ChangeLevelingBirthMonth(NetworkLevelingSequenceDirection direction)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogError("Unable to get leveling birth month vm due too missing CharGenView");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -980,6 +1065,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (view == null)
                     {
                         _logger.LogError("Can't change leveling birth month due to missing ability score phase view");
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -1005,7 +1091,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void IncreaseLevelingAbilityScore(NetworkLevelingAbilityScore networkLevelingAbilityScore)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -1018,6 +1104,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (abilityScoreView == null)
                     {
                         _logger.LogError("Unable to find ability score allocator view. StatType={StatType}", networkLevelingAbilityScore.StatType);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -1034,7 +1121,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void DecreaseLevelingAbilityScore(NetworkLevelingAbilityScore networkLevelingAbilityScore)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -1047,6 +1134,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (abilityScoreView == null)
                     {
                         _logger.LogError("Unable to find ability score allocator view. StatType={StatType}", networkLevelingAbilityScore.StatType);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
 
@@ -1063,7 +1151,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void CompleteLeveling()
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -1080,7 +1168,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void TerminateLeveling()
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -1097,7 +1185,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void UpdateLevelingRespecUI(bool isInteractable, int readyPlayersCount, int totalPlayersCount)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 if (_uiAccessor.RespecView?.ViewModel == null)
                 {
@@ -1125,11 +1213,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void CompleteLevelingRespec()
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 if (_uiAccessor.RespecView?.ViewModel == null)
                 {
                     _logger.LogWarning("Unable to complete closed respec window");
+                    RejectGuardedApplication("leveling-application-incomplete");
                     return;
                 }
 
@@ -1140,11 +1229,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void InitiateLevelingRespecLevelUp()
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 if (_uiAccessor.RespecView?.ViewModel == null)
                 {
                     _logger.LogWarning("Unable to levelup due to missing respec window");
+                    RejectGuardedApplication("leveling-application-incomplete");
                     return;
                 }
 
@@ -1155,11 +1245,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void InitiateLevelingRespecMythicLevelUp()
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 if (_uiAccessor.RespecView?.ViewModel == null)
                 {
                     _logger.LogWarning("Unable to mythic levelup due to missing respec window");
+                    RejectGuardedApplication("leveling-application-incomplete");
                     return;
                 }
 
@@ -1170,7 +1261,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void UpdateLevelingPhaseControls(bool isEnabled)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 try
                 {
@@ -1228,7 +1319,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public void SwitchLevelingPhase(NetworkLevelingPhase networkLevelingPhase)
         {
-            _mainThreadAccessor.Post(() =>
+            Post(() =>
             {
                 if (_backgroundCharGen != null)
                 {
@@ -1237,6 +1328,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     {
                         _logger.LogError("Background leveling phase is out of range. Index={Index}, TotalCount={TotalCount}",
                             networkLevelingPhase.Index, _backgroundCharGen.PhasesCollection.Count);
+                        RejectGuardedApplication("leveling-application-incomplete");
                         return;
                     }
                     _backgroundCharGen.CurrentPhaseVM.Value = _backgroundCharGen.PhasesCollection[networkLevelingPhase.Index];
@@ -1245,6 +1337,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 if (_uiAccessor.CharGenView == null)
                 {
                     _logger.LogError("Unable to update switch leveling phase due too missing CharGenView");
+                    RejectGuardedApplication("leveling-application-incomplete");
                     return;
                 }
 
@@ -1252,6 +1345,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 if (networkLevelingPhase.Index >= roadmapVM.EntitiesCollection.Count)
                 {
                     _logger.LogError("Leveling phase is out of range. Index={Index}, TotalCount={TotalCount}", networkLevelingPhase.Index, roadmapVM.EntitiesCollection.Count);
+                    RejectGuardedApplication("leveling-application-incomplete");
                     return;
                 }
 
@@ -1265,12 +1359,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (_uiAccessor.CharGenView == null)
             {
                 _logger.LogError("Unable to get leveling skillpoint vm due too missing CharGenView");
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
             if (_uiAccessor.CharGenView.SelectedDetailView is not CharGenSkillsPhaseDetailedPCView skillAllocator)
             {
                 _logger.LogWarning("Unable to get leveling skillpoint vm because current phase is not skill phase");
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
@@ -1278,6 +1374,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (skillView == null)
             {
                 _logger.LogWarning("Unable to find leveling view for stat. StatType={StatType}", statType);
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
@@ -1289,12 +1386,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (_uiAccessor.CharGenView?.ViewModel == null)
             {
                 _logger.LogError("Unable to get leveling ability score vm due too missing CharGenView");
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
             if (_uiAccessor.CharGenView.SelectedDetailView is not CharGenAbilityScoresDetailedPCView abilityScoresDetailedPCView)
             {
                 _logger.LogWarning("Unable to get leveling ability score vm because current phase is not skill phase");
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
@@ -1302,6 +1401,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (abilityScoreView == null)
             {
                 _logger.LogWarning("Unable to find ability score leveling view for stat. StatType={StatType}", statType);
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
@@ -1315,12 +1415,14 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (_uiAccessor.CharGenView == null)
             {
                 _logger.LogError("Unable to get leveling spellphase vm due too missing CharGenView");
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
             if (_uiAccessor.CharGenView.SelectedDetailView is not CharGenSpellsPhaseDetailedPCView spellsPhaseDetailedPCView)
             {
                 _logger.LogWarning("Unable to get leveling spellphase vm because current phase is not spell phase");
+                RejectGuardedApplication("leveling-application-incomplete");
                 return null;
             }
 
@@ -1339,6 +1441,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (texture == null)
             {
                 _logger.LogError("Unable to find texture. Selector={Selector}, TextureName={TextureName}", selectorName, textureName);
+                RejectGuardedApplication("leveling-application-incomplete");
                 return;
             }
 
@@ -1353,7 +1456,9 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         private CharGenAppearancePhaseDetailedPCView GetCharGenAppearancePhaseView()
         {
-            return _uiAccessor.CharGenView?.SelectedDetailView as CharGenAppearancePhaseDetailedPCView;
+            var view = _uiAccessor.CharGenView?.SelectedDetailView as CharGenAppearancePhaseDetailedPCView;
+            if (view == null) RejectGuardedApplication("leveling-appearance-view-missing");
+            return view;
         }
     }
 }

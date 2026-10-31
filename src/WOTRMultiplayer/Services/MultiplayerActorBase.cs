@@ -18,6 +18,7 @@ using WOTRMultiplayer.Abstractions.GameInteraction.CombatLog;
 using WOTRMultiplayer.Abstractions.IO;
 using WOTRMultiplayer.Abstractions.Random;
 using WOTRMultiplayer.Abstractions.Settings;
+using WOTRMultiplayer.Abstractions.Unity;
 using WOTRMultiplayer.Entities;
 using WOTRMultiplayer.Entities.ActionBar;
 using WOTRMultiplayer.Entities.Area;
@@ -61,16 +62,82 @@ namespace WOTRMultiplayer.Services
 
         private long _nextRealTimeUnitDeathSequence;
 
-        private DeferredLevelingSession _deferredLeveling;
+        private readonly Dictionary<string, DeferredLevelingSession> _deferredLevelings = new(StringComparer.OrdinalIgnoreCase);
+        private DeferredLevelingSession _activeDeferredLeveling;
         private bool _replayingDeferredLeveling;
+        private long _levelingDispatchGeneration;
+        private NetworkGame _levelingFailureSession;
+        private int? _levelingFailureSaveSeed;
 
         private sealed class DeferredLevelingSession
         {
+            public NetworkLevelingIdentity Identity { get; set; }
+            public NetworkGame Session { get; set; }
             public long OwnerId { get; set; }
             public string UnitId { get; set; }
             public NetworkLevelingType Type { get; set; }
             public Queue<(object Message, Action Apply)> Messages { get; } = new();
             public bool HasTerminalMessage { get; set; }
+            public bool AwaitingForcedUI { get; set; }
+            public bool AwaitingOwnedUI { get; set; }
+            public bool OwnedStartScheduled { get; set; }
+            public bool Failed { get; set; }
+            public bool TerminalApplied { get; set; }
+        }
+
+        protected bool HasLevelingSynchronizationFailure
+        {
+            get
+            {
+                var session = Game;
+                return session != null && ReferenceEquals(session, _levelingFailureSession)
+                    && session.LoadedSaveSeed == _levelingFailureSaveSeed;
+            }
+        }
+
+        protected bool IsSavingBlockedByLevelingSync
+        {
+            get
+            {
+                lock (ActionLock)
+                    return Game != null && (HasLevelingSynchronizationFailure || Game.Leveling != null
+                        || _deferredLevelings.Values.Any(value => ReferenceEquals(value.Session, Game)
+                            && IsCurrentLevelingIdentity(value.Identity)));
+            }
+        }
+
+        protected bool IsLevelingOwnershipLocked(string unitId)
+        {
+            lock (ActionLock)
+            {
+                if (Game == null) return false;
+                if (HasLevelingSynchronizationFailure) return true;
+                if (string.IsNullOrEmpty(unitId)) return false;
+                bool Affects(string progressingUnit) => !string.IsNullOrEmpty(progressingUnit)
+                    && (string.Equals(progressingUnit, unitId, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(GameInteraction.GetPetOwnerId(progressingUnit), unitId, StringComparison.OrdinalIgnoreCase));
+                return Affects(Game.Leveling?.UnitId)
+                    || _deferredLevelings.Values.Any(value => ReferenceEquals(value.Session, Game)
+                        && IsCurrentLevelingIdentity(value.Identity) && !value.TerminalApplied && Affects(value.UnitId));
+            }
+        }
+
+        private void FailLevelingSynchronization(NetworkGame session, NetworkLevelingIdentity identity, Exception error)
+        {
+            lock (ActionLock)
+            {
+                if (!ReferenceEquals(Game, session) || !IsCurrentLevelingIdentity(identity)
+                    || HasLevelingSynchronizationFailure) return;
+                _levelingFailureSession = session;
+                _levelingFailureSaveSeed = identity.LoadedSaveSeed;
+            }
+            Logger.LogError(error, "Leveling synchronization failed; saving remains blocked. UnitId={UnitId}", identity.UnitId);
+            MainThreadAccessor.Post(() =>
+            {
+                if (!ReferenceEquals(Game, session) || !HasLevelingSynchronizationFailure) return;
+                GameInteraction.SetPause(true);
+                PlayerNotification.ShowWarningNotification(WellKnownKeys.GameNotifications.Leveling.SynchronizationFailed.Key);
+            });
         }
 
         public NetworkArea CurrentArea => Game.CurrentArea;
@@ -108,6 +175,23 @@ namespace WOTRMultiplayer.Services
         internal NetworkGame Game { get; set; }
 
         protected ILogger Logger { get; private set; }
+        protected virtual IMainThreadAccessor MainThreadAccessor => null;
+
+        // Async message handlers must never throw: an exception escaping an async void
+        // handler is rethrown on the Unity synchronization context and kills the game.
+        // Handlers run as SafeFireAndForget wrappers so a handler failure is logged
+        // and the message pump keeps running.
+        protected async void SafeFireAndForget(Func<Task> action, [System.Runtime.CompilerServices.CallerMemberName] string handler = null)
+        {
+            try
+            {
+                await action().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unhandled error in async message handler. Handler={Handler}", handler);
+            }
+        }
 
         protected IMapper Mapper { get; private set; }
 
@@ -1088,8 +1172,96 @@ namespace WOTRMultiplayer.Services
         /// <param name="networkLevelingType"></param>
         public void OnForceLevelingUI(string unitId, NetworkLevelingType networkLevelingType)
         {
-            InitiateLeveling(unitId, networkLevelingType);
+            lock (ActionLock)
+            {
+                if (HasLevelingSynchronizationFailure) return;
+                var pending = _deferredLevelings.Values.FirstOrDefault(value =>
+                    ReferenceEquals(value.Session, Game) && IsCurrentLevelingIdentity(value.Identity)
+                    && value.UnitId == unitId && value.Type == networkLevelingType && value.AwaitingForcedUI);
+                if (pending != null)
+                {
+                    if (Game.Leveling == null)
+                        InitiateLeveling(unitId, networkLevelingType, pending.Identity);
+                    AdoptForcedLeveling(pending.Identity, networkLevelingType);
+                    return;
+                }
+                if (Game.Leveling?.IsForced == true && Game.Leveling.UnitId == unitId && Game.Leveling.Type == networkLevelingType)
+                    return;
+                if (Game.Leveling != null && (Game.Leveling.UnitId != unitId || Game.Leveling.Type != networkLevelingType))
+                {
+                    FailLevelingSynchronization(Game, Game.Leveling.Identity,
+                        new InvalidOperationException("forced-leveling-interrupted-local-leveling"));
+                    return;
+                }
+                if (Game.Leveling == null || Game.Leveling.UnitId != unitId || Game.Leveling.Type != networkLevelingType)
+                    InitiateLeveling(unitId, networkLevelingType);
+                Game.Leveling.IsForced = true;
+                var host = Game.LocalPlayerId == WOTRMultiplayer.Networking.NetworkConstants.HostPlayerId;
+                Game.Leveling.AwaitingHostIdentity = !host;
+                if (host)
+                {
+                    Game.Leveling.Identity.OwnerId = Game.Players.FirstOrDefault(player =>
+                        CanControlLeveling(player.Id, unitId, networkLevelingType))?.Id ?? Game.LocalPlayerId;
+                    Send(new NotifyLevelingStarted { UnitId = unitId, Type = networkLevelingType.ToString(),
+                        Leveling = Game.Leveling.Identity, IsForced = true });
+                }
+            }
             Logger.LogInformation("Leveling UI has been forced by the game. UnitId={UnitId}, Type={Type}", Game.Leveling.UnitId, Game.Leveling.Type);
+        }
+
+        protected void ReceiveForcedLeveling(NetworkLevelingIdentity identity, NetworkLevelingType type)
+        {
+            lock (ActionLock)
+            {
+                if (Game.Leveling?.IsForced == true && Game.Leveling.UnitId == identity.UnitId && Game.Leveling.Type == type)
+                {
+                    AdoptForcedLeveling(identity, type);
+                    return;
+                }
+                if (!_deferredLevelings.TryGetValue(identity.Id, out var pending))
+                {
+                    pending = new DeferredLevelingSession { Session = Game, Identity = identity,
+                        OwnerId = identity.OwnerId, UnitId = identity.UnitId, Type = type };
+                    _deferredLevelings.Add(identity.Id, pending);
+                }
+                if (ReferenceEquals(pending, _activeDeferredLeveling))
+                {
+                    pending.Failed = true;
+                    FailLevelingSynchronization(Game, identity, new InvalidOperationException("forced-leveling-overlaps-replay"));
+                    return;
+                }
+                pending.AwaitingForcedUI = true;
+            }
+        }
+
+        private void AdoptForcedLeveling(NetworkLevelingIdentity identity, NetworkLevelingType type)
+        {
+            if (Game.Leveling == null || Game.Leveling.UnitId != identity.UnitId || Game.Leveling.Type != type)
+            {
+                FailLevelingSynchronization(Game, identity, new InvalidOperationException("forced-leveling-overlaps-local-leveling"));
+                return;
+            }
+            var session = Game;
+            var leveling = Game.Leveling;
+            leveling.Identity = identity;
+            leveling.IsForced = true;
+            leveling.AwaitingHostIdentity = false;
+            if (_deferredLevelings.TryGetValue(identity.Id, out var pending))
+            {
+                if (ReferenceEquals(pending, _activeDeferredLeveling) || pending.Failed)
+                {
+                    FailLevelingSynchronization(session, identity, new InvalidOperationException("forced-leveling-replay-not-quiescent"));
+                    return;
+                }
+                _deferredLevelings.Remove(identity.Id);
+                while (pending.Messages.Count > 0)
+                {
+                    var entry = pending.Messages.Dequeue();
+                    DispatchLiveLeveling(session, leveling, identity, entry.Apply);
+                }
+            }
+            if (ReferenceEquals(Game.Leveling, leveling))
+                OnLevelingWitnessPhase(new NetworkLevelingPhase { Index = leveling.PhaseIndex });
         }
 
         public void OnLevelingMythicClassSelected(string mythicClassId)
@@ -1136,7 +1308,7 @@ namespace WOTRMultiplayer.Services
 
         public bool CanMakeLevelingDecisions()
         {
-            if (Game.Leveling == null)
+            if (Game.Leveling == null || Game.Leveling.AwaitingHostIdentity || HasLevelingSynchronizationFailure)
             {
                 return false;
             }
@@ -1182,7 +1354,41 @@ namespace WOTRMultiplayer.Services
         private static bool IsIndependentLeveling(NetworkLevelingType type)
             => type == NetworkLevelingType.Leveling || type == NetworkLevelingType.MythicLeveling;
 
-        protected bool DeferRemoteLeveling(long ownerId, string unitId, NetworkLevelingType type)
+        protected NetworkLevelingIdentity CreateLevelingIdentity(long ownerId, string unitId, NetworkLevelingType type)
+            => new()
+            {
+                Id = Guid.NewGuid().ToString("N"), SessionId = Game.Id,
+                LoadedSaveSeed = Game.LoadedSaveSeed, OwnerId = ownerId,
+                UnitId = unitId, Type = type.ToString()
+            };
+
+        protected bool IsCurrentLevelingIdentity(NetworkLevelingIdentity identity)
+        {
+            var session = Game;
+            return identity != null && Guid.TryParseExact(identity.Id, "N", out _)
+                && session != null && identity.SessionId == session.Id
+                && identity.LoadedSaveSeed == session.LoadedSaveSeed;
+        }
+
+        private static bool SameLevelingIdentity(NetworkLevelingIdentity expected, NetworkLevelingIdentity received)
+            => expected != null && received != null && expected.Id == received.Id
+                && expected.SessionId == received.SessionId && expected.LoadedSaveSeed == received.LoadedSaveSeed
+                && expected.UnitId == received.UnitId && expected.Type == received.Type && expected.OwnerId == received.OwnerId;
+
+        protected void StampLevelingMessage(object message)
+        {
+            if (message is ILevelingMessage leveling && leveling.Leveling == null)
+                leveling.Leveling = Game?.Leveling?.Identity;
+        }
+
+        protected NetworkLevelingIdentity GetLevelingIdentityForStart(string unitId, NetworkLevelingType type)
+            => _deferredLevelings.Values.FirstOrDefault(value =>
+                ReferenceEquals(value.Session, Game) && value.UnitId == unitId && value.Type == type
+                && !value.HasTerminalMessage)?.Identity
+                ?? Game.Leveling?.Identity;
+
+        protected bool DeferRemoteLeveling(long ownerId, string unitId, NetworkLevelingType type,
+            NetworkLevelingIdentity identity = null)
         {
             if (!IsIndependentLeveling(type) || string.IsNullOrWhiteSpace(unitId)
                 || CanControlLeveling(Game.LocalPlayerId, unitId, type))
@@ -1192,110 +1398,286 @@ namespace WOTRMultiplayer.Services
 
             lock (ActionLock)
             {
-                if (_deferredLeveling != null)
+                identity ??= _deferredLevelings.Values.FirstOrDefault(value =>
+                    ReferenceEquals(value.Session, Game) && value.UnitId == unitId
+                    && value.OwnerId == ownerId && value.Type == type && !value.HasTerminalMessage)?.Identity
+                    ?? CreateLevelingIdentity(ownerId, unitId, type);
+                if (!_deferredLevelings.TryGetValue(identity.Id, out var deferred))
                 {
-                    return _deferredLeveling.OwnerId == ownerId
-                        && string.Equals(_deferredLeveling.UnitId, unitId, StringComparison.OrdinalIgnoreCase)
-                        && _deferredLeveling.Type == type;
+                    deferred = new DeferredLevelingSession
+                    {
+                        Session = Game,
+                        OwnerId = ownerId,
+                        UnitId = unitId,
+                        Type = type,
+                        Identity = identity
+                    };
+                    _deferredLevelings.Add(identity.Id, deferred);
+                    Logger.LogInformation("[LevelingOwnerUI] Deferring remote level-up replay. Owner={Owner}, UnitId={UnitId}, Type={Type}",
+                        ownerId, unitId, type);
                 }
-
-                _deferredLeveling = new DeferredLevelingSession
-                {
-                    OwnerId = ownerId,
-                    UnitId = unitId,
-                    Type = type
-                };
-                Logger.LogInformation("[LevelingOwnerUI] Deferring remote level-up replay. Owner={Owner}, UnitId={UnitId}, Type={Type}",
-                    ownerId, unitId, type);
-                return true;
+                return ReferenceEquals(deferred.Session, Game) && deferred.OwnerId == ownerId
+                    && deferred.UnitId == unitId && deferred.Type == type;
             }
         }
 
         private Action<long, T> DeferLevelingMessages<T>(Action<long, T> handler) where T : class
             => (receivedFrom, message) =>
+                DispatchLevelingMessage(() => ApplyLevelingMessage(receivedFrom, message, handler));
+
+        // Starts and subsequent messages must cross the same FIFO before looking
+        // up an active identity. Otherwise a choice can overtake its queued start.
+        protected void DispatchLevelingMessage(Action apply)
+        {
+            NetworkGame session;
+            int? saveSeed;
+            long generation;
+            lock (ActionLock)
+            {
+                session = Game;
+                saveSeed = Game?.LoadedSaveSeed;
+                generation = _levelingDispatchGeneration;
+            }
+            MainThreadAccessor.Post(() =>
             {
                 lock (ActionLock)
                 {
-                    if (!_replayingDeferredLeveling && _deferredLeveling != null)
-                    {
-                        _deferredLeveling.Messages.Enqueue((message, () => handler(receivedFrom, message)));
-                        if (message is NotifyLevelingCompleted || message is NotifyLevelingTerminated)
-                        {
-                            _deferredLeveling.HasTerminalMessage = true;
-                        }
-                        TryReplayDeferredLeveling();
-                        return;
-                    }
+                    if (session == null || !ReferenceEquals(Game, session)
+                        || Game.LoadedSaveSeed != saveSeed || generation != _levelingDispatchGeneration) return;
+                    apply();
                 }
+            });
+        }
 
+        private void ApplyLevelingMessage<T>(long receivedFrom, T message, Action<long, T> handler) where T : class
+        {
+            NetworkGame session;
+            NetworkLeveling leveling;
+            NetworkLevelingIdentity identity;
+            lock (ActionLock)
+            {
+                identity = (message as ILevelingMessage)?.Leveling;
+                if (!IsCurrentLevelingIdentity(identity) || HasLevelingSynchronizationFailure) return;
+                // The transport does not relay progressions. Only validated
+                // owner choices and authentic phase witnesses reach peers.
+                if (Game.LocalPlayerId == WOTRMultiplayer.Networking.NetworkConstants.HostPlayerId
+                    && (message is NotifyLevelingPhaseWitnessed witness
+                        ? witness.PlayerId != receivedFrom || !Game.Players.Any(player => player.Id == receivedFrom)
+                        : receivedFrom != identity.OwnerId)) return;
+                if (_deferredLevelings.TryGetValue(identity.Id, out var deferred)
+                    && ReferenceEquals(deferred.Session, Game)
+                    && SameLevelingIdentity(deferred.Identity, identity))
+                {
+                    if (deferred.HasTerminalMessage || deferred.Failed) return;
+                    deferred.Messages.Enqueue((message, () => handler(receivedFrom, message)));
+                    if (message is NotifyLevelingCompleted || message is NotifyLevelingTerminated)
+                    {
+                        deferred.HasTerminalMessage = true;
+                    }
+                    ForwardValidatedLevelingMessage(receivedFrom, message);
+                    TryReplayDeferredLeveling();
+                    return;
+                }
+                if (!SameLevelingIdentity(Game?.Leveling?.Identity, identity)) return;
+                session = Game;
+                leveling = Game.Leveling;
+            }
+
+            DispatchLiveLeveling(session, leveling, identity, () =>
+            {
+                ForwardValidatedLevelingMessage(receivedFrom, message);
                 handler(receivedFrom, message);
-            };
+            });
+        }
+
+        private void ForwardValidatedLevelingMessage(long receivedFrom, object message)
+        {
+            if (_networkConnection is INetworkHostConnection host
+                && message is Networking.Messages.IForwardableMessage)
+                host.BroadcastExcept(receivedFrom, message);
+        }
+
+        protected void StartOrQueueOwnedLeveling(NetworkLevelingIdentity identity, NetworkLevelingType type)
+        {
+            lock (ActionLock)
+            {
+                if (SameLevelingIdentity(Game.Leveling?.Identity, identity)) return;
+                if (_deferredLevelings.ContainsKey(identity.Id)) return;
+                if (Game.Leveling != null || _replayingDeferredLeveling)
+                {
+                    _deferredLevelings.Add(identity.Id, new DeferredLevelingSession
+                    {
+                        Session = Game, Identity = identity, OwnerId = identity.OwnerId,
+                        UnitId = identity.UnitId, Type = type, AwaitingOwnedUI = true
+                    });
+                    return;
+                }
+                BeginOwnedLeveling(identity, type);
+            }
+        }
+
+        private void BeginOwnedLeveling(NetworkLevelingIdentity identity, NetworkLevelingType type)
+        {
+            InitiateLeveling(identity.UnitId, type, identity);
+            var session = Game;
+            var leveling = Game.Leveling;
+            DispatchLiveLeveling(session, leveling, identity,
+                () => LevelingInteraction.StartLeveling(leveling.UnitId, leveling.Type));
+        }
+
+        protected void DispatchLiveLeveling(NetworkGame session, NetworkLeveling leveling,
+            NetworkLevelingIdentity identity, Action apply)
+        {
+            bool Current() => ReferenceEquals(Game, session) && ReferenceEquals(Game?.Leveling, leveling)
+                && IsCurrentLevelingIdentity(identity) && SameLevelingIdentity(leveling.Identity, identity)
+                && !HasLevelingSynchronizationFailure;
+            MainThreadAccessor.Post(() =>
+            {
+                if (!Current()) return;
+                try
+                {
+                    using (LevelingInteraction.EnterReplayScope(Current,
+                        error => FailLevelingSynchronization(session, identity, error))) apply();
+                }
+                catch (Exception error) { FailLevelingSynchronization(session, identity, error); }
+            });
+        }
 
         private void TryReplayDeferredLeveling()
         {
             DeferredLevelingSession deferred;
             lock (ActionLock)
             {
-                if (_replayingDeferredLeveling || Game?.Leveling != null
-                    || _deferredLeveling?.HasTerminalMessage != true)
+                if (_replayingDeferredLeveling || Game?.Leveling != null || HasLevelingSynchronizationFailure) return;
+                var owned = _deferredLevelings.Values.FirstOrDefault(value =>
+                    ReferenceEquals(value.Session, Game) && IsCurrentLevelingIdentity(value.Identity)
+                    && value.AwaitingOwnedUI && !value.AwaitingForcedUI && !value.Failed);
+                if (owned != null)
                 {
+                    if (!owned.OwnedStartScheduled)
+                    {
+                        owned.OwnedStartScheduled = true;
+                        DispatchLevelingMessage(() =>
+                        {
+                            owned.OwnedStartScheduled = false;
+                            if (Game.Leveling != null || _replayingDeferredLeveling || owned.AwaitingForcedUI || HasLevelingSynchronizationFailure
+                                || !_deferredLevelings.TryGetValue(owned.Identity.Id, out var pending)
+                                || !ReferenceEquals(pending, owned)) return;
+                            _deferredLevelings.Remove(owned.Identity.Id);
+                            BeginOwnedLeveling(owned.Identity, owned.Type);
+                            var session = Game;
+                            var leveling = Game.Leveling;
+                            while (owned.Messages.Count > 0)
+                                DispatchLiveLeveling(session, leveling, owned.Identity, owned.Messages.Dequeue().Apply);
+                        });
+                    }
                     return;
                 }
+                deferred = _deferredLevelings.Values.FirstOrDefault(value =>
+                    ReferenceEquals(value.Session, Game) && IsCurrentLevelingIdentity(value.Identity)
+                    && value.HasTerminalMessage && !value.AwaitingForcedUI && !value.Failed);
+                if (deferred == null) return;
 
+                _activeDeferredLeveling = deferred;
                 _replayingDeferredLeveling = true;
-                deferred = _deferredLeveling;
             }
 
             _ = ReplayDeferredLevelingAsync(deferred);
         }
 
+        private Task<bool> RunDeferredLevelingActionAsync(DeferredLevelingSession deferred, Action action)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            MainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    lock (ActionLock)
+                    {
+                        if (!ReferenceEquals(Game, deferred.Session)
+                            || !ReferenceEquals(_activeDeferredLeveling, deferred))
+                        {
+                            completion.TrySetResult(false);
+                            return;
+                        }
+                    }
+                    using (LevelingInteraction.EnterReplayScope(() =>
+                        ReferenceEquals(Game, deferred.Session)
+                        && ReferenceEquals(_activeDeferredLeveling, deferred)
+                        && IsCurrentLevelingIdentity(deferred.Identity) && !deferred.Failed && !HasLevelingSynchronizationFailure,
+                        error =>
+                        {
+                            deferred.Failed = true;
+                            FailLevelingSynchronization(deferred.Session, deferred.Identity, error);
+                        }))
+                        action();
+                    completion.TrySetResult(true);
+                }
+                catch (Exception error) { completion.TrySetException(error); }
+            });
+            return completion.Task;
+        }
+
         private async Task ReplayDeferredLevelingAsync(DeferredLevelingSession deferred)
         {
+            bool Current()
+            {
+                lock (ActionLock) return ReferenceEquals(Game, deferred.Session)
+                    && ReferenceEquals(_activeDeferredLeveling, deferred)
+                    && (deferred.Identity == null || IsCurrentLevelingIdentity(deferred.Identity))
+                    && !deferred.TerminalApplied && !deferred.Failed && !HasLevelingSynchronizationFailure;
+            }
             try
             {
-                InitiateLeveling(deferred.UnitId, deferred.Type);
-                // Independent remote level-ups must never open CharGen or enter a
-                // modal game mode on this peer. Replay them against a headless
-                // controller while the local player remains in the world or in
-                // their own separate level-up window.
-                LevelingInteraction.StartBackgroundLeveling(deferred.UnitId, deferred.Type);
+                if (!Current()) return;
+                if (!await RunDeferredLevelingActionAsync(deferred, () =>
+                {
+                    InitiateLeveling(deferred.UnitId, deferred.Type, deferred.Identity);
+                    // Independent remote level-ups must never open CharGen or enter a
+                    // modal game mode on this peer. Replay them against a headless
+                    // controller while the local player remains in the world or in
+                    // their own separate level-up window.
+                    LevelingInteraction.StartBackgroundLeveling(deferred.UnitId, deferred.Type);
+                })) return;
 
                 var deadline = DateTime.UtcNow.AddSeconds(20);
-                while (!LevelingInteraction.IsBackgroundLevelingReady && DateTime.UtcNow < deadline)
+                while (Current() && !LevelingInteraction.IsBackgroundLevelingReady && DateTime.UtcNow < deadline)
                 {
                     await Task.Delay(50);
                 }
-                if (!LevelingInteraction.IsBackgroundLevelingReady)
+                if (Current() && !LevelingInteraction.IsBackgroundLevelingReady)
                 {
                     throw new TimeoutException("deferred-leveling-ui-timeout");
                 }
 
                 Logger.LogInformation("[LevelingOwnerUI] Replaying deferred remote level-up. Owner={Owner}, UnitId={UnitId}, Messages={Count}",
                     deferred.OwnerId, deferred.UnitId, deferred.Messages.Count);
-                while (true)
+                while (Current())
                 {
                     (object Message, Action Apply) entry;
                     lock (ActionLock)
                     {
-                        if (deferred.Messages.Count == 0) break;
+                        if (!Current() || deferred.Messages.Count == 0) break;
                         entry = deferred.Messages.Dequeue();
                     }
-                    entry.Apply();
+                    if (!await RunDeferredLevelingActionAsync(deferred, entry.Apply)) break;
                     await Task.Delay(entry.Message is NotifyLevelingPhaseChanged ? 150 : 50);
                 }
 
                 deadline = DateTime.UtcNow.AddSeconds(20);
-                while (Game?.Leveling != null && DateTime.UtcNow < deadline)
+                while (Current() && Game?.Leveling != null && DateTime.UtcNow < deadline)
                 {
                     await Task.Delay(50);
                 }
-                if (Game?.Leveling != null)
+                if (Current() && Game?.Leveling != null)
                 {
                     throw new TimeoutException("deferred-leveling-completion-timeout");
                 }
             }
             catch (Exception ex)
             {
+                deferred.Failed = true;
+                FailLevelingSynchronization(deferred.Session, deferred.Identity, ex);
                 Logger.LogError(ex, "[LevelingOwnerUI] Deferred remote level-up replay failed. Owner={Owner}, UnitId={UnitId}",
                     deferred.OwnerId, deferred.UnitId);
             }
@@ -1303,8 +1685,14 @@ namespace WOTRMultiplayer.Services
             {
                 lock (ActionLock)
                 {
-                    if (ReferenceEquals(_deferredLeveling, deferred)) _deferredLeveling = null;
-                    _replayingDeferredLeveling = false;
+                    if (!deferred.Failed && deferred.Identity != null && _deferredLevelings.TryGetValue(deferred.Identity.Id, out var current)
+                        && ReferenceEquals(current, deferred))
+                        _deferredLevelings.Remove(deferred.Identity.Id);
+                    if (ReferenceEquals(_activeDeferredLeveling, deferred))
+                    {
+                        _activeDeferredLeveling = null;
+                        _replayingDeferredLeveling = false;
+                    }
                 }
                 TryReplayDeferredLeveling();
             }
@@ -1317,6 +1705,7 @@ namespace WOTRMultiplayer.Services
 
         public void OnLevelingWitnessPhase(NetworkLevelingPhase phase)
         {
+            if (Game.Leveling == null || Game.Leveling.AwaitingHostIdentity || HasLevelingSynchronizationFailure) return;
             if (Game.Leveling.PhaseIndex != phase.Index && CanMakeLevelingDecisions())
             {
                 var phaseChangedMessage = new NotifyLevelingPhaseChanged
@@ -1869,6 +2258,7 @@ namespace WOTRMultiplayer.Services
                 PlayerNotification.AddCombatText(messageKey, CombatTextSeverity.Common, new UnitLogParameter(Game.Leveling.UnitId));
             }
 
+            MarkDeferredLevelingTerminalApplied();
             Game.Leveling = null;
             TryReplayDeferredLeveling();
         }
@@ -1902,8 +2292,20 @@ namespace WOTRMultiplayer.Services
                 UpdateCharactersOwnership();
             }
 
+            MarkDeferredLevelingTerminalApplied();
             Game.Leveling = null;
             TryReplayDeferredLeveling();
+        }
+
+        private void MarkDeferredLevelingTerminalApplied()
+        {
+            lock (ActionLock)
+            {
+                var identity = Game.Leveling?.Identity;
+                if (identity != null && _deferredLevelings.TryGetValue(identity.Id, out var deferred)
+                    && ReferenceEquals(deferred.Session, Game) && SameLevelingIdentity(deferred.Identity, identity))
+                    deferred.TerminalApplied = true;
+            }
         }
 
         public void OnCharacterSelectionWindowShown()
@@ -2814,14 +3216,18 @@ namespace WOTRMultiplayer.Services
             Game.PlayersInGlobalMapMode.AddOrUpdate(playerId, travelerMode, (key, existing) => travelerMode);
         }
 
-        protected void InitiateLeveling(string unitId, NetworkLevelingType levelingType)
+        protected void InitiateLeveling(string unitId, NetworkLevelingType levelingType,
+            NetworkLevelingIdentity identity = null)
         {
             if (Game.Leveling != null)
             {
                 Logger.LogWarning("Previous leveling has not been finished. UnitId={UnitId}, Type={Type}", Game.Leveling.UnitId, Game.Leveling.Type);
             }
 
-            Game.Leveling = new NetworkLeveling(unitId, levelingType);
+            Game.Leveling = new NetworkLeveling(unitId, levelingType)
+            {
+                Identity = identity ?? CreateLevelingIdentity(Game.LocalPlayerId, unitId, levelingType)
+            };
         }
 
         protected async Task WaitForTurnToBeCompletedAsync()
@@ -3519,12 +3925,22 @@ namespace WOTRMultiplayer.Services
         protected void SoftReset()
         {
             Logger.LogInformation("Doing soft reset");
+            lock (ActionLock)
+            {
+                _levelingDispatchGeneration++;
+                var interrupted = IsCurrentLevelingIdentity(Game.Leveling?.Identity) ? Game.Leveling.Identity
+                    : _deferredLevelings.Values.FirstOrDefault(value => ReferenceEquals(value.Session, Game)
+                        && !value.TerminalApplied && IsCurrentLevelingIdentity(value.Identity))?.Identity;
+                if (interrupted != null)
+                    FailLevelingSynchronization(Game, interrupted, new InvalidOperationException("leveling-interrupted-by-area-reset"));
+                Game.Leveling = null;
+                _deferredLevelings.Clear();
+                _activeDeferredLeveling = null;
+                _replayingDeferredLeveling = false;
+            }
             Game.StartUp = null;
             Game.Combat = null;
             Game.ArmyCombat = null;
-            Game.Leveling = null;
-            _deferredLeveling = null;
-            _replayingDeferredLeveling = false;
             _pauseCooldown = null;
             ResetLastCombatTurn();
             ValueGenerator.ResetSeededGenerators(IdentifierLifetime.Area, IdentifierLifetime.Combat, IdentifierLifetime.CombatTurn);
@@ -4166,7 +4582,10 @@ namespace WOTRMultiplayer.Services
             CombatInteraction.RunTacticalUnitMoveToCommand(command);
         }
 
-        private async void OnNotifyTacticalUnitAttackCommandExecuted(long receivedFrom, NotifyTacticalUnitAttackCommandExecuted message)
+         private void OnNotifyTacticalUnitAttackCommandExecuted(long receivedFrom, NotifyTacticalUnitAttackCommandExecuted message)
+            => SafeFireAndForget(() => OnNotifyTacticalUnitAttackCommandExecutedAsync(receivedFrom, message));
+
+         private async Task OnNotifyTacticalUnitAttackCommandExecutedAsync(long receivedFrom, NotifyTacticalUnitAttackCommandExecuted message)
         {
             var command = Mapper.Map<NetworkTacticalUnitAttackCommand>(message.Command);
 
@@ -4216,7 +4635,10 @@ namespace WOTRMultiplayer.Services
             GameInteraction.TriggerLootClosedActions(mapObject);
         }
 
-        private async void OnNotifyGlobalMapTravelerModeChanged(long receivedFrom, NotifyGlobalMapTravelerModeChanged message)
+         private void OnNotifyGlobalMapTravelerModeChanged(long receivedFrom, NotifyGlobalMapTravelerModeChanged message)
+            => SafeFireAndForget(() => OnNotifyGlobalMapTravelerModeChangedAsync(receivedFrom, message));
+
+         private async Task OnNotifyGlobalMapTravelerModeChangedAsync(long receivedFrom, NotifyGlobalMapTravelerModeChanged message)
         {
             await WaitWhileTrue(() => Game.CurrentArea == null, "Waiting for area to load before updating traveler mode");
 
@@ -4428,7 +4850,10 @@ namespace WOTRMultiplayer.Services
             GameInteraction.SetPause(true);
         }
 
-        private async void OnNotifyTrapDisarmRolled(long receivedFrom, NotifyTrapDisarmRolled message)
+         private void OnNotifyTrapDisarmRolled(long receivedFrom, NotifyTrapDisarmRolled message)
+            => SafeFireAndForget(() => OnNotifyTrapDisarmRolledAsync(receivedFrom, message));
+
+         private async Task OnNotifyTrapDisarmRolledAsync(long receivedFrom, NotifyTrapDisarmRolled message)
         {
             await WaitWhileTrue(() => GameInteraction.IsUnitBusy(message.TrapDisarm.UnitId), "Waiting for unit to finish actions before applying trap disarm roll");
 
@@ -4436,7 +4861,10 @@ namespace WOTRMultiplayer.Services
             GameInteraction.ApplyTrapDisarm(trapDisarm);
         }
 
-        private async void OnNotifyUnitKilled(long receivedFrom, NotifyUnitKilled message)
+         private void OnNotifyUnitKilled(long receivedFrom, NotifyUnitKilled message)
+            => SafeFireAndForget(() => OnNotifyUnitKilledAsync(receivedFrom, message));
+
+         private async Task OnNotifyUnitKilledAsync(long receivedFrom, NotifyUnitKilled message)
         {
             try
             {
@@ -4544,7 +4972,10 @@ namespace WOTRMultiplayer.Services
             UpdateGlobalMapCrusadeArmyBattleResultsUIState();
         }
 
-        private async void OnNotifyTacticalCombatTurnInitialized(long receivedFrom, NotifyTacticalCombatTurnInitialized message)
+         private void OnNotifyTacticalCombatTurnInitialized(long receivedFrom, NotifyTacticalCombatTurnInitialized message)
+            => SafeFireAndForget(() => OnNotifyTacticalCombatTurnInitializedAsync(receivedFrom, message));
+
+         private async Task OnNotifyTacticalCombatTurnInitializedAsync(long receivedFrom, NotifyTacticalCombatTurnInitialized message)
         {
             await WaitWhileTrue(() => Game.ArmyCombat == null || Game.ArmyCombat.Seed == 0 || !CombatInteraction.IsInCrusadeTacticalCombat(), "Crusade army combat has not been started yet");
 
@@ -4556,7 +4987,10 @@ namespace WOTRMultiplayer.Services
             UpdateReadyStatus(message.PlayerId, message.IsReady);
         }
 
-        private async void OnNotifyCutsceneSkipped(long playerId, NotifyCutsceneSkipped message)
+         private void OnNotifyCutsceneSkipped(long playerId, NotifyCutsceneSkipped message)
+            => SafeFireAndForget(() => OnNotifyCutsceneSkippedAsync(playerId, message));
+
+         private async Task OnNotifyCutsceneSkippedAsync(long playerId, NotifyCutsceneSkipped message)
         {
             var isCutscene = await WaitWhileTrue(() => GameInteraction.CurrentGameMode != GameModeType.Cutscene, "Waiting for cutscene to be played before applying skip");
             if (!isCutscene)
@@ -4766,7 +5200,10 @@ namespace WOTRMultiplayer.Services
             UpdateZoneLootUIState();
         }
 
-        private async void OnNotifyZoneLootShown(long receivedFrom, NotifyZoneLootShown message)
+         private void OnNotifyZoneLootShown(long receivedFrom, NotifyZoneLootShown message)
+            => SafeFireAndForget(() => OnNotifyZoneLootShownAsync(receivedFrom, message));
+
+         private async Task OnNotifyZoneLootShownAsync(long receivedFrom, NotifyZoneLootShown message)
         {
             AddPlayerToTracker(Game.PlayersInZoneLoot, message.PlayerId);
             await GameInteraction.ShowZoneLootAsync(message.AreaExitId);
@@ -5063,12 +5500,18 @@ namespace WOTRMultiplayer.Services
             LevelingInteraction.SwitchLevelingPhase(phase);
         }
 
-        private async void OnNotifyLevelingPhaseWitnessed(long receivedFrom, NotifyLevelingPhaseWitnessed message)
+         private void OnNotifyLevelingPhaseWitnessed(long receivedFrom, NotifyLevelingPhaseWitnessed message)
+            => SafeFireAndForget(() => OnNotifyLevelingPhaseWitnessedAsync(receivedFrom, message));
+
+         private async Task OnNotifyLevelingPhaseWitnessedAsync(long receivedFrom, NotifyLevelingPhaseWitnessed message)
         {
+            var session = Game;
             // leveling is always created at the host first and later on on clients as a part of leveling confirmation
             // but not in case when game is forcing leveling ui to open for everyone at the same time => means there is some racing there
             await WaitWhileTrue(() => Game.Leveling == null, "Received leveling witness notification, but leveling has not been started yet.");
 
+            if (!ReferenceEquals(Game, session) || !IsCurrentLevelingIdentity(message.Leveling)
+                || !SameLevelingIdentity(Game?.Leveling?.Identity, message.Leveling)) return;
             WitnessLevelingPhase(message.PlayerId);
         }
 

@@ -8,6 +8,9 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyGlobalMapInteractionService : IGlobalMapInteractionService
     {
+        public void TickMapPresentation() { }
+        public void ObserveCommonPopup(NetworkGlobalMapCommonPopup popup) { }
+        public void ShowReceivedLocation(NetworkGlobalMapLocation location) { }
         public void AcceptEncounter()
         {
         }
@@ -45,7 +48,7 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
             return false;
         }
 
-        public void RollEncounter(NetworkGlobalMapEncounter encounter)
+        public void RollEncounter(NetworkGlobalMapEncounter encounter, string eventId = null)
         {
         }
 

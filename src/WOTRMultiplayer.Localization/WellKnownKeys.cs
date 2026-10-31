@@ -1708,6 +1708,18 @@ public static class WellKnownKeys
                 public static string Key { get; set; }
             }
 
+            [Description("synchronizationFailed")]
+            public static class SynchronizationFailed
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("ownerChangeBlocked")]
+            public static class OwnerChangeBlocked
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("featureMismatch")]
             public static class FeatureMismatch
             {

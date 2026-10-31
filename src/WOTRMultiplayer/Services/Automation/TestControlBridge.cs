@@ -16,6 +16,7 @@ using UnityEngine;
 using WOTRMultiplayer.Abstractions;
 using WOTRMultiplayer.Abstractions.GameInteraction;
 using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 
 namespace WOTRMultiplayer.Services.Automation
@@ -347,6 +348,73 @@ namespace WOTRMultiplayer.Services.Automation
                         }, null);
                         return;
                     }
+                    case "submit_move":
+                    {
+                        var client = _actors.Client as MultiplayerClient;
+                        if (client?.IsActive != true || client.Game?.Combat?.Stage != NetworkCombatStage.Running
+                            || client.Game.RealTimeCombat?.Phase != CombatSynchronizationPhase.Stable)
+                            throw new InvalidOperationException("move-requires-stable-real-time-combat");
+                        var unitId = arguments.Value<string>("unitId");
+                        if (!client.IsControlledByLocalPlayer(unitId))
+                            throw new InvalidOperationException("move-unit-not-controlled-locally");
+                        var unit = Game.Instance?.Player?.PartyAndPets?.FirstOrDefault(value =>
+                            value.UniqueId == unitId && !value.State.IsFinallyDead)
+                            ?? throw new InvalidOperationException("move-party-unit-not-found");
+                        var distance = arguments.Value<float?>("distance") ?? 2f;
+                        if (float.IsNaN(distance) || float.IsInfinity(distance) || distance < 0.1f || distance > 10f)
+                            throw new InvalidDataException("move-distance-invalid");
+                        var from = unit.Position;
+                        var destination = from + new Vector3(distance, 0, 0);
+                        var accepted = client.SubmitRealTimeCombatCommand(RealTimeCommandKind.Move,
+                            new NetworkUnitMoveTo
+                            {
+                                InitiatorUnitId = unitId,
+                                Position = new NetworkVector3(from.x, from.y, from.z),
+                                Destination = new NetworkVector3(destination.x, destination.y, destination.z)
+                            });
+                        Complete(requestId, new JObject
+                        {
+                            ["accepted"] = accepted,
+                            ["unitId"] = unitId,
+                            ["fromX"] = from.x,
+                            ["destinationX"] = destination.x
+                        }, null);
+                        return;
+                    }
+                    case "submit_attack":
+                    {
+                        var client = _actors.Client as MultiplayerClient;
+                        if (client?.IsActive != true || client.Game?.Combat?.Stage != NetworkCombatStage.Running
+                            || client.Game.RealTimeCombat?.Phase != CombatSynchronizationPhase.Stable)
+                            throw new InvalidOperationException("attack-requires-stable-real-time-combat");
+                        var unitId = arguments.Value<string>("unitId");
+                        if (!client.IsControlledByLocalPlayer(unitId))
+                            throw new InvalidOperationException("attack-unit-not-controlled-locally");
+                        var unit = Game.Instance?.Player?.PartyAndPets?.FirstOrDefault(value =>
+                            value.UniqueId == unitId && !value.State.IsFinallyDead)
+                            ?? throw new InvalidOperationException("attack-party-unit-not-found");
+                        var requestedEnemyId = arguments.Value<string>("enemyId");
+                        var hostiles = Game.Instance.State.Units.All.Where(value => value != null
+                            && !value.State.IsFinallyDead && !value.IsPlayerFaction && value.IsPlayersEnemy && value.View != null);
+                        var enemy = string.IsNullOrWhiteSpace(requestedEnemyId)
+                            ? hostiles.OrderBy(value => Vector3.Distance(unit.Position, value.Position)).FirstOrDefault()
+                            : hostiles.FirstOrDefault(value => value.UniqueId == requestedEnemyId);
+                        if (enemy == null) throw new InvalidOperationException("attack-hostile-unit-not-found");
+                        var accepted = client.SubmitRealTimeCombatCommand(RealTimeCommandKind.Attack,
+                            attack: new NetworkUnitAttack
+                            {
+                                InitiatorUnitId = unitId,
+                                TargetUnitId = enemy.UniqueId,
+                                IsFullAttack = true
+                            });
+                        Complete(requestId, new JObject
+                        {
+                            ["accepted"] = accepted,
+                            ["unitId"] = unitId,
+                            ["enemyId"] = enemy.UniqueId
+                        }, null);
+                        return;
+                    }
                     case "set_pause":
                     {
                         var paused = RequireBoolean(arguments, "paused");
@@ -392,6 +460,35 @@ namespace WOTRMultiplayer.Services.Automation
                             ["accepted"] = accepted,
                             ["requestedMode"] = mode.ToString()
                         });
+                        return;
+                    }
+                    case "inject_hp_divergence":
+                    {
+                        var client = _actors.Client as MultiplayerClient;
+                        if (client?.IsActive != true)
+                            throw new InvalidOperationException("hp-divergence-client-only");
+                        if (client.Game?.Combat?.Stage != NetworkCombatStage.Running
+                            || client.Game.RealTimeCombat?.Mode != CombatMode.RealTimeWithPause
+                            || client.Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
+                            throw new InvalidOperationException("hp-divergence-requires-stable-real-time-combat");
+                        var unitId = arguments.Value<string>("unitId");
+                        var unit = Game.Instance?.Player?.PartyAndPets?.FirstOrDefault(value =>
+                            string.Equals(value.UniqueId, unitId, StringComparison.Ordinal))
+                            ?? throw new InvalidOperationException("hp-divergence-party-unit-not-found");
+                        var hp = arguments.Value<int?>("hp")
+                            ?? throw new InvalidDataException("hp-required");
+                        if (hp < 1 || hp > unit.MaxHP) throw new InvalidDataException("hp-out-of-range");
+                        if (unit.HPLeft == hp) throw new InvalidDataException("hp-divergence-no-op");
+                        var before = unit.HPLeft;
+                        unit.Descriptor.m_Damage = unit.MaxHP - hp;
+                        _logger.LogWarning("[MCP] Injected local HP divergence. UnitId={UnitId}, Before={Before}, After={After}",
+                            unit.UniqueId, before, unit.HPLeft);
+                        Complete(requestId, new JObject
+                        {
+                            ["unitId"] = unit.UniqueId,
+                            ["before"] = before,
+                            ["after"] = unit.HPLeft
+                        }, null);
                         return;
                     }
                     case "force_sync":

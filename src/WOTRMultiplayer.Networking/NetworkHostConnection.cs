@@ -11,6 +11,7 @@ using WOTRMultiplayer.Networking.Channels;
 using WOTRMultiplayer.Networking.Configuration;
 using WOTRMultiplayer.Networking.Consuming;
 using WOTRMultiplayer.Networking.Messages;
+using WOTRMultiplayer.Networking.Messages.Game;
 
 namespace WOTRMultiplayer.Networking
 {
@@ -127,7 +128,16 @@ namespace WOTRMultiplayer.Networking
 
         protected override void OnMessageReceived(NetworkMessageMetadata networkMessageMetadata)
         {
-            if (networkMessageMetadata.Message is IForwardableMessage)
+            if (!TryGetPlayerInfo(networkMessageMetadata.ChannelType, networkMessageMetadata.ClientId, out var playerId))
+            {
+                Logger.LogError("Unable to find player id for specified client. ChannelType={ChannelType}, ClientId={ClientId}", networkMessageMetadata.ChannelType, networkMessageMetadata.ClientId);
+                return;
+            }
+
+            // Progression messages need actor-level identity and owner validation
+            // before they can be relayed to peers which trust this host.
+            if (networkMessageMetadata.Message is IForwardableMessage
+                && networkMessageMetadata.Message is not ILevelingMessage)
             {
                 try
                 {
@@ -137,12 +147,6 @@ namespace WOTRMultiplayer.Networking
                 {
                     Logger.LogError(ex, "Error while forwarding message. ChannelType={ChannelType}, ClientId={ClientId}, MessageType={MessageType}", networkMessageMetadata.ChannelType, networkMessageMetadata.ClientId, networkMessageMetadata.Message.GetType().Name);
                 }
-            }
-
-            if (!TryGetPlayerInfo(networkMessageMetadata.ChannelType, networkMessageMetadata.ClientId, out var playerId))
-            {
-                Logger.LogError("Unable to find player id for specified client. ChannelType={ChannelType}, ClientId={ClientId}", networkMessageMetadata.ChannelType, networkMessageMetadata.ClientId);
-                return;
             }
 
             networkMessageMetadata.PlayerId = playerId;

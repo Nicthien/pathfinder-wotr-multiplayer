@@ -10,6 +10,11 @@ namespace WOTRMultiplayer.Networking
     // event subscriptions, command ledgers or native execution equivalence.
     public static class RealTimeNativeTopologyComparison
     {
+        public const string AbilityRuntimeType = "Kingmaker.UnitLogic.Abilities.Ability";
+
+        public static bool AllowsDuplicateFactIds(string runtimeType)
+            => string.Equals(runtimeType, AbilityRuntimeType, StringComparison.Ordinal);
+
         public static void RequireValid(NetworkNativeTopology topology)
         {
             if (topology?.Entities == null || topology.Entities.Count > 32768) throw Invalid();
@@ -23,12 +28,16 @@ namespace WOTRMultiplayer.Networking
                 if (entity == null || !Text(entity.Id, 256) || !ids.Add(entity.Id)
                     || entity.Kind != "unit" && entity.Kind != "area" || entity.Parts == null || entity.Facts == null) throw Invalid();
                 foreach (var part in entity.Parts) { Node(); if (!Text(part, 2048)) throw Invalid(); }
-                var facts = new HashSet<string>(StringComparer.Ordinal);
+                var facts = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (var fact in entity.Facts)
                 {
                     Node();
-                    if (fact == null || !Text(fact.Id, 256) || !facts.Add(fact.Id) || !Text(fact.RuntimeType, 2048)
+                    if (fact == null || !Text(fact.Id, 256) || !Text(fact.RuntimeType, 2048)
                         || !Text(fact.BlueprintId, 64) || fact.Components == null) throw Invalid();
+                    if (facts.TryGetValue(fact.Id, out var previousRuntimeType)
+                        && (previousRuntimeType != fact.RuntimeType || !AllowsDuplicateFactIds(fact.RuntimeType)))
+                        throw Invalid();
+                    facts[fact.Id] = fact.RuntimeType;
                     foreach (var component in fact.Components)
                     {
                         Node();

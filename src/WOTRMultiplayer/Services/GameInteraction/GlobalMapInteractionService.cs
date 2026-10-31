@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -1472,7 +1472,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
         public Task<bool> ShowCommonPopupAsync(NetworkGlobalMapCommonPopup popup)
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var receivedScope = GlobalMapPresentationScope.Current;
             _mainThreadAccessor.Post(() =>
             {
