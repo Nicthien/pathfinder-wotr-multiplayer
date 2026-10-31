@@ -310,6 +310,7 @@ namespace WOTRMultiplayer.Services
 
         public void CombatRoundStarted(int round)
         {
+            if (IsSaveLoadPending) return;
             Logger.LogInformation("Combat round started. Round={Round}", round);
             Game.Combat.Round = round;
         }
@@ -639,6 +640,7 @@ namespace WOTRMultiplayer.Services
                 _combatSaveGameLoaded = true;
                 Logger.LogInformation("[CombatSave] Native load lifecycle completed; awaiting final idle state.");
             }
+            CompleteSaveLoad();
         }
 
         private DateTime _lastLocalPingAt;
@@ -696,9 +698,29 @@ namespace WOTRMultiplayer.Services
 
         public void ForceLoadGame(string gameId, string savePath)
         {
+            if (IsSaveLoadPending)
+            {
+                // LoadSavedGame queues Game.LoadGame after preparing the network
+                // load. Admit that native entry once without starting another transfer.
+                if (_nativeSaveLoadStarted && !_nativeSaveLoadAdmitted && Game.Id == gameId
+                    && string.Equals(Path.GetFullPath(Game.StartUp.SavePath), Path.GetFullPath(savePath), StringComparison.OrdinalIgnoreCase))
+                {
+                    _nativeSaveLoadAdmitted = true;
+                    return;
+                }
+                throw new InvalidOperationException("save-load-already-pending");
+            }
             if (Game.Stage != NetworkLobbyStage.Playing && Game.Stage != NetworkLobbyStage.Lobby)
             {
-                return;
+                throw new InvalidOperationException("save-load-stage-unavailable");
+            }
+
+            if (WOTRMultiplayer.Services.GameInteraction.RealTimeNativeLoadLease.IsActive
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable || Game.RealTimeCombat.CombatEndPending)
+            {
+                Logger.LogWarning("[SaveLoad] Load refused while a world replacement or combat barrier owns the world.");
+                PlayerNotification.ShowWarningNotification(WellKnownKeys.LobbyWindow.RealTime.ModeUnavailable.Key);
+                throw new InvalidOperationException("save-load-combat-barrier-active");
             }
 
             PrepareCombatSaveLoad(savePath);
@@ -721,13 +743,21 @@ namespace WOTRMultiplayer.Services
             ResetOnSaveLoad();
 
             Game.LoadedSaveSeed = CreateRandomSeed();
+            BeginSaveLoad();
+            // This method is called by Game.LoadGame's prefix: the host is
+            // already entering its native load, unlike a peer awaiting chunks.
+            _nativeSaveLoadStarted = true;
+            _nativeSaveLoadAdmitted = true;
 
             TransferSaveGame(requiresProgress: false);
         }
 
         public void CombatStarted()
         {
+            if (IsSaveLoadPending) return;
             if (CombatSaving.CombatSaveLoadState.Active) return;
+            if (HasCombatStartupFailure) { GameInteraction.SetPause(true); return; }
+            if (Game?.Combat != null && HoldsCombatMembership) return;
             _combatSaveSemanticSeeds = null;
             if (TryRetainRealTimeCombatOnStart()) return;
             if (RealTimePresentationRuntime.Enabled && Game?.RealTimeCombat?.CombatEndPending == true)
@@ -747,8 +777,13 @@ namespace WOTRMultiplayer.Services
 
             Game.Combat = new NetworkCombat
             {
-                StartedAt = DateTime.UtcNow
+                StartedAt = DateTime.UtcNow,
+                RealTimeBootstrapPending = Game.RealTimeCombat.PreferredMode == CombatMode.RealTimeWithPause
             };
+            // A new encounter needs its own RTwP handshake, even if the native
+            // engine already has real-time selected from outside combat.
+            Game.RealTimeCombat.Mode = CombatMode.TurnBased;
+            if (Game.Combat.RealTimeBootstrapPending) GameInteraction.SetPause(true);
             ResetLastCombatTurn();
         }
 
@@ -759,6 +794,13 @@ namespace WOTRMultiplayer.Services
 
         public void CombatEnded()
         {
+            if (IsSaveLoadPending) return;
+            if (IsNativeCombatRestart) return;
+            if (IsCombatStartupBlocked)
+            {
+                FailCombatStartup("native-combat-ended-during-initialization");
+                return;
+            }
             if (TryDeferRealTimeCombatEnd()) return;
             CompleteCombatEnd();
         }
@@ -802,7 +844,7 @@ namespace WOTRMultiplayer.Services
             var session = Game;
             var state = session?.RealTimeCombat;
             if (!isActive() || state == null || session.Stage != NetworkLobbyStage.Playing
-                || session.Combat?.Stage == NetworkCombatStage.Running
+                || session.Combat != null
                 || state.CombatEndPending || state.Phase != CombatSynchronizationPhase.Stable) return;
             var sequence = state.PreferenceSequence;
             var saveSeed = session.LoadedSaveSeed;
@@ -813,11 +855,11 @@ namespace WOTRMultiplayer.Services
                     () => isActive() && ReferenceEquals(Game, session) && ReferenceEquals(session.RealTimeCombat, state)
                         && session.LoadedSaveSeed == saveSeed && state.PreferenceSequence == sequence
                         && session.Stage == NetworkLobbyStage.Playing
-                        && session.Combat?.Stage != NetworkCombatStage.Running
+                        && session.Combat == null
                         && state.Phase == CombatSynchronizationPhase.Stable && !state.CombatEndPending
                         && Kingmaker.Game.Instance?.Player?.IsInCombat == false);
                 if (applied && ReferenceEquals(Game, session) && state.PreferenceSequence == sequence
-                    && session.Combat?.Stage != NetworkCombatStage.Running)
+                    && session.Combat == null)
                 {
                     state.Mode = mode;
                     Logger.LogInformation("[CombatMode] Outside-combat engine selection and button updated. Mode={Mode}, Sequence={Sequence}", mode, sequence);
@@ -2806,6 +2848,7 @@ namespace WOTRMultiplayer.Services
 
         public void ForceUnpause()
         {
+            if (IsCombatStartupBlocked) { GameInteraction.SetPause(true); return; }
             lock (ActionLock)
             {
                 Game.ForcedPause = null;
@@ -2815,6 +2858,13 @@ namespace WOTRMultiplayer.Services
 
         public bool ToggleManualPause(bool isPaused)
         {
+            if (IsCombatStartupBlocked)
+            {
+                GameInteraction.SetPause(true);
+                // The keyboard caller toggles IsPaused again when this returns
+                // true. Safety pause has already been applied locally.
+                return false;
+            }
             lock (ActionLock)
             {
                 // unpaused => paused
@@ -3885,6 +3935,8 @@ namespace WOTRMultiplayer.Services
             ResetRealTimeRuleRolls();
             ResetOnSaveLoad();
 
+            BeginSaveLoad();
+            _nativeSaveLoadStarted = true;
             Game.ForcedPause = null;
             GameInteraction.SetPause(false);
             // it's important to use different loading method for players who joined mid-game
@@ -4667,6 +4719,7 @@ namespace WOTRMultiplayer.Services
 
             Game.Id = message.GameId;
             Game.LoadedSaveSeed = message.LoadedSaveSeed;
+            if (!message.IsNewGameSequence) BeginSaveLoad();
 
             if (Game.StartUp.IsNewGameSequence)
             {

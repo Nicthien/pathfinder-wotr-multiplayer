@@ -43,6 +43,8 @@ namespace WOTRMultiplayer.Entities.Combat
 
         public bool IsStarted { get; set; }
 
+        public bool RealTimeBootstrapPending { get; set; }
+
         public ConcurrentDictionary<long, bool> PlayersFinishedStartupSequence { get; set; } = [];
 
         public ConcurrentDictionary<long, bool> PlayersInCombat { get; set; } = [];

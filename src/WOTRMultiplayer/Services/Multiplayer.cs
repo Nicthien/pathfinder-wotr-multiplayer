@@ -104,6 +104,8 @@ namespace WOTRMultiplayer.Services
 
         public void UpdateRealTimeCombat()
         {
+            if (_multiplayerActorAccessor.Current is MultiplayerActorBase startupActor)
+                startupActor.TickCombatStartup();
             if (_multiplayerActorAccessor.Current is MultiplayerActorBase movementActor)
                 movementActor.TickTurnMovement();
             if (_multiplayerActorAccessor.Client is MultiplayerClient saveClient) saveClient.TickCombatSave();
@@ -118,6 +120,17 @@ namespace WOTRMultiplayer.Services
         }
 
         public bool IsRealTimeClientCombatActive => _multiplayerActorAccessor.Client.IsRealTimeCombatActive;
+
+        public bool IsClientSaveTransferActive => _multiplayerActorAccessor.Client is MultiplayerClient client
+            && client.IsActive && client.HoldsWorldBeforeSaveLoad;
+
+        public bool IsCombatSimulationBlocked => (_multiplayerActorAccessor.Current is MultiplayerActorBase actor
+            && (actor.IsCombatStartupBlocked || actor.HoldsWorldBeforeSaveLoad))
+            || (_multiplayerActorAccessor.Client is MultiplayerClient client && client.HasCombatStartupFailure)
+            || (_multiplayerActorAccessor.Host is MultiplayerHost host && host.HasCombatStartupFailure);
+
+        public bool HoldsCombatMembership => _multiplayerActorAccessor.Current is MultiplayerActorBase actor
+            && actor.HoldsCombatMembership;
 
         public void ToggleNetworkCombatMode()
         {

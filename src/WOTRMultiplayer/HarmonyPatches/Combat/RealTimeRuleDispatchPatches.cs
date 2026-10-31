@@ -101,8 +101,13 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPrefix]
         [HarmonyPriority(Priority.First)]
-        public static bool BeforeDispatch(RulebookEvent __0, Delegate __1) =>
-            BeforeCallback(__0, __1, RealTimePresentationRuntime.IsClientActive, Report);
+        public static bool BeforeDispatch(RulebookEvent __0, Delegate __1)
+        {
+            if (Main.Multiplayer?.IsCombatSimulationBlocked == true && __0 != null
+                && RealTimePresentationRulePatches.IsMutation(__0.GetType()))
+                return BeforeCallback(__0, __1, true, null);
+            return BeforeCallback(__0, __1, RealTimePresentationRuntime.IsClientActive, Report);
+        }
 
         private static void Report(RulebookEvent rule) => Main.Multiplayer.ReportRealTimeAIActionFault(
             rule.Initiator?.UniqueId, null, "autonomous-client-rule-dispatch:" + rule.GetType().Name);

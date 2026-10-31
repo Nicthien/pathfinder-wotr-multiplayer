@@ -136,7 +136,8 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
 
         [HarmonyPrefix]
         public static bool BeforeTick(UnitEntityData __0) =>
-            !RealTimePresentationRuntime.IsClientActive || __0?.IsInCombat != true;
+            Main.Multiplayer?.IsCombatSimulationBlocked != true
+                && (!RealTimePresentationRuntime.IsClientActive || __0?.IsInCombat != true);
     }
 
     [HarmonyPatch]
@@ -155,6 +156,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool BeforeRule(RulebookEvent __instance)
         {
+            if (Main.Multiplayer?.IsCombatSimulationBlocked == true) return false;
             if (!RealTimePresentationRuntime.IsClientActive) return true;
             Main.GetLogger<RealTimePresentationRulePatches>().LogError(
                 "Blocked autonomous client combat rule in presentation prototype. RuleType={RuleType}, UnitId={UnitId}",

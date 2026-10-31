@@ -16,6 +16,7 @@ namespace WOTRMultiplayer.Services
             // revoke hydration/stash writes, not re-enable rules or AI while
             // the protected client world is still being reconstructed.
             && (GameInteraction.RealTimeNativeLoadLease.IsActive
+                || Main.Multiplayer?.IsClientSaveTransferActive == true
                 || Main.Multiplayer?.IsRealTimeClientCombatActive == true);
 
         // Explicit network-result presentation may construct native Rulebook

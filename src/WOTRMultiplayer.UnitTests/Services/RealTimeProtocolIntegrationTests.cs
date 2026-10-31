@@ -511,19 +511,23 @@ namespace WOTRMultiplayer.UnitTests.Services
             var nextSnapshot = typeof(MultiplayerHost).GetField("_nextRealTimeSnapshotAt",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
 
-            for (var i = 0; i < 34; i++)
-            {
-                nextSnapshot.SetValue(host, DateTime.MinValue);
-                host.PublishRealTimeCombatSnapshot();
-            }
+            host.PublishRealTimeCombatSnapshot();
+            var snapshot = (NotifyRealTimeCombatSnapshot)queued.Peek();
+            var sentAt = (ConcurrentDictionary<(long Epoch, long Sequence), DateTime>)typeof(MultiplayerHost)
+                .GetField("_realTimeSnapshotSentAt", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(host);
+            sentAt[(snapshot.Epoch, snapshot.Sequence)] = DateTime.UtcNow.AddSeconds(-9);
+            nextSnapshot.SetValue(host, DateTime.MinValue);
+            host.PublishRealTimeCombatSnapshot();
 
             Assert.That(host.Game.RealTimeCombat.MissingSnapshotReplies, Is.EqualTo(1));
-            var latest = (NotifyRealTimeCombatSnapshot)queued.ToArray()[33];
-            Assert.That(latest.MissingReplies, Is.EqualTo(1));
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
+            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
+            Assert.That(queued.ToArray()[1], Is.TypeOf<NotifyRealTimeRepair>());
         }
 
         [Test]
-        public void Host_ThreeExpiredReplies_PausesAndStartsAutomaticVerification()
+        public void Host_SlowApplicationDoesNotAccumulateSnapshotsOrBlockPauseRequests()
         {
             var (host, _, _, _, queued, _) = CreatePair();
             host.Game.RealTimeCombat.Mode = CombatMode.RealTimeWithPause;
@@ -537,10 +541,33 @@ namespace WOTRMultiplayer.UnitTests.Services
                 host.PublishRealTimeCombatSnapshot();
             }
 
-            Assert.That(host.Game.RealTimeCombat.MissingSnapshotReplies, Is.EqualTo(3));
-            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Repairing));
-            Assert.That(host.IsSavingBlockedByCombatSync, Is.True);
-            Assert.That(queued.ToArray()[36], Is.TypeOf<NotifyRealTimeRepair>());
+            Assert.That(queued.Count, Is.EqualTo(1), "A slow application must not create an unbounded FIFO.");
+            Assert.That(host.Game.RealTimeCombat.MissingSnapshotReplies, Is.Zero);
+            Assert.That(host.Game.RealTimeCombat.Phase, Is.EqualTo(CombatSynchronizationPhase.Stable));
+            Assert.That(host.RequestLocalRealTimePause(true), Is.True);
+        }
+
+        [Test]
+        public void Host_SnapshotFlowWaitsForEveryPeerAndRejectsDuplicateAcknowledgments()
+        {
+            var (host, _, hostNetwork, _, queued, _) = CreatePair();
+            host.Game.RealTimeCombat.Mode = host.Game.RealTimeCombat.PreferredMode = CombatMode.RealTimeWithPause;
+            host.Game.Players.Add(new NetworkPlayer { Id = 43, LobbySyncStatus = NetworkLobbySyncStatus.Succeed });
+            host.PublishRealTimeCombatSnapshot();
+            var snapshot = (NotifyRealTimeCombatSnapshot)queued.Dequeue();
+            var reply = new ClientRealTimeStateHash { Epoch = snapshot.Epoch, Sequence = snapshot.Sequence,
+                CanonicalStateHash = snapshot.CanonicalStateHash, Applied = true };
+            var receive = FakeUtils.GetNetworkReceiverHandler<ClientRealTimeStateHash>(hostNetwork);
+            receive(42, reply); receive(42, reply);
+            var next = typeof(MultiplayerHost).GetField("_nextRealTimeSnapshotAt", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            next.SetValue(host, DateTime.MinValue);
+            host.PublishRealTimeCombatSnapshot();
+            Assert.That(queued, Is.Empty, "One peer cannot release another peer's application slot.");
+            receive(43, reply);
+            next.SetValue(host, DateTime.MinValue);
+            host.PublishRealTimeCombatSnapshot();
+            Assert.That(queued.Count, Is.EqualTo(1));
+            Assert.That(queued.Peek(), Is.TypeOf<NotifyRealTimeCombatSnapshot>());
         }
 
         [Test]

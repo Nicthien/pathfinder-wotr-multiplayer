@@ -58,7 +58,7 @@ namespace WOTRMultiplayer.Services
         private readonly ConcurrentDictionary<(long Epoch, long Sequence), DateTime> _realTimeSnapshotSentAt = new();
         private readonly RealTimeRuleRollMailbox _realTimeRuleRolls = new();
         private readonly RealTimeEntityIdMailbox _realTimeEntityIds = new();
-        private int _consecutiveMissingRealTimeReplies;
+        private readonly ConcurrentDictionary<(long Epoch, long Sequence, long PlayerId), byte> _realTimeSnapshotPendingPeers = new();
         private readonly object _realTimeCommandLock = new();
         private readonly object _realTimePauseLock = new();
         private readonly Dictionary<long, long> _lastRealTimePauseRequestByPlayer = [];
@@ -162,11 +162,11 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause;
 
-        public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
+        public bool IsRealTimeCombatBarrierActive => IsActive && (IsCombatStartupBlocked || Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat != null && (_rejoin != null || _waitingForRealTimePeer || Game.RealTimeCombat.CombatEndPending
-                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable);
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable));
 
-        public bool IsSavingBlockedByCombatSync => IsSavingBlockedByLevelingSync || IsActive && (_turnEndSynchronizationFailed
+        public bool IsSavingBlockedByCombatSync => IsSaveLoadPending || IsSavingBlockedByLevelingSync || HasCombatStartupFailure || IsActive && (Game?.ForcedPause?.Reason == NetworkForcedPauseReason.AreaLoading || IsCombatStartupBlocked || _turnEndSynchronizationFailed
             || Game?.RealTimeCombat != null && (Game.RealTimeCombat.BlocksSaving
                 || Game.Combat?.Stage == NetworkCombatStage.Running
                     && Game.RealTimeCombat.Mode == CombatMode.RealTimeWithPause));
@@ -201,6 +201,10 @@ namespace WOTRMultiplayer.Services
 
         protected override void ResetRealTimeRuleRolls()
         {
+            _realTimeSnapshotHashes.Clear();
+            _realTimeSnapshotSentAt.Clear();
+            _realTimeSnapshotPendingPeers.Clear();
+            _nextRealTimeSnapshotAt = default;
             _realTimeRuleRolls.Reset();
             _realTimeEntityIds.Reset();
             _realTimeCriticalFaulted = false;
@@ -214,6 +218,7 @@ namespace WOTRMultiplayer.Services
 
         public void PublishRealTimeCombatSnapshot()
         {
+            if (IsSaveLoadPending) return;
             TickTurnStartRecovery();
             TickSessionRejoin();
             if (_rejoin != null && (!_rejoin.Loaded || _rejoin.Stopped || !_rejoin.Header.RealTime)) return;
@@ -243,6 +248,7 @@ namespace WOTRMultiplayer.Services
             }
 
             _nextRealTimeSnapshotAt = DateTime.UtcNow.AddMilliseconds(250);
+            if (!CanPublishRealTimeSnapshot()) return;
 
             var state = CombatInteraction.GetRealTimeCombatState();
             EnsurePresentationLane(Game.RealTimeCombat);
@@ -258,17 +264,17 @@ namespace WOTRMultiplayer.Services
             var sequence = coordinator.PublishAuthoritativeSnapshot(hash);
             if (orders != null) orders.LastIncludedSequence = sequence;
             _realTimeSnapshotHashes[(Game.RealTimeCombat.Epoch, sequence)] = hash;
-            _realTimeSnapshotSentAt[(Game.RealTimeCombat.Epoch, sequence)] = DateTime.UtcNow;
+            var peers = GetSyncedPlayers().Where(player => player.Id != Game.LocalPlayerId).ToList();
+            foreach (var peer in peers)
+                _realTimeSnapshotPendingPeers[(Game.RealTimeCombat.Epoch, sequence, peer.Id)] = 0;
+            if (peers.Count > 0)
+                _realTimeSnapshotSentAt[(Game.RealTimeCombat.Epoch, sequence)] = DateTime.UtcNow;
             foreach (var key in _realTimeSnapshotHashes.Keys)
             {
                 if (key.Epoch != Game.RealTimeCombat.Epoch || key.Sequence < sequence - 32)
                 {
                     _realTimeSnapshotHashes.TryRemove(key, out _);
-                    if (_realTimeSnapshotSentAt.TryRemove(key, out _) && key.Epoch == Game.RealTimeCombat.Epoch)
-                    {
-                        Game.RealTimeCombat.MissingSnapshotReplies++;
-                        _consecutiveMissingRealTimeReplies++;
-                    }
+                    _realTimeSnapshotSentAt.TryRemove(key, out _);
                 }
             }
             Send(new NotifyRealTimeCombatSnapshot
@@ -284,12 +290,6 @@ namespace WOTRMultiplayer.Services
                 MissingReplies = Game.RealTimeCombat.MissingSnapshotReplies,
                 State = Mapper.Map<Networking.Messages.Contracts.NetworkCombatState>(state)
             });
-            if (_consecutiveMissingRealTimeReplies >= 3)
-            {
-                Logger.LogWarning("Three consecutive real-time snapshot replies expired; pausing for verification. Epoch={Epoch}, Sequence={Sequence}", Game.RealTimeCombat.Epoch, sequence);
-                _consecutiveMissingRealTimeReplies = 0;
-                _ = BeginRealTimeRepairAsync();
-            }
         }
 
         public async void ToggleCombatModeFromHotkey()
@@ -358,7 +358,6 @@ namespace WOTRMultiplayer.Services
             coordinator.RequestModeSwitch(mode, players);
             var transitionState = Game.RealTimeCombat;
             var transitionEpoch = transitionState.Epoch;
-            _consecutiveMissingRealTimeReplies = 0;
             _realTimeModeSwitchDeadline = DateTime.UtcNow.AddSeconds(30);
             _realTimeModeRetransmissions = 0;
             try
@@ -1020,7 +1019,7 @@ namespace WOTRMultiplayer.Services
             Game = null;
             _realTimeSnapshotHashes.Clear();
             _realTimeSnapshotSentAt.Clear();
-            _consecutiveMissingRealTimeReplies = 0;
+            _realTimeSnapshotPendingPeers.Clear();
             _lastRealTimeModePrepare = null;
             _lastRealTimeModeCommit = null;
             _lastRealTimeModeComplete = null;
@@ -1304,6 +1303,7 @@ namespace WOTRMultiplayer.Services
         /// <returns></returns>
         public bool CanInitializeCombat()
         {
+            if (HasCombatStartupFailure) return false;
             try
             {
                 if (Game.Combat == null)
@@ -1393,8 +1393,15 @@ namespace WOTRMultiplayer.Services
 
                             if (player == Game.LocalPlayerId)
                             {
+                                var reconcilingCombat = Game.Combat;
                                 CombatInteraction.EnsureUnitsInCombatAsync(units)
-                                    .ContinueWith(x => Game.Combat.UnavailableUnits.TryAdd(Game.LocalPlayerId, x.Result));
+                                    .ContinueWith(x =>
+                                    {
+                                        if (x.IsFaulted) { Logger.LogError(x.Exception, "Combat roster reconciliation failed"); return; }
+                                        lock (ActionLock)
+                                            if (ReferenceEquals(Game?.Combat, reconcilingCombat))
+                                                reconcilingCombat.UnavailableUnits.TryAdd(Game.LocalPlayerId, x.Result);
+                                    }, TaskScheduler.Default);
                                 continue;
                             }
 
@@ -1498,6 +1505,7 @@ namespace WOTRMultiplayer.Services
         /// <returns></returns>
         public bool CanContinueCombat()
         {
+            if (HasCombatStartupFailure) return false;
             try
             {
                 if (Game.Combat == null)
@@ -2712,12 +2720,20 @@ namespace WOTRMultiplayer.Services
 
          private async Task OnNotifyCombatInitiatedAsync(long receivedFrom, NotifyCombatInitiated message)
         {
+            if (IsSaveLoadPending) return;
+            if (!IsActive || message == null || receivedFrom != message.PlayerId
+                || !GetSyncedPlayers().Any(player => player.Id == receivedFrom)) return;
+            var session = Game;
+            var saveSeed = Game.LoadedSaveSeed;
+            bool Current() => IsActive && ReferenceEquals(Game, session) && Game.LoadedSaveSeed == saveSeed;
             SetPauseCooldown();
 
-            var isInCombat = await WaitWhileTrue(() => Game.Combat == null, "Waiting for combat to be initiated", TimeSpan.FromSeconds(30)); // cutscenes etc
-            if (!isInCombat)
+            var isInCombat = await WaitWhileTrue(() => Current() && Game.Combat == null, "Waiting for combat to be initiated", TimeSpan.FromSeconds(30)); // cutscenes etc
+            if (!Current()) return;
+            if (!isInCombat || Game.Combat == null)
             {
                 Logger.LogError("Combat has not been started on host");
+                FailCombatStartup("host-combat-not-started");
                 return;
             }
 
@@ -2729,16 +2745,43 @@ namespace WOTRMultiplayer.Services
                 var player = GetPlayer(receivedFrom);
                 PlayerNotification.AddCombatText(WellKnownKeys.GameNotifications.Combat.Start.DesyncedStartup.Client.Key, CombatTextSeverity.Critical, new PlayerLogParameter(player));
 
-                await WaitWhileTrue(() => CombatInteraction.IsRiderActive(), "Waiting for current turn to end before resetting combat");
+                var previousCombat = Game.Combat;
+                var riderEnded = await WaitWhileTrue(() => Current() && ReferenceEquals(Game.Combat, previousCombat)
+                    && CombatInteraction.IsRiderActive(), "Waiting for current turn to end before resetting combat");
+                if (!Current() || !ReferenceEquals(Game.Combat, previousCombat)) return;
+                if (!riderEnded) { FailCombatStartup("combat-restart-rider-timeout"); return; }
 
-                // this will also trigger restart for all clients in the lobby
-                CleanupUntargetableUnitsState();
-                Game.Combat = null;
-                await CombatInteraction.ForceResetCombatAsync();
+                if (IsNativeCombatRestart) return;
+                NativeCombatRestartSession = session;
+                NativeCombatRestartSave = saveSeed;
+                try
+                {
+                    CleanupUntargetableUnitsState();
+                    Game.Combat = null;
+                    await CombatInteraction.ForceResetCombatAsync();
 
-                await WaitWhileTrue(() => Game.Combat == null || !Game.Combat.IsInitiated, "Waiting for combat to restart");
-                Game.Combat.PlayersInCombat.TryAdd(message.PlayerId, true);
-                Logger.LogInformation("Corrupted player has been re-added after combat restart. PlayerId={PlayerId}", message.PlayerId);
+                    var restarted = await WaitWhileTrue(() => Current() && (Game.Combat == null || !Game.Combat.IsInitiated), "Waiting for combat to restart");
+                    if (!Current()) return;
+                    var restartedCombat = Game.Combat;
+                    if (!restarted || restartedCombat == null || !restartedCombat.IsInitiated
+                        || restartedCombat.Stage != NetworkCombatStage.Initiating)
+                    {
+                        FailCombatStartup("combat-restart-timeout-or-replaced");
+                        return;
+                    }
+                    restartedCombat.PlayersInCombat.TryAdd(message.PlayerId, true);
+                    Logger.LogInformation("Corrupted player has been re-added after combat restart. PlayerId={PlayerId}", message.PlayerId);
+                }
+                catch (Exception failure)
+                {
+                    if (Current()) FailCombatStartup("combat-restart-exception");
+                    Logger.LogError(failure, "Native combat restart failed");
+                }
+                finally
+                {
+                    if (ReferenceEquals(NativeCombatRestartSession, session) && NativeCombatRestartSave == saveSeed)
+                        NativeCombatRestartSession = null;
+                }
                 return;
             }
 
@@ -2748,16 +2791,19 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyCombatDataCollected(long receivedFrom, NotifyCombatDataCollected message)
         {
+            if (receivedFrom != message.PlayerId || Game?.Combat?.Stage != NetworkCombatStage.Collecting) return;
             Game.Combat.InitialUnitsInCombat.TryAdd(message.PlayerId, [.. message.Units]);
         }
 
         private void OnNotifyCombatUnitsExclusionConfirmed(long receivedFrom, NotifyCombatUnitsExclusionConfirmed message)
         {
+            if (Game?.Combat?.Stage != NetworkCombatStage.Resyncing) return;
             Game.Combat.UnavailableUnits.TryRemove(receivedFrom, out _);
         }
 
         private void OnNotifyCombatDataDiscrepancyConfirmed(long receivedFrom, NotifyCombatDataDiscrepancyConfirmed message)
         {
+            if (Game?.Combat?.Stage != NetworkCombatStage.Reconciling) return;
             Game.Combat.UnavailableUnits.TryAdd(receivedFrom, message.UnavailableUnits);
         }
 
@@ -2900,13 +2946,15 @@ namespace WOTRMultiplayer.Services
                 return;
             }
 
-            if (_realTimeSnapshotSentAt.TryRemove((message.Epoch, message.Sequence), out var sentAt))
+            if (_realTimeSnapshotPendingPeers.TryRemove((message.Epoch, message.Sequence, receivedFrom), out _)
+                && _realTimeSnapshotSentAt.TryGetValue((message.Epoch, message.Sequence), out var sentAt))
             {
-                _consecutiveMissingRealTimeReplies = 0;
                 var elapsed = Math.Max(0, Math.Min(60_000, (int)(DateTime.UtcNow - sentAt).TotalMilliseconds));
                 Game.RealTimeCombat.ResponseTimeMs = Game.RealTimeCombat.ResponseTimeMs == 0
                     ? elapsed
                     : (Game.RealTimeCombat.ResponseTimeMs * 4 + elapsed) / 5;
+                if (!_realTimeSnapshotPendingPeers.Keys.Any(key => key.Epoch == message.Epoch && key.Sequence == message.Sequence))
+                    _realTimeSnapshotSentAt.TryRemove((message.Epoch, message.Sequence), out _);
             }
 
             if (requiresRepair || !message.Applied)
@@ -2933,7 +2981,6 @@ namespace WOTRMultiplayer.Services
             var coordinator = new RealTimeCombatCoordinator(Game.RealTimeCombat);
             Game.RealTimeCombat.RecoveryStatus = "preparing"; Game.RealTimeCombat.RecoveryFailure = null;
             coordinator.BeginRepair();
-            _consecutiveMissingRealTimeReplies = 0;
             Game.RealTimeCombat.RequiredPlayers = GetSyncedPlayers().Select(x => x.Id).Append(Game.LocalPlayerId).ToHashSet();
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
@@ -3245,7 +3292,6 @@ namespace WOTRMultiplayer.Services
                 return;
             }
             new RealTimeCombatCoordinator(Game.RealTimeCombat).BeginRepair();
-            _consecutiveMissingRealTimeReplies = 0;
             Game.RealTimeCombat.ReadyPlayers = [Game.LocalPlayerId];
             _realTimeRepairStage = RealTimeRepairStage.Prepare;
             _realTimeRepairDeadline = DateTime.UtcNow.AddSeconds(30);
@@ -3633,6 +3679,11 @@ namespace WOTRMultiplayer.Services
 
         public bool RequestLocalRealTimePause(bool wantsPause)
         {
+            if (IsActive && IsCombatStartupBlocked)
+            {
+                GameInteraction.SetPause(true);
+                return wantsPause;
+            }
             if (!IsRealTimeCombatActive || Game.RealTimeCombat.CombatEndPending
                 || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
             {

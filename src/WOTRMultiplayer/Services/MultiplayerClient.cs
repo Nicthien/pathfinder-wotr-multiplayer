@@ -93,11 +93,13 @@ namespace WOTRMultiplayer.Services
         public bool IsRealTimeCombatActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat?.Mode == CombatMode.RealTimeWithPause;
 
-        public bool IsRealTimeCombatBarrierActive => IsActive && Game?.Combat?.Stage == NetworkCombatStage.Running
+        public bool IsRealTimeCombatBarrierActive => IsActive && (IsCombatStartupBlocked || Game?.Combat?.Stage == NetworkCombatStage.Running
             && Game.RealTimeCombat != null && (Game.RealTimeCombat.CombatEndPending
-                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable);
+                || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable));
 
-        public bool IsSavingBlockedByCombatSync => IsSavingBlockedByLevelingSync || _disconnectedDuringRealTimeCombat || _turnEndSynchronizationFailed
+        public bool IsSavingBlockedByCombatSync => IsSaveLoadPending || IsSavingBlockedByLevelingSync || _disconnectedDuringRealTimeCombat || _turnEndSynchronizationFailed
+            || IsActive && Game?.ForcedPause?.Reason == NetworkForcedPauseReason.AreaLoading
+            || HasCombatStartupFailure || IsActive && IsCombatStartupBlocked
             || WaitingForHostCombatEnd
             || IsActive && Game?.RealTimeCombat != null
                 && (Game.RealTimeCombat.BlocksSaving
@@ -374,6 +376,11 @@ namespace WOTRMultiplayer.Services
 
         public bool RequestRealTimePause(bool wantsPause)
         {
+            if (IsActive && IsCombatStartupBlocked)
+            {
+                GameInteraction.SetPause(true);
+                return wantsPause;
+            }
             if (!IsRealTimeCombatActive || Game.RealTimeCombat.Phase != CombatSynchronizationPhase.Stable)
             {
                 return false;
@@ -559,6 +566,7 @@ namespace WOTRMultiplayer.Services
 
         public bool CanInitializeCombat()
         {
+            if (HasCombatStartupFailure) return false;
             if (Game.Combat == null)
             {
                 return false;
@@ -612,6 +620,7 @@ namespace WOTRMultiplayer.Services
 
         public bool CanContinueCombat()
         {
+            if (HasCombatStartupFailure) return false;
             if (Game.Combat == null)
             {
                 return false;
@@ -1166,6 +1175,7 @@ namespace WOTRMultiplayer.Services
 
          private async Task OnNotifyCombatInitiatedAsync(long receivedFrom, NotifyCombatInitiated message)
         {
+            if (IsSaveLoadPending) return;
             SetPauseCooldown();
 
             if (Game.Combat == null && SettingsService.GetSettings().RegroupDistantPlayersOnCombatStart)
@@ -1204,8 +1214,13 @@ namespace WOTRMultiplayer.Services
          private async Task OnNotifyCombatUnitsExcludedAsync(long receivedFrom, NotifyCombatUnitsExcluded message)
         {
             if (receivedFrom != NetworkConstants.HostPlayerId || Game?.Combat == null) return;
+            var session = Game;
+            var combat = Game.Combat;
+            var save = Game.LoadedSaveSeed;
             _excludedCombatUnits = message.Units.ToList();
             await CombatInteraction.ExcludeUnitsFromCombatAsync(message.Units);
+            if (!IsActive || !ReferenceEquals(Game, session) || !ReferenceEquals(Game.Combat, combat)
+                || Game.LoadedSaveSeed != save || HasCombatStartupFailure) return;
             var confirmation = new NotifyCombatUnitsExclusionConfirmed();
             Send(confirmation);
         }
@@ -3248,6 +3263,7 @@ namespace WOTRMultiplayer.Services
         {
             var session = Game; var combat = Game?.Combat;
             bool Current() => playerId == NetworkConstants.HostPlayerId && IsActive
+                && !HasCombatStartupFailure
                 && ReferenceEquals(Game, session) && ReferenceEquals(Game?.Combat, combat)
                 && combat?.Stage == NetworkCombatStage.Running
                 && Game.Id == message.SessionId && Game.LoadedSaveSeed == message.LoadedSaveSeed
@@ -3434,7 +3450,17 @@ namespace WOTRMultiplayer.Services
          private async Task OnNotifyCombatInitializationRequiredAsync(long playerId, NotifyCombatInitializationRequired message)
         {
             if (playerId != NetworkConstants.HostPlayerId) return;
-            await WaitWhileTrue(() => Game.Combat == null || Game.CurrentArea == null || Game.CurrentArea.Seed == 0, "Combat has not been started on client yet. Waiting until start");
+            var waitingSession = Game;
+            var waitingSave = Game.LoadedSaveSeed;
+            bool WaitingCurrent() => IsActive && ReferenceEquals(Game, waitingSession) && Game.LoadedSaveSeed == waitingSave;
+            var ready = await WaitWhileTrue(() => WaitingCurrent()
+                && (Game.Combat == null || Game.CurrentArea == null || Game.CurrentArea.Seed == 0), "Combat has not been started on client yet. Waiting until start");
+            if (!WaitingCurrent()) return;
+            if (!ready || Game.Combat == null || HasCombatStartupFailure)
+            {
+                FailCombatStartup("client-initialization-timeout-or-failed");
+                return;
+            }
 
             Game.Combat.Seed = message.CombatSeed;
             Logger.LogInformation("Combat seed has been configured. Seed={Seed}", Game.Combat.Seed);
@@ -3460,6 +3486,7 @@ namespace WOTRMultiplayer.Services
             }
 
             await CombatInteraction.UpdateCombatStateAsync(combatState, areaEffects, true);
+            if (!StillInitializing() || HasCombatStartupFailure) return;
 
             var confirmation = new ClientCombatInitializationCompleted();
             Send(confirmation);

@@ -79,6 +79,12 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat
         [HarmonyPrefix]
         public static bool AiBrainController_SelectAction_Prefix(UnitEntityData unit, ref bool __result)
         {
+            if (Main.Multiplayer?.IsCombatSimulationBlocked == true)
+            {
+                __result = false;
+                _selectionFromHost = null;
+                return false;
+            }
             if (RealTimePresentationRuntime.IsClientActive)
             {
                 __result = false;
