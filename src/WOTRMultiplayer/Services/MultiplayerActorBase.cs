@@ -60,6 +60,9 @@ namespace WOTRMultiplayer.Services
 
         private DateTime? _pauseCooldown;
 
+        private bool _remoteCutsceneBarrierActive;
+        private bool _wasPausedBeforeRemoteCutscene;
+
         private long _nextRealTimeUnitDeathSequence;
 
         private readonly Dictionary<string, DeferredLevelingSession> _deferredLevelings = new(StringComparer.OrdinalIgnoreCase);
@@ -1078,6 +1081,11 @@ namespace WOTRMultiplayer.Services
 
             var message = new NotifyGameModeTypeEnded { PlayerId = Game.LocalPlayerId, Type = type.Name };
             Send(message);
+
+            if (type == GameModeType.Cutscene)
+            {
+                TryEndRemoteCutsceneBarrier();
+            }
         }
 
         public void OnCapitalModeRest()
@@ -2867,6 +2875,12 @@ namespace WOTRMultiplayer.Services
             }
             lock (ActionLock)
             {
+                if (_remoteCutsceneBarrierActive)
+                {
+                    Logger.LogInformation("Manual pause toggle ignored while a remote cutscene barrier is active");
+                    return false;
+                }
+
                 // unpaused => paused
                 if (!isPaused)
                 {
@@ -3258,6 +3272,73 @@ namespace WOTRMultiplayer.Services
             lock (ActionLock)
             {
                 Game.ForcedPause?.ReadyPlayers.Add(playerId);
+            }
+        }
+
+        private void OnRemoteCutsceneGameModeStarted(long playerId)
+        {
+            if (playerId == Game.LocalPlayerId)
+            {
+                return;
+            }
+
+            var pauseLocalWorld = true;
+            lock (ActionLock)
+            {
+                if (!_remoteCutsceneBarrierActive)
+                {
+                    _wasPausedBeforeRemoteCutscene = GameInteraction.IsPaused;
+                    _remoteCutsceneBarrierActive = true;
+                    Logger.LogInformation("Remote cutscene barrier started. PlayerId={PlayerId}, WasPaused={WasPaused}",
+                        playerId, _wasPausedBeforeRemoteCutscene);
+                }
+
+                pauseLocalWorld = Game?.PlayersInGameMode.TryGetValue(GameModeType.Cutscene, out var cutscenePlayers) != true
+                    || !cutscenePlayers.Contains(Game.LocalPlayerId);
+            }
+
+            if (pauseLocalWorld)
+            {
+                GameInteraction.SetPause(true);
+            }
+        }
+
+        private void TryEndRemoteCutsceneBarrier()
+        {
+            bool restorePause;
+            lock (ActionLock)
+            {
+                if (!_remoteCutsceneBarrierActive)
+                {
+                    return;
+                }
+
+                if (Game?.PlayersInGameMode.TryGetValue(GameModeType.Cutscene, out var cutscenePlayers) == true
+                    && cutscenePlayers.Count > 0)
+                {
+                    return;
+                }
+
+                var realTimeState = Game?.RealTimeCombat;
+                restorePause = _wasPausedBeforeRemoteCutscene
+                    || Game?.ForcedPause != null
+                    || realTimeState?.CombatEndPending == true
+                    || realTimeState?.IsManualPauseActive == true
+                    || realTimeState != null && realTimeState.Phase != CombatSynchronizationPhase.Stable;
+                _remoteCutsceneBarrierActive = false;
+                _wasPausedBeforeRemoteCutscene = false;
+            }
+
+            Logger.LogInformation("Remote cutscene barrier ended. RestorePause={RestorePause}", restorePause);
+            GameInteraction.SetPause(restorePause);
+        }
+
+        protected void ResetRemoteCutsceneBarrier()
+        {
+            lock (ActionLock)
+            {
+                _remoteCutsceneBarrierActive = false;
+                _wasPausedBeforeRemoteCutscene = false;
             }
         }
 
@@ -3994,6 +4075,7 @@ namespace WOTRMultiplayer.Services
             Game.Combat = null;
             Game.ArmyCombat = null;
             _pauseCooldown = null;
+            ResetRemoteCutsceneBarrier();
             ResetLastCombatTurn();
             ValueGenerator.ResetSeededGenerators(IdentifierLifetime.Area, IdentifierLifetime.Combat, IdentifierLifetime.CombatTurn);
 
@@ -5085,6 +5167,10 @@ namespace WOTRMultiplayer.Services
             {
                 OnRemoteRestGameModeEnded(message.PlayerId);
             }
+            else if (gameMode == GameModeType.Cutscene)
+            {
+                TryEndRemoteCutsceneBarrier();
+            }
         }
 
         private void OnNotifyGameModeTypeStarted(long receivedFrom, NotifyGameModeTypeStarted message)
@@ -5099,6 +5185,10 @@ namespace WOTRMultiplayer.Services
             else if (gameMode == GameModeType.Pause)
             {
                 OnRemotePauseGameModeStarted(message.PlayerId);
+            }
+            else if (gameMode == GameModeType.Cutscene)
+            {
+                OnRemoteCutsceneGameModeStarted(message.PlayerId);
             }
         }
 

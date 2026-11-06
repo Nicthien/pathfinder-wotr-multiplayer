@@ -480,12 +480,32 @@ namespace WOTRMultiplayer.Services.GameInteraction
             => StartTurnBasedCombatTurn(unitId, onInvalidUnit, null);
 
         public void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply)
+            => StartTurnBasedCombatTurn(unitId, onInvalidUnit, canApply, replaceCurrentTurn: false);
+
+        public void ReplaceTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply)
+            => StartTurnBasedCombatTurn(unitId, onInvalidUnit, canApply, replaceCurrentTurn: true);
+
+        private void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply,
+            bool replaceCurrentTurn)
         {
             _mainThreadAccessor.Post(() =>
             {
                 try
                 {
                     if (canApply != null && !canApply()) return;
+                    if (replaceCurrentTurn)
+                    {
+                        var staleTurn = Game.Instance.TurnBasedCombatController.CurrentTurn;
+                        if (staleTurn != null)
+                        {
+                            _logger.LogWarning("Replacing stale native turn before host-confirmed recovery. UnitId={UnitId}, Status={Status}",
+                                unitId, staleTurn.Status);
+                            staleTurn.End();
+                            staleTurn.Dispose();
+                            Game.Instance.TurnBasedCombatController.CurrentTurn = null;
+                        }
+                    }
+
                     var currentUnit = _gameStateLookupService.GetUnitEntity(unitId);
                     if (currentUnit == null)
                     {

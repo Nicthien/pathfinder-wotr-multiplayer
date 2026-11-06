@@ -63,7 +63,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(dispatch, Is.Not.Null);
             if (reload) session.LoadedSaveSeed++;
             dispatch();
-            var call = A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn("enemy", A<Action>._, A<Func<bool>>._));
+            var call = A.CallTo(() => _combatInteractionService.ReplaceTurnBasedCombatTurn("enemy", A<Action>._, A<Func<bool>>._));
             if (reload) call.MustNotHaveHappened(); else call.MustHaveHappenedOnceExactly();
         }
 
@@ -95,7 +95,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                     CombatSeed = 21, Round = 1, UnitId = "enemy" });
 
             Assert.That(_multiplayerClient.Game.Combat.Round, Is.EqualTo(1));
-            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn(
+            A.CallTo(() => _combatInteractionService.ReplaceTurnBasedCombatTurn(
                 "enemy", A<Action>._, A<Func<bool>>._)).MustHaveHappenedOnceExactly();
         }
 
@@ -113,7 +113,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             receive(-1, frame); receive(-1, frame);
             A.CallTo(() => _networkClient.Broadcast(A<ClientCombatTurnStarted>.That.Matches(m => m.UnitId == "enemy")))
                 .MustHaveHappenedTwiceExactly();
-            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn(A<string>._, A<Action>._, A<Func<bool>>._))
+            A.CallTo(() => _combatInteractionService.ReplaceTurnBasedCombatTurn(A<string>._, A<Action>._, A<Func<bool>>._))
                 .MustNotHaveHappened();
         }
 
@@ -134,7 +134,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                 new NotifyInvalidCombatTurnStarted { SessionId = "game", LoadedSaveSeed = 17,
                     CombatSeed = 21, Round = 2, UnitId = "host-unit" });
 
-            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn("host-unit", A<Action>._, A<Func<bool>>._))
+            A.CallTo(() => _combatInteractionService.ReplaceTurnBasedCombatTurn("host-unit", A<Action>._, A<Func<bool>>._))
                 .MustHaveHappenedOnceExactly();
             Assert.That(_multiplayerClient.Game.Combat.Turn, Is.Null);
         }
@@ -173,7 +173,7 @@ namespace WOTRMultiplayer.UnitTests.Services
                     Round = 2, UnitId = "host-unit", TurnSeed = 71
                 });
 
-            A.CallTo(() => _combatInteractionService.StartTurnBasedCombatTurn(
+            A.CallTo(() => _combatInteractionService.ReplaceTurnBasedCombatTurn(
                     "host-unit", A<Action>._, A<Func<bool>>._))
                 .MustHaveHappenedOnceExactly();
             A.CallTo(() => _networkClient.Broadcast(A<ClientCombatSaveAck>._)).MustNotHaveHappened();

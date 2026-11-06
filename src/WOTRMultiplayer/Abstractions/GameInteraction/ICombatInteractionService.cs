@@ -39,6 +39,7 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit = null);
         void StartTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply);
+        void ReplaceTurnBasedCombatTurn(string unitId, Action onInvalidUnit, Func<bool> canApply);
 
         void EndCombatTurn(string unitId);
 

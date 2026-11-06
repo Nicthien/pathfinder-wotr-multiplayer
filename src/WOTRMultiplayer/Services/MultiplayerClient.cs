@@ -263,6 +263,7 @@ namespace WOTRMultiplayer.Services
 
         public void Reset()
         {
+            ResetRemoteCutsceneBarrier();
             ResetCombatSaveState();
             _excludedCombatUnits.Clear();
             ResetSessionRejoin();
@@ -3288,7 +3289,7 @@ namespace WOTRMultiplayer.Services
                 }
                 Logger.LogWarning("[TurnRecovery] Initializing host-confirmed turn. Unit={Unit}, Round={Round}", message.UnitId, message.Round);
                 ResetCombatTurn();
-                CombatInteraction.StartTurnBasedCombatTurn(message.UnitId, () =>
+                CombatInteraction.ReplaceTurnBasedCombatTurn(message.UnitId, () =>
                 {
                     if (Current()) Send(new ClientInvalidUnitTurnStartRequested { UnitId = message.UnitId });
                 }, Current);

@@ -1006,6 +1006,7 @@ namespace WOTRMultiplayer.Services
 
         public void Reset()
         {
+            ResetRemoteCutsceneBarrier();
             _combatSave = null;
             _combatRestore = null;
             _combatRestorePeers.Clear(); _combatRestoreAcknowledged.Clear();
