@@ -60,6 +60,9 @@ namespace WOTRMultiplayer.Networking.Messages.Contracts
         [ProtoMember(18)]
         public List<NetworkBuffContextState> ContextChain { get; set; }
 
+        [ProtoMember(19)]
+        public long? RemainingDurationTicks { get; set; }
+
         public override string ToString()
         {
             return Id.ToString();

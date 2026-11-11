@@ -1104,6 +1104,11 @@ namespace WOTRMultiplayer.Services
         {
             // make sure next area load is not affected by last combat turn seed
             ResetLastCombatTurn();
+            if (areaTransition.IsActionsTransition)
+            {
+                try { ScheduleTransitionPositions(areaTransition); }
+                catch (Exception error) { Logger.LogError(error, "Unable to schedule transition position confirmation."); }
+            }
 
             var message = new NotifyPartyAreaTransitioned
             {
@@ -1279,11 +1284,13 @@ namespace WOTRMultiplayer.Services
                 }
             }
 
-            if (!Game.DialogState.Dialog.IsScripted)
+            if (!Game.DialogState.Dialog.IsScripted || Game.Combat == null)
             {
                 var message = new NotifyDialogStarted
                 {
-                    Dialog = Mapper.Map<Networking.Messages.Contracts.NetworkDialog>(networkDialog)
+                    Dialog = Mapper.Map<Networking.Messages.Contracts.NetworkDialog>(networkDialog),
+                    HostOutsideCombat = Game.Combat == null, SessionId = Game.Id,
+                    LoadedSaveSeed = Game.LoadedSaveSeed, AreaSeed = Game.CurrentArea?.Seed ?? 0
                 };
                 Send(message);
             }
@@ -2581,6 +2588,7 @@ namespace WOTRMultiplayer.Services
 
                // area transitioning
                .On<ClientAreaLoaded>(OnClientAreaLoaded)
+               .On<ClientPartyRegroupRequested>(OnClientPartyRegroupRequested)
 
                // leveling
                .On<ClientCharacterLevelingRequested>(OnClientCharacterLevelingRequested)
@@ -2729,8 +2737,13 @@ namespace WOTRMultiplayer.Services
             bool Current() => IsActive && ReferenceEquals(Game, session) && Game.LoadedSaveSeed == saveSeed;
             SetPauseCooldown();
 
-            var isInCombat = await WaitWhileTrue(() => Current() && Game.Combat == null, "Waiting for combat to be initiated", TimeSpan.FromSeconds(30)); // cutscenes etc
+            var isInCombat = await WaitWhileTrue(() => Current() && Game.Combat == null && Game.DialogState == null, "Waiting for combat to be initiated", TimeSpan.FromSeconds(30)); // cutscenes etc
             if (!Current()) return;
+            if (Game.Combat == null && Game.DialogState != null)
+            {
+                Logger.LogInformation("Discarding client-only combat startup because the host entered dialog.");
+                return;
+            }
             if (!isInCombat || Game.Combat == null)
             {
                 Logger.LogError("Combat has not been started on host");

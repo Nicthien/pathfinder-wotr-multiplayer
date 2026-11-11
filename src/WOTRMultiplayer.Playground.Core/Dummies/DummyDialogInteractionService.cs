@@ -8,6 +8,7 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
 {
     public class DummyDialogInteractionService : IDialogInteractionService
     {
+        public void StopDialog() { }
         public void SelectDialogAnswer(string answerName, string manualUnitSelectionId, System.Func<bool> authorized)
         {
             if (authorized == null || authorized()) SelectDialogAnswer(answerName, manualUnitSelectionId);

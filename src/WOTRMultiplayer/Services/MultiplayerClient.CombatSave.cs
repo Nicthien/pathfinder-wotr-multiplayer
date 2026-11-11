@@ -303,18 +303,18 @@ namespace WOTRMultiplayer.Services
         private void HandleCombatSaveRestore(NotifyCombatSave frame)
         {
             if (frame.Operation == _combatRestoreFailedOperation) return;
-            if (frame.Stage != "RestoreFailed" && TryFinalizeCombatSaveLoadedState()) return;
-            // The host retries every restoration stage. Ignore an early frame
-            // while this peer is between OnAreaLoaded and OnGameLoaded rather
-            // than attempting an unsafe native topology capture.
-            if (frame.Stage != "RestoreFailed" && !IsCombatSaveRestoreReady) return;
-            // A receipt is not permission to tick: keep the world held until the
-            // host has collected every receipt and sends its ordered release.
-            if (frame.Stage == "RestoreComplete" && _combatRestoreCompletionAck?.Identity.Operation == frame.Operation)
-            { Send(_combatRestoreCompletionAck); return; }
-            if (PendingCombatSave == null || _combatRestoreHeader != null && _combatRestoreHeader.Operation != frame.Operation) return;
             try
             {
+                if (frame.Stage != "RestoreFailed" && TryFinalizeCombatSaveLoadedState()) return;
+                // The host retries every restoration stage. Ignore an early frame
+                // while this peer is between OnAreaLoaded and OnGameLoaded rather
+                // than attempting an unsafe native topology capture.
+                if (frame.Stage != "RestoreFailed" && !IsCombatSaveRestoreReady) return;
+                // A receipt is not permission to tick: keep the world held until the
+                // host has collected every receipt and sends its ordered release.
+                if (frame.Stage == "RestoreComplete" && _combatRestoreCompletionAck?.Identity.Operation == frame.Operation)
+                { Send(_combatRestoreCompletionAck); return; }
+                if (PendingCombatSave == null || _combatRestoreHeader != null && _combatRestoreHeader.Operation != frame.Operation) return;
                 if (frame.Stage == "RestoreFailed") throw new InvalidOperationException("host-restore-failed");
                 if (frame.Stage == "RestorePrepare")
                 {

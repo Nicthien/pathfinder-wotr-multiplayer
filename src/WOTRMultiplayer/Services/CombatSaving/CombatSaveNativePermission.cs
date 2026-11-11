@@ -20,6 +20,10 @@ namespace WOTRMultiplayer.Services.CombatSaving
             finally { _checking = false; }
         }
 
-        internal static bool IsBlockingCombat(Player player) => !_checking && player.IsInCombat;
+        internal static bool ShouldBlockCombat(bool inCombat, bool checking, bool activeHost)
+            => inCombat && !checking && !activeHost;
+
+        internal static bool IsBlockingCombat(Player player) => ShouldBlockCombat(player.IsInCombat, _checking,
+            Main.Multiplayer?.IsActive == true && Main.Multiplayer.CanInitiateAreaTransitions());
     }
 }

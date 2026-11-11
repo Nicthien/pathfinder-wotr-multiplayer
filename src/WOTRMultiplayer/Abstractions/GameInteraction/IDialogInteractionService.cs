@@ -19,6 +19,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         Task<bool> StartDialogAsync(NetworkDialog networkDialog);
 
+        void StopDialog();
+
         void UpdateDialogPopupUI(bool isInteractable, int readyPlayersCount, int totalPlayersCount);
 
         void CloseDialogPopup(NetworkDialogPopup networkDialogPopup);

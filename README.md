@@ -39,7 +39,7 @@ Cette variante n'est ni officielle ni affiliée à Owlcat Games.
   invisible de la réplication distante afin que deux joueurs puissent faire
   progresser leurs personnages sans partager la même fenêtre modale ;
 - reprise de session et reconnexion avec contrôles d'époque et de séquence ;
-- sauvegarde et restauration synchronisées en plein combat au tour par tour ;
+- sauvegarde normale par l'hôte, y compris pendant le combat lorsque le jeu le permet ;
 - interface et localisation françaises complètes ;
 - outils de compilation, de diagnostic, de staging et de test local isolé.
 
@@ -59,20 +59,19 @@ amont plus récentes, notamment la série `0.5.x`, ne sont pas intégrées
 automatiquement : elles doivent être adaptées volontairement pour ne pas
 casser le protocole RTwP déjà testé.
 
-La sauvegarde et la reprise d'un combat ont été vérifiées avec une instance
-hôte et une instance cliente réellement connectées, dans deux installations et
-deux profils isolés sur une même machine. Cette preuve ne remplace pas encore
-une campagne complète ni une validation sur deux PC physiques.
+Un ancien mécanisme de sauvegarde et de reprise de combat a été vérifié avec
+deux instances isolées connectées sur une même machine. Cette preuve ne valide
+pas le nouveau parcours de sauvegarde normale ni une campagne sur deux PC.
 
 La montée de niveau indépendante dispose de tests automatisés du propriétaire,
 de la mise en file et de la reprise de la réplication. Son enchaînement visuel
 complet reste à confirmer sur deux PC physiques avant de le considérer comme
 validé en campagne.
 
-Le mod conserve volontairement des protections strictes : une sauvegarde est
-refusée pendant une barrière de changement de mode, de synchronisation ou de
-réparation, et un état partiellement appliqué n'est jamais considéré comme une
-réussite.
+L'hôte peut demander une sauvegarde normale même si les états des joueurs
+diffèrent ou si une synchronisation est en cours. Elle contient l'état courant
+de l'hôte, qui peut être incohérent ; les restrictions propres au jeu restent
+applicables. Une réparation partielle n'est pas considérée comme réussie.
 
 ## Compatibilité
 

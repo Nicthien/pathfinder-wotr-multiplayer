@@ -99,6 +99,9 @@
         },
         "lobbyWindow": {
             "realTime": {
+                "regroupPlayer": "Join player",
+                "regroupUnavailable": "Unable to regroup: both players need available characters in the same loaded area, outside combat and transitions.",
+                "transitionSyncFailed": "The party's positions could not be synchronized after the transition. Reload the host's save to reunite the players.",
                 "combatStatus": "Combat: {0}",
                 "pausePolicy": "Pause policy: {0}",
                 "preferredMode": "Preferred combat mode: {0}",
@@ -414,7 +417,7 @@
                 "terminated": "{0} - leveling has been terminated",
                 "classMismatch": "Selected {0} class is missing.\nMake sure game content (DLCs/Mods) is the same",
                 "archetypeMismatch": "Selected {0} archetype is missing.\nMake sure game content (DLCs/Mods) is the same",
-                "synchronizationFailed": "Character progression could not be synchronized. Saving is blocked. Return to the main menu and reload a safe host save.",
+                "synchronizationFailed": "Character progression could not be synchronized. Player states may differ. Reload a host save to continue together.",
                 "ownerChangeBlocked": "Finish or cancel this character's progression before changing its owner.",
                 "featureMismatch": "Selected {0} feature is missing.\nMake sure game content (DLCs/Mods) is the same"
             },
@@ -445,7 +448,7 @@
             },
             "combat": {
                 "unitAutokilled": "Auto-killing unit '{0}' ({1}) as it's been killed at {2}",
-                "finalSyncFailed": "The final combat state could not be confirmed. Saving remains blocked. Collect diagnostics, then return to the main menu and load a safe save.",
+                "finalSyncFailed": "The final combat state could not be confirmed. Player states may differ; reload a host save to continue together.",
                 "saveBlockedDuringSynchronization": "Save unavailable during real-time multiplayer combat or synchronization. Switch to turn-based mode or wait until combat ends.",
                 "saveBlockedAfterDisconnect": "Saving is blocked after a disconnect during real-time combat because this state may differ from the host. Return to the main menu and load a safe save.",
                 "realTimeCommandRejected": "The host rejected the real-time command ({0}).",

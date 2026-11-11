@@ -530,6 +530,8 @@ namespace WOTRMultiplayer.Services
         {
             if (networkDialog.IsScripted)
             {
+                if (string.Equals(Game.DialogState?.Dialog?.Id, networkDialog.Id, StringComparison.OrdinalIgnoreCase))
+                    return true;
                 var previousDialog = Game.DialogState;
                 Game.DialogState = new NetworkDialogState(networkDialog);
                 Logger.LogInformation("Scripted dialog has been started. DialogId={DialogId}, DialogName={Name}", Game.DialogState.Dialog.Id, Game.DialogState.Dialog.Name);
@@ -930,6 +932,7 @@ namespace WOTRMultiplayer.Services
 
                // area transitioning
                .On<NotifyPartyAreaTransitioned>(OnNotifyPartyAreaTransitioned)
+               .On<NotifyPartyRegrouped>(OnNotifyPartyRegrouped)
                .On<NotifyTransitionMapEntryChosen>(OnNotifyTransitionMapEntryChosen)
                .On<NotifyTransitionMapClosed>(OnNotifyTransitionMapClosed)
                .On<NotifyIslandMapEntryChosen>(OnNotifyIslandMapEntryChosen)
@@ -3498,7 +3501,52 @@ namespace WOTRMultiplayer.Services
 
          private async Task OnNotifyDialogStartedAsync(long playerId, NotifyDialogStarted started)
         {
-            await WaitWhileTrue(() => Game.DialogState != null && Game.DialogState.IsSelectingAnswer, "Waiting until the previous answer has been processed");
+            if (playerId != NetworkConstants.HostPlayerId || started?.Dialog == null || Game == null) return;
+            var session = Game;
+            if (started.HostOutsideCombat && (!string.Equals(started.SessionId, session.Id, StringComparison.Ordinal)
+                || started.LoadedSaveSeed != session.LoadedSaveSeed || started.AreaSeed != session.CurrentArea?.Seed)) return;
+            if (started.HostOutsideCombat && session.Combat != null
+                && (session.Combat.Stage != NetworkCombatStage.Initiating || !CanDiscardUnconfirmedCombatStartup()))
+            {
+                Logger.LogError("Host dialog arrived during a client combat that cannot be discarded as an unconfirmed startup.");
+                return;
+            }
+            if (started.HostOutsideCombat
+                && session.Combat?.Stage == NetworkCombatStage.Initiating && CanDiscardUnconfirmedCombatStartup())
+            {
+                var pendingCombat = session.Combat;
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                MainThreadAccessor.Post(() =>
+                {
+                    try
+                    {
+                        if (!ReferenceEquals(Game, session) || !ReferenceEquals(session.Combat, pendingCombat)
+                            || session.LoadedSaveSeed != started.LoadedSaveSeed || session.CurrentArea?.Seed != started.AreaSeed)
+                            return;
+                        NativeCombatRestartSession = session;
+                        NativeCombatRestartSave = session.LoadedSaveSeed;
+                        CombatInteraction.ForceResetCombat();
+                        CompleteCombatEnd();
+                        ClearDiscardedCombatStartupFailure();
+                        Logger.LogInformation("Cancelled client-only combat startup before host dialog.");
+                        completion.TrySetResult(true);
+                    }
+                    catch (Exception error)
+                    {
+                        completion.TrySetException(error);
+                    }
+                    finally
+                    {
+                        if (ReferenceEquals(NativeCombatRestartSession, session)) NativeCombatRestartSession = null;
+                        completion.TrySetResult(false);
+                    }
+                });
+                if (!await completion.Task) return;
+                if (!ReferenceEquals(Game, session) || session.LoadedSaveSeed != started.LoadedSaveSeed) return;
+            }
+            var ready = await WaitWhileTrue(() => ReferenceEquals(Game, session)
+                && Game.DialogState != null && Game.DialogState.IsSelectingAnswer, "Waiting until the previous answer has been processed");
+            if (!ready || !ReferenceEquals(Game, session)) return;
 
             var dialog = Mapper.Map<NetworkDialog>(started.Dialog);
 
@@ -3542,7 +3590,12 @@ namespace WOTRMultiplayer.Services
 
          private async Task OnNotifyDialogCueAnswerSuggestedAsync(long playerId, NotifyDialogCueAnswerSuggested message)
         {
-            await WaitWhileTrue(() => Game.DialogState == null || !string.Equals(Game.DialogState.CurrentCueName, message.CueName, StringComparison.OrdinalIgnoreCase), "Waiting for dialog to initialize before suggesting cue answer");
+            var session = Game;
+            if (playerId != NetworkConstants.HostPlayerId || session == null || message == null) return;
+            var ready = await WaitWhileTrue(() => ReferenceEquals(Game, session)
+                && (session.DialogState == null || !string.Equals(session.DialogState.CurrentCueName, message.CueName, StringComparison.OrdinalIgnoreCase)),
+                "Waiting for dialog to initialize before suggesting cue answer");
+            if (!ready || !ReferenceEquals(Game, session) || session.DialogState?.Dialog == null) return;
 
             if (message.Dialog?.Id != Game.DialogState.Dialog.Id || Game.DialogState.IsSelectingAnswer) return;
             Game.DialogState.VoteRoundId = message.VoteRoundId;

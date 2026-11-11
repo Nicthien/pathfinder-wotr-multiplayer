@@ -649,7 +649,7 @@ namespace WOTRMultiplayer.UI.Controllers
             _mainThreadAccessor.Post(() => UpdateServerInfo(connectivity));
         }
 
-        private void AddCombatButton(Transform parent, string label, Action action)
+        private GameObject AddCombatButton(Transform parent, string label, Action action)
         {
             var buttonObject = _uiFactory.CreateButton(parent);
             var layout = buttonObject.GetComponent<LayoutElement>() ?? buttonObject.AddComponent<LayoutElement>();
@@ -664,6 +664,7 @@ namespace WOTRMultiplayer.UI.Controllers
             var button = buttonObject.GetComponent<OwlcatButton>();
             button.Interactable = action != null;
             if (action != null) button.OnLeftClick.AddListener(() => action());
+            return buttonObject;
         }
 
         private static void ConfigureScrollableLobby(GameObject root)
@@ -749,6 +750,20 @@ namespace WOTRMultiplayer.UI.Controllers
             playerNameBox.color = _uiFactory.DefaultTextMesh.Color;
             playerNameBox.SetText(player.Name);
             playerNameBox.fontStyle = player.IsReady ? FontStyles.Normal : FontStyles.Strikethrough;
+
+            if (_activeOwner == LobbyWindowOwner.EscMenu
+                && _multiplayerActorAccessor.Current is MultiplayerActorBase actor
+                && actor.Game != null && player.Id != actor.Game.LocalPlayerId)
+            {
+                var regroupButton = AddCombatButton(playerContainerObject.transform, Localized(WellKnownKeys.LobbyWindow.RealTime.RegroupPlayer.Key), () =>
+                {
+                    if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
+                        host.RequestPartyRegroup(player.Id);
+                    else if (_multiplayerActorAccessor.Client is MultiplayerClient client && client.IsActive)
+                        client.RequestPartyRegroup(player.Id);
+                });
+                regroupButton.name = "RegroupPlayer_" + player.Id;
+            }
 
             if (player.IsReady)
             {

@@ -39,7 +39,7 @@ Choisir les autres projets de tests et contrôles de `tools/` selon le changemen
 
 - L'hôte fait autorité sur l'état de combat et les résultats aléatoires.
 - Préserver les protections de session, d'époque, de séquence et de synchronisation ; ne pas traiter un état partiellement appliqué comme une réussite.
-- Ne pas autoriser une sauvegarde pendant une barrière de changement de mode ou de réparation. Une réparation échouée doit suivre le mécanisme de repli sécurisé ; ne pas contourner une protection pour débloquer artificiellement la partie.
+- L'hôte doit pouvoir demander une sauvegarde normale même pendant une désynchronisation ou une barrière ; le jeu peut conserver ses propres restrictions. Une sauvegarde prise dans un état divergent peut contenir des incohérences. Une réparation échouée doit toujours suivre son mécanisme de repli ; ne pas présenter un état partiellement appliqué comme réparé.
 - `00_WOTRMultiplayer` est le slot stable ; `00_WOTRMultiplayerRTwP` est le slot expérimental. Un seul doit être actif ; les slots inactifs restent hors du dossier `Mods`.
 - Construire et tester en **Release** : la configuration Debug peut déployer automatiquement dans le jeu. Ne jamais copier un build Debug dans le slot stable. Utiliser les scripts de staging et conserver les sauvegardes prévues.
 - Pour les essais de sauvegarde en combat, utiliser les installations et profils isolés sous `local-artifacts/combat-save-lab/`. Lire `docs/sauvegarde-combat-tb-developpement-2026-10-17.md` puis vérifier les preuves courantes. Ne pas remplacer les mods de l'installation habituelle ni utiliser les sauvegardes originales.

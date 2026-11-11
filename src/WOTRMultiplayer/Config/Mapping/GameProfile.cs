@@ -363,6 +363,9 @@ namespace WOTRMultiplayer.Config.Mapping
                 IsAttachedToUnit = areaEffectEntityData.m_OnUnit,
                 CreationGameTimeTicks = areaEffectEntityData.m_CreationTime.Ticks,
                 DurationTicks = areaEffectEntityData.m_Duration?.Ticks,
+                RemainingDurationTicks = WOTRMultiplayer.Services.GameInteraction.RealTimeAreaReplication.RemainingTicks(
+                    areaEffectEntityData.m_CreationTime.Ticks, areaEffectEntityData.m_Duration?.Ticks,
+                    Kingmaker.Game.Instance.TimeController.GameTime.Ticks),
                 Name = areaEffectEntityData.Blueprint.name,
                 Orientation = RealTimePresentationRuntime.Enabled
                     && (Main.Multiplayer?.IsRealTimeCombatActive == true

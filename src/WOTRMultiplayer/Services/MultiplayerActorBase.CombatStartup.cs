@@ -10,6 +10,7 @@ namespace WOTRMultiplayer.Services
     {
         private NetworkGame _startupFailureSession;
         private int _startupFailureSave;
+        private bool _startupFailureWasPaused;
         protected NetworkGame NativeCombatRestartSession;
         protected int NativeCombatRestartSave;
         protected bool IsNativeCombatRestart => Game != null && ReferenceEquals(Game, NativeCombatRestartSession)
@@ -33,6 +34,7 @@ namespace WOTRMultiplayer.Services
             if (Game == null) return;
             if (!HasCombatStartupFailure)
             {
+                _startupFailureWasPaused = GameInteraction.IsPaused;
                 Logger.LogError("[CombatStartup] Protected stop; reload a safe save. Reason={Reason}", reason);
                 PlayerNotification.ShowWarningNotification(WellKnownKeys.LobbyWindow.RealTime.RecoveryStopped.Key);
             }
@@ -41,6 +43,19 @@ namespace WOTRMultiplayer.Services
             Game.RealTimeCombat.RecoveryStatus = "combat-startup-failed";
             Game.RealTimeCombat.RecoveryFailure = reason;
             GameInteraction.SetPause(true);
+        }
+
+        protected bool CanDiscardUnconfirmedCombatStartup()
+            => !HasCombatStartupFailure || string.Equals(Game?.RealTimeCombat?.RecoveryFailure,
+                "initialization-timeout:Initiating", StringComparison.Ordinal);
+
+        protected void ClearDiscardedCombatStartupFailure()
+        {
+            if (!HasCombatStartupFailure || !CanDiscardUnconfirmedCombatStartup()) return;
+            _startupFailureSession = null;
+            Game.RealTimeCombat.RecoveryStatus = null;
+            Game.RealTimeCombat.RecoveryFailure = null;
+            if (!_startupFailureWasPaused && Game.ForcedPause == null) GameInteraction.SetPause(false);
         }
 
         // Called by the menu/network update, including while the world is paused.

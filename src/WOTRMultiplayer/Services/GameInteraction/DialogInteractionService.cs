@@ -29,6 +29,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 {
     public class DialogInteractionService : IDialogInteractionService
     {
+        public void StopDialog() => Kingmaker.Game.Instance?.DialogController?.StopDialog();
         public const string SuggestionIconObjectPrefix = "SuggestionIcon";
 
         private readonly ILogger<DialogInteractionService> _logger;
@@ -224,6 +225,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     if (dialogBlueprint == null)
                     {
                         _logger.LogError("Unable to find dialog. DialogName={DialogName}, DialogId={DialogId}", networkDialog.Name, networkDialog.Id);
+                        hasStartedDialogTask.TrySetResult(false);
                         return;
                     }
 

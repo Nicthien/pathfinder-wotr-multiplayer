@@ -58,6 +58,9 @@ namespace WOTRMultiplayer.Services
             && host.Game.RealTimeCombat.Mode == CombatMode.TurnBased && !host.IsSavingBlockedByCombatSync
             && !CombatSaving.CombatSavePauseLease.Active && !CombatSaving.CombatSaveLoadState.Active;
 
+        internal CombatSaving.CombatSaveManifest CaptureNormalCombatSave(ref string nativeTurn)
+            => _multiplayerActorAccessor.Host is MultiplayerHost host
+                ? host.CaptureNormalCombatSave(ref nativeTurn) : null;
         public void SaveCombatFromMenu()
         {
             if (CanSaveCombatFromMenu && _multiplayerActorAccessor.Host is MultiplayerHost host)

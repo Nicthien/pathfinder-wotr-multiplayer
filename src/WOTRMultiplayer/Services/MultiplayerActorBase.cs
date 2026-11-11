@@ -134,7 +134,7 @@ namespace WOTRMultiplayer.Services
                 _levelingFailureSession = session;
                 _levelingFailureSaveSeed = identity.LoadedSaveSeed;
             }
-            Logger.LogError(error, "Leveling synchronization failed; saving remains blocked. UnitId={UnitId}", identity.UnitId);
+            Logger.LogError(error, "Leveling synchronization failed. UnitId={UnitId}", identity.UnitId);
             MainThreadAccessor.Post(() =>
             {
                 if (!ReferenceEquals(Game, session) || !HasLevelingSynchronizationFailure) return;
@@ -768,6 +768,23 @@ namespace WOTRMultiplayer.Services
                 GameInteraction.SetPause(true);
                 Logger.LogError("A new combat started before the previous final checkpoint was confirmed; retaining the protected encounter.");
                 return;
+            }
+            if (Game.DialogState != null)
+            {
+                Logger.LogInformation("Closing the active dialog before combat initialization. DialogId={DialogId}",
+                    Game.DialogState.Dialog?.Id);
+                DialogInteraction.StopDialog();
+                Game.DialogState = null;
+                if (Main.Multiplayer?.IsActive == true)
+                {
+                    var native = Kingmaker.Game.Instance;
+                    if (native?.Player?.IsTurnBasedModeOn() == true
+                        && native.TurnBasedCombatController?.Initialized == false)
+                    {
+                        Logger.LogInformation("Replaying native combat initialization after dialog closure.");
+                        native.TurnBasedCombatController.HandlePartyCombatStateChanged(true);
+                    }
+                }
             }
             Logger.LogInformation("Combat started");
             ResetRealTimeRuleRolls();
@@ -5162,6 +5179,19 @@ namespace WOTRMultiplayer.Services
         {
             var gameMode = GameModeType.All.FirstOrDefault(g => string.Equals(g.Name, message.Type, StringComparison.OrdinalIgnoreCase));
             UnregisterGameMode(gameMode, message.PlayerId);
+            if (gameMode == GameModeType.Dialog && receivedFrom == Networking.NetworkConstants.HostPlayerId
+                && message.PlayerId == Networking.NetworkConstants.HostPlayerId
+                && Game?.LocalPlayerId != Networking.NetworkConstants.HostPlayerId && Game?.DialogState != null)
+            {
+                var session = Game;
+                var dialog = session.DialogState;
+                MainThreadAccessor.Post(() =>
+                {
+                    if (!ReferenceEquals(Game, session) || !ReferenceEquals(session.DialogState, dialog)) return;
+                    DialogInteraction.StopDialog();
+                    if (ReferenceEquals(session.DialogState, dialog)) session.DialogState = null;
+                });
+            }
             if (gameMode == GameModeType.Rest)
 
             {

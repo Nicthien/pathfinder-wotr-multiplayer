@@ -242,12 +242,9 @@ namespace WOTRMultiplayer.UnitTests.Services
         }
 
         [Test]
-        public void SavingRemainsBlockedAndNativeModeSwitchesDoNotRequireNetworkNotifications()
+        public void NativeModeSwitchesDoNotRequireNetworkNotifications()
         {
             using var lease = RealTimeNativeLoadLease.Begin(new object(), Info(), () => true, (_, _) => { });
-            var canSave = true;
-            SaveManagerRealTimePatches.SaveManager_IsSaveAllowed_Postfix(ref canSave);
-            Assert.That(canSave, Is.False);
             Assert.That(GamePatches.Game_StartMode_Prefix(GameModeType.Pause), Is.True);
             Assert.That(GamePatches.Game_StopMode_Prefix(GameModeType.Pause), Is.True);
             var world = new object(); RealTimeNativeGraphRepair.Add(world, lease); lease.Dispose();

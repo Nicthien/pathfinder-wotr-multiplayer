@@ -10,6 +10,20 @@ namespace WOTRMultiplayer.UnitTests.Services
 {
     public partial class MultiplayerHostTests
     {
+        [Test]
+        public void ScriptedDialogOutsideCombatIsPublishedWithCurrentSessionIdentity()
+        {
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Id = "session", LoadedSaveSeed = 7,
+                CurrentArea = new WOTRMultiplayer.Entities.Area.NetworkArea { Seed = 5 }
+            };
+            _multiplayerHost.StartDialog(new NetworkDialog { Id = "dialog", IsScripted = true });
+            A.CallTo(() => _networkServer.Broadcast(A<NotifyDialogStarted>.That.Matches(message =>
+                message.Dialog.Id == "dialog" && message.HostOutsideCombat && message.SessionId == "session"
+                && message.LoadedSaveSeed == 7 && message.AreaSeed == 5))).MustHaveHappenedOnceExactly();
+        }
+
         private NetworkDialogState PrepareControlledDialog(bool systemAnswer = false)
         {
             var host = new NetworkPlayer(-1) { IsHost = true, LobbySyncStatus = NetworkLobbySyncStatus.Succeed };

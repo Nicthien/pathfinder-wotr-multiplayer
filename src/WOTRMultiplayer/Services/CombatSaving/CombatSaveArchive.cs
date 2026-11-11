@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Kingmaker.EntitySystem.Persistence;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Services.GameInteraction;
 using WOTRMultiplayer.Services.Random;
@@ -150,6 +151,31 @@ namespace WOTRMultiplayer.Services.CombatSaving
             stream.Write(bytes, 0, bytes.Length);
         }
 
+        // Enrich the native save in place before ZipSaver.Save commits it.
+        // Validation and hashing complete before the reserved entry is written.
+        internal static void AddToNativeSave(ISaver target, CombatSaveManifest manifest)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+            ValidateManifest(manifest);
+            var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            long total = 0;
+            foreach (var name in target.GetAllFiles())
+            {
+                RealTimeMemorySaver.ValidateFileName(name);
+                if (name == ManifestName) continue;
+                var bytes = target.ReadBytes(name) ?? throw new InvalidDataException("combat-save-native-file-missing");
+                if (bytes.Length > RealTimeMemorySaver.MaximumFileBytes) throw new InvalidDataException("combat-save-native-file-too-large");
+                total += bytes.Length;
+                if (total > RealTimeMemorySaver.MaximumTotalBytes) throw new InvalidDataException("combat-save-native-save-too-large");
+                files.Add(name, bytes);
+            }
+            ValidateNative(files, manifest.Campaign);
+            var snapshot = JsonConvert.DeserializeObject<CombatSaveManifest>(
+                JsonConvert.SerializeObject(manifest, Settings), Settings);
+            snapshot.Files = files.ToDictionary(x => x.Key, x => Hash(x.Value), StringComparer.OrdinalIgnoreCase);
+            var metadata = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(snapshot, Settings));
+            target.SaveBytes(ManifestName, metadata);
+        }
         internal static CombatSaveManifest ValidateFile(string path, int protocol, string fingerprint, string gameVersion,
             IReadOnlyCollection<string> compatibleFingerprints = null)
         {

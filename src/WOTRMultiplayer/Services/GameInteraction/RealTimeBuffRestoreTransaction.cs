@@ -129,9 +129,15 @@ namespace WOTRMultiplayer.Services.GameInteraction
             if (refreshAfterRollback != null) _refreshAfterRollback.Add(refreshAfterRollback);
         }
 
-        public void VerifyAndCommit(NetworkCombatState expected, NetworkCombatState actual)
+        public void VerifyAndCommit(NetworkCombatState expected, NetworkCombatState actual,
+            Func<NetworkCombatState, NetworkCombatState> verificationProjection = null)
         {
             EnsureOpen();
+            if (verificationProjection != null)
+            {
+                expected = verificationProjection(expected);
+                actual = verificationProjection(actual);
+            }
             if (HasChanges)
             {
                 if (RealTimeCombatHasher.Compute(new RealTimeCombatSnapshot { Combat = expected })

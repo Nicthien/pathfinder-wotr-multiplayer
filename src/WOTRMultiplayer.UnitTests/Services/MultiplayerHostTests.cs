@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -165,6 +165,28 @@ namespace WOTRMultiplayer.UnitTests.Services
                 .MustNotHaveHappened();
         }
 
+        [Test]
+        public void NativeCombatSaveBeforeNetworkTurnPlayingStaysOrdinaryAndHasNoResumeManifest()
+        {
+            A.CallTo(() => _networkServer.IsActive).Returns(true);
+            _multiplayerHost.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                Stage = NetworkLobbyStage.Playing,
+                Combat = new NetworkCombat
+                {
+                    Stage = NetworkCombatStage.Running,
+                    Turn = new NetworkCombatTurn
+                    {
+                        UnitId = "hero", Stage = NetworkCombatTurnStage.StartSynchronization
+                    }
+                },
+                RealTimeCombat = new NetworkRealTimeCombatState { Mode = CombatMode.TurnBased }
+            };
+            var nativeTurn = "{\"Round\":1}";
+
+            Assert.That(_multiplayerHost.CaptureNormalCombatSave(ref nativeTurn), Is.Null);
+            Assert.That(nativeTurn, Is.EqualTo("{\"Round\":1}"));
+        }
         [Test]
         public void RunningRealTimeCombat_BlocksSavingUntilTurnBasedOrCombatEnd()
         {

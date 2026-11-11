@@ -790,12 +790,24 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     NetworkCombatState applied;
                     using (var restoration = new RealTimeBuffRestoreTransaction())
                     {
+                        // A normal native load can recreate capacity/prepared slots
+                        // differently on either peer. Normalize both worlds inside
+                        // the same rollback transaction before applying saved values.
+                        var normalizedSpellSlots = 0;
+                        foreach (var networkUnit in expected.Units.Where(unit =>
+                                     unit?.Descriptor?.SpellbooksCaptured == true))
+                            normalizedSpellSlots += RealTimeSpellbookReplication.NormalizeNativeLoadTopology(
+                                _gameStateLookupService.GetUnitEntity(networkUnit.Id),
+                                networkUnit.Descriptor.Spellbooks, restoration);
+                        if (normalizedSpellSlots != 0)
+                            _logger.LogInformation("[CombatSave] Normalized native spellbook topology. ChangedSlots={Count}",
+                                normalizedSpellSlots);
                         ApplyRealTimeCombatStateCore(expected, restoration, false,
                             RealTimePresentationRuntime.IsClientActive);
                         _logger.LogInformation("[CombatSave] Mechanical restore phase: capture-applied-world");
                         applied = GetRealTimeCombatState();
                         _logger.LogInformation("[CombatSave] Mechanical restore phase: verify-applied-world");
-                        restoration.VerifyAndCommit(expected, applied);
+                        restoration.VerifyAndCommit(expected, applied, CombatSaving.CombatSaveRestoreHasher.Project);
                     }
                     if (!canApply()) { completion.TrySetResult(null); return; }
                     _logger.LogInformation("[CombatSave] Mechanical restore phase: complete");
@@ -1279,7 +1291,8 @@ namespace WOTRMultiplayer.Services.GameInteraction
         {
             Game.Instance.TurnBasedCombatController.CurrentTurn?.Dispose();
             Game.Instance.TurnBasedCombatController.CurrentTurn = null;
-            var unitsInCombat = Game.Instance.State.Units.InCombat();
+            // Leaving combat mutates the native combat collection.
+            var unitsInCombat = Game.Instance.State.Units.InCombat().ToList();
             foreach (var unit in unitsInCombat)
             {
                 unit.CombatState.LeaveCombat();
@@ -1854,6 +1867,75 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return units;
         }
 
+        public bool TryRegroupParty(IReadOnlyCollection<string> unitIds, IReadOnlyCollection<string> targetUnitIds,
+            out List<PartyRegroupPosition> positions)
+        {
+            positions = [];
+            if (unitIds == null || targetUnitIds == null) return false;
+            var controlled = new HashSet<string>(unitIds.Where(id => !string.IsNullOrEmpty(id)), StringComparer.OrdinalIgnoreCase);
+            var targetIds = new HashSet<string>(targetUnitIds.Where(id => !string.IsNullOrEmpty(id)), StringComparer.OrdinalIgnoreCase);
+            var party = Game.Instance?.Player?.PartyAndPets?.Where(u => u != null && u.IsInGame).ToList();
+            if (party == null || controlled.Count == 0 || targetIds.Count == 0) return false;
+            var anchor = party.FirstOrDefault(u => targetIds.Contains(u.UniqueId) && !u.State.IsFinallyDead);
+            if (anchor == null) return false;
+            anchor = anchor.RiderPart?.SaddledUnit ?? anchor;
+            var movers = party.Where(u => controlled.Contains(u.UniqueId)
+                    || u.Master != null && controlled.Contains(u.Master.UniqueId))
+                .Select(u => u.RiderPart?.SaddledUnit ?? u).Where(u => u != null && u != anchor)
+                .Distinct().ToList();
+            if (movers.Count == 0
+                || movers.Any(u => !string.Equals(u.HoldingState?.SceneName, anchor.HoldingState?.SceneName, StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            FreePlaceSelector.PlaceSpawnPlaces(movers.Count, Math.Max(0.75f, movers.Max(u => u.Corpulence)), anchor.Position);
+            for (var i = 0; i < movers.Count; i++)
+            {
+                var destination = FreePlaceSelector.GetRelaxedPosition(i, projectOnGround: true);
+                positions.Add(new PartyRegroupPosition { UnitId = movers[i].UniqueId, X = destination.x, Y = destination.y,
+                    Z = destination.z, Orientation = anchor.Orientation, Scene = anchor.HoldingState?.SceneName });
+            }
+            return ApplyPartyRegroup(positions);
+        }
+
+        public List<PartyRegroupPosition> CapturePartyRegroupPositions()
+        {
+            var party = Game.Instance?.Player?.PartyAndPets;
+            if (party == null) return [];
+            return party.Where(unit => unit != null && unit.IsInGame && unit.RiderPart == null)
+                .Select(unit => new PartyRegroupPosition
+                {
+                    UnitId = unit.UniqueId, X = unit.Position.x, Y = unit.Position.y, Z = unit.Position.z,
+                    Orientation = unit.Orientation, Scene = unit.HoldingState?.SceneName
+                }).ToList();
+        }
+
+        public bool ApplyPartyRegroup(IReadOnlyCollection<PartyRegroupPosition> positions)
+        {
+            if (positions == null || positions.Count == 0) return false;
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var units = new List<(UnitEntityData Unit, PartyRegroupPosition Position)>();
+            foreach (var position in positions)
+            {
+                if (position == null || string.IsNullOrEmpty(position.UnitId) || !ids.Add(position.UnitId)
+                    || float.IsNaN(position.X) || float.IsInfinity(position.X)
+                    || float.IsNaN(position.Y) || float.IsInfinity(position.Y)
+                    || float.IsNaN(position.Z) || float.IsInfinity(position.Z)
+                    || float.IsNaN(position.Orientation) || float.IsInfinity(position.Orientation)) return false;
+                var unit = _gameStateLookupService.GetUnitEntity(position.UnitId);
+                if (unit == null || !unit.IsInGame || unit.RiderPart != null
+                    || !string.Equals(unit.HoldingState?.SceneName, position.Scene, StringComparison.OrdinalIgnoreCase)) return false;
+                units.Add((unit, position));
+            }
+            foreach (var entry in units)
+            {
+                entry.Unit.Commands?.InterruptMove();
+                entry.Unit.SaddledPart?.Rider?.Commands?.InterruptMove();
+                UpdateUnitPosition(entry.Unit, new Vector3(entry.Position.X, entry.Position.Y, entry.Position.Z).ToNetworkVector3());
+                entry.Unit.Orientation = entry.Position.Orientation;
+            }
+            return true;
+        }
+
         public int RegroupDistantPlayersForCombat(IReadOnlyCollection<string> playerControlledUnitIds, float minimumDistance)
         {
             try
@@ -2137,6 +2219,13 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     RealTimeAreaVisual.For(localAreaEffect.View)?.Confirm(areaEffect);
                     continue;
                 }
+
+                // Host and client game clocks can drift during turn-based combat.
+                // Anchor the host's remaining lifetime to the local game clock so
+                // a still-active pit does not expire early on the client.
+                if (Main.Multiplayer?.IsActive == true && !Main.Multiplayer.CanInitiateAreaTransitions())
+                    RealTimeAreaReplication.ApplyRemainingDuration(localAreaEffect, areaEffect.RemainingDurationTicks,
+                        Game.Instance.TimeController.GameTime);
 
                 var units = areaEffect.UnitsInside
                     .Select(x => new AreaEffectEntityData.UnitInfo
@@ -2817,7 +2906,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
 
             if (rider != null)
             {
-                rider.CombatState.PreventAttacksOfOpporunityNextFrame = true;
+                if (rider.CombatState != null) rider.CombatState.PreventAttacksOfOpporunityNextFrame = true;
                 _logger.LogInformation("Disabled AoO (next frame) for rider due to mount position update. UnitId={UnitId}, RiderUnitId={RiderUnitId}", unit.UniqueId, rider.UniqueId);
             }
         }

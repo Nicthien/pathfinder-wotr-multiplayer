@@ -38,7 +38,7 @@ This variant is unofficial and is not affiliated with Owlcat Games.
   remote peer so two players can progress their characters without sharing the
   same modal window;
 - session recovery and reconnection with epoch and sequence checks;
-- synchronized saving and restoration during turn-based combat;
+- normal host saving, including during combat when permitted by the game;
 - complete French interface and localization;
 - isolated local build, diagnostics, staging, and testing tools.
 
@@ -58,18 +58,18 @@ changes, including the `0.5.x` series, are not integrated automatically: they
 must be adapted deliberately to avoid breaking the already tested RTwP
 protocol.
 
-Saving and resuming combat have been tested with one host instance and one
-connected client instance, using two isolated installations and profiles on the
-same machine. This does not yet replace a full campaign test or validation on
-two physical PCs.
+An earlier coordinated combat save and restore path was tested with two
+connected isolated instances on one machine. That evidence does not validate
+the new normal-save path or a campaign on two physical PCs.
 
 Independent level-up has automated coverage for ownership, queuing, and replay
 resumption. Its complete visual flow still needs confirmation on two physical
 PCs before it can be considered campaign-validated.
 
-The mod deliberately keeps strict safeguards: saving is rejected during a
-mode-switch, synchronization, or repair barrier, and a partially applied state
-is never treated as a success.
+The host can request a normal save even when player states differ or a
+synchronization is in progress. It captures the host's current state, which
+may be inconsistent; the game's own restrictions still apply. A partially
+applied repair is never treated as a success.
 
 ## Compatibility
 

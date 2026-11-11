@@ -171,6 +171,11 @@ namespace WOTRMultiplayer.Services.GameInteraction
                             () => FinishBackgroundLeveling(commit: false),
                             () => FinishBackgroundLeveling(commit: true),
                             config);
+                        // The visible CharGen view selects its first phase on bind.
+                        // A headless replay has no view and the first selection can
+                        // arrive without a preceding phase-change message.
+                        if (_backgroundCharGen.CurrentPhaseVM.Value == null && _backgroundCharGen.PhasesCollection.Count > 0)
+                            _backgroundCharGen.CurrentPhaseVM.Value = _backgroundCharGen.PhasesCollection[0];
                     }
                     _logger.LogInformation("Started headless remote leveling. UnitId={UnitId}, Mode={Mode}", unitId, mode);
                 }
@@ -785,10 +790,12 @@ namespace WOTRMultiplayer.Services.GameInteraction
                     CharGenFeatureSelectorItemVM requestedFeatureVM;
                     if (_backgroundCharGen?.CurrentPhaseVM.Value is CharGenFeatureSelectorPhaseVM backgroundPhase)
                     {
+                        // The game normally creates this list when the detailed UI
+                        // binds. A headless replay has no view to perform that step.
+                        if (backgroundPhase.SelectorVM == null) backgroundPhase.BeginDetailedView();
                         requestedFeatureVM = backgroundPhase.ExtractNestedEntities()
                             .OfType<CharGenFeatureSelectorItemVM>().FirstOrDefault(featureItem =>
-                            string.Equals(featureItem.Feature.NameForAcronym, networkLevelingFeature.Name, StringComparison.OrdinalIgnoreCase)
-                            && string.Equals(featureItem.Feature.Feature.AssetGuid.ToString(), networkLevelingFeature.Id, StringComparison.OrdinalIgnoreCase));
+                            string.Equals(featureItem.Feature.Feature.AssetGuid.ToString(), networkLevelingFeature.Id, StringComparison.OrdinalIgnoreCase));
                     }
                     else
                     {
@@ -796,7 +803,6 @@ namespace WOTRMultiplayer.Services.GameInteraction
                         requestedFeatureVM = view?.m_Selector.VirtualList.Elements
                             .Select(element => element.Data as CharGenFeatureSelectorItemVM)
                             .FirstOrDefault(featureItem => featureItem != null
-                                && string.Equals(featureItem.Feature.NameForAcronym, networkLevelingFeature.Name, StringComparison.OrdinalIgnoreCase)
                                 && string.Equals(featureItem.Feature.Feature.AssetGuid.ToString(), networkLevelingFeature.Id, StringComparison.OrdinalIgnoreCase));
                     }
                     if (requestedFeatureVM == null)
@@ -1265,6 +1271,10 @@ namespace WOTRMultiplayer.Services.GameInteraction
             {
                 try
                 {
+                    // Remote replay has no controls, and must never change another
+                    // player's currently open character creation window.
+                    if (_backgroundCharGen != null) return;
+
                     if (_uiAccessor.CharGenView?.ViewModel == null)
                     {
                         _logger.LogError("Unable to update leveling controls due too missing CharGenView");

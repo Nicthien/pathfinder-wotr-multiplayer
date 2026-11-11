@@ -18,6 +18,22 @@ namespace WOTRMultiplayer.Services.GameInteraction
         private static readonly FieldInfo Duration = AccessTools.Field(typeof(AreaEffectEntityData), "m_Duration")
             ?? throw new MissingFieldException(typeof(AreaEffectEntityData).FullName, "m_Duration");
 
+        internal static long? RemainingTicks(long created, long? duration, long now)
+        {
+            if (!duration.HasValue) return null;
+            var remaining = (decimal)created + duration.Value - now;
+            return remaining <= 0 ? 0 : remaining >= long.MaxValue ? long.MaxValue : (long)remaining;
+        }
+
+        internal static void ApplyRemainingDuration(AreaEffectEntityData area, long? remainingTicks, TimeSpan localTime)
+        {
+            if (!remainingTicks.HasValue || remainingTicks.Value < 0) return;
+            var limit = Math.Max(0m, (decimal)TimeSpan.MaxValue.Ticks - localTime.Ticks);
+            var duration = (long)Math.Min(remainingTicks.Value, limit);
+            Creation.SetValue(area, localTime);
+            Duration.SetValue(area, (TimeSpan?)TimeSpan.FromTicks(duration));
+        }
+
         public static string Validate(AreaEffectEntityData area, NetworkAreaEffect state)
         {
             if (area == null || state == null || state.Position == null || state.UnitsInside == null)

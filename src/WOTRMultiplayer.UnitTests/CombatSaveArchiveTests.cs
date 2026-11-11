@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using NUnit.Framework;
 using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Services.CombatSaving;
@@ -22,12 +24,12 @@ namespace WOTRMultiplayer.UnitTests
             NativeSupplement = CombatSaveNativeContractTests.Supplement(),
             Generators = new DeterministicGeneratorCheckpoint()
         };
-        private static RealTimeMemorySaver Source(string tbm = "{\"RoundNumber\":2}")
+        private static RealTimeMemorySaver Source(string tbm = "{\"RoundNumber\":2}", bool seal = true)
         {
             var source = new RealTimeMemorySaver();
             source.SaveJson("header", "{\"GameId\":\"campaign\"}");
             source.SaveJson("player", "{}"); source.SaveJson("party", "[]"); source.SaveJson("tbm", tbm);
-            source.Seal(); return source;
+            if (seal) source.Seal(); return source;
         }
         [Test]
         public void NewSaveRoundTripIncludesMetadataWithoutOverwriting()
@@ -60,6 +62,53 @@ namespace WOTRMultiplayer.UnitTests
             Assert.That(System.Text.Encoding.UTF8.GetString(source.ReadBytes("tbm.json")), Does.Not.Contain("RoundNumber"));
         }
 
+        [Test]
+        public void ExistingNativeSaveReceivesIntegrityCheckedManifest()
+        {
+            using var source = Source("{\"m_CurrentTurn\":{\"Status\":\"Acting\"}}", seal: false);
+            var manifest = Manifest();
+            var native = Newtonsoft.Json.Linq.JObject.Parse(source.ReadJson("tbm"));
+            manifest.NativeSupplement.AddTo(native);
+            source.SaveJson("tbm", native.ToString(Newtonsoft.Json.Formatting.None));
+
+            CombatSaveArchive.AddToNativeSave(source, manifest);
+            source.Seal();
+            var path = WriteZip(source, "native-enriched.zks");
+
+            var validated = CombatSaveArchive.ValidateFile(path, 70, manifest.BuildFingerprint, "test");
+            Assert.That(validated.Files.Keys, Is.EquivalentTo(source.GetAllFiles()
+                .Where(name => name != CombatSaveArchive.ManifestName)));
+            Assert.That(CombatSaveNativeSupplement.Read(Newtonsoft.Json.Linq.JObject.Parse(
+                CombatSaveArchive.ReadNativeTurn(path))).TimeSinceStart, Is.EqualTo(manifest.NativeSupplement.TimeSinceStart));
+            Assert.That(manifest.Files, Is.Empty);
+        }
+
+        [Test]
+        public void FailedNativeValidationLeavesNoPartialManifest()
+        {
+            using var source = Source(seal: false);
+            var manifest = Manifest();
+            manifest.Campaign = "another-campaign";
+            var nativeBefore = source.ReadBytes("tbm.json");
+
+            Assert.Throws<InvalidDataException>(() => CombatSaveArchive.AddToNativeSave(source, manifest));
+            Assert.That(source.ReadBytes(CombatSaveArchive.ManifestName), Is.Null);
+            Assert.That(source.ReadBytes("tbm.json"), Is.EqualTo(nativeBefore));
+        }
+
+        private string WriteZip(RealTimeMemorySaver source, string name)
+        {
+            var path = Path.Combine(_directory, name);
+            using var stream = File.Create(path);
+            using var zip = new ZipArchive(stream, ZipArchiveMode.Create, true);
+            foreach (var file in source.GetAllFiles())
+            {
+                var bytes = source.ReadBytes(file);
+                using var output = zip.CreateEntry(file).Open();
+                output.Write(bytes, 0, bytes.Length);
+            }
+            return path;
+        }
         [TestCase("")]
         [TestCase("{}")]
         [TestCase("null")]

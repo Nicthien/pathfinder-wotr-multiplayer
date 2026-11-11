@@ -8,6 +8,9 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using Kingmaker;
+using Kingmaker.UnitLogic;
+using HarmonyLib;
+using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Blueprints.Area;
 using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
@@ -263,6 +266,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
             // native barrier predicate is the RT authorization in lieu of a
             // user-save pause lease.
             using var combatSaveScope = new CombatSaving.CombatSaveCaptureScope(game, captureAuthorized);
+            var spellbookSnapshot = new GameSpellbookSnapshot(game);
             var calculatedStats = game.State.Units.All.Where(unit => unit?.Stats?.AllStats != null)
                 .ToDictionary(unit => unit, unit => RealTimeCalculatedStatReplication.Capture(unit.Stats.AllStats));
             void RestoreCalculatedStats()
@@ -325,6 +329,7 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 transaction.Apply(player.CrossSceneState.TurnOff, () => RestoreScene(player.CrossSceneState));
                 transaction.Apply(() => player.TurnOff(EntityDataBase.Reason.SaveGame), () => { if (!player.IsTurnedOn) player.TurnOn(); });
                 player.PreSave();
+                spellbookSnapshot.Restore();
                 // The serialized off-state must contain the same caches as the
                 // authoritative live world, not values recalculated by TurnOff.
                 RestoreCalculatedStats();
@@ -429,6 +434,71 @@ namespace WOTRMultiplayer.Services.GameInteraction
             using (var writer = new JsonTextWriter(text))
                 JsonSerializer.Create(DefaultJsonSettings.DefaultSettings).Serialize(writer, value);
             return bytes.ToArray();
+        }
+
+        private sealed class SpellbookSnapshotEntry
+        {
+            public Spellbook Book { get; set; }
+            public List<SpellSlot>[] Levels { get; set; }
+            public Dictionary<SpellSlot, (AbilityData Spell, bool Available, SpellSlot[] Linked,
+                bool Opposition)> States { get; set; }
+            public List<AbilityData> Removed { get; set; }
+
+            public void Restore()
+            {
+                for (var level = 0; level < Levels.Length; level++)
+                {
+                    Book.m_MemorizedSpells[level].Clear();
+                    if (Levels[level] != null) Book.m_MemorizedSpells[level].AddRange(Levels[level]);
+                }
+                foreach (var pair in States)
+                {
+                    SpellField(pair.Key) = pair.Value.Spell;
+                    pair.Key.Available = pair.Value.Available;
+                    pair.Key.LinkedSlots = pair.Value.Linked?.ToArray();
+                    pair.Key.IsOpposition = pair.Value.Opposition;
+                }
+                Book.RemoveMemorizedSpells.Clear();
+                Book.RemoveMemorizedSpells.AddRange(Removed);
+            }
+        }
+
+        private static readonly AccessTools.FieldRef<SpellSlot, AbilityData> SpellField =
+            AccessTools.FieldRefAccess<SpellSlot, AbilityData>("Spell");
+
+        private sealed class GameSpellbookSnapshot
+        {
+            public List<SpellbookSnapshotEntry> Entries { get; } = new();
+            public GameSpellbookSnapshot(Game game)
+            {
+                if (game?.State?.Units?.All == null) return;
+                var units = game.State.Units.All
+                    .Where(unit => unit != null)
+                    .Concat(game.Player?.PartyAndPets ?? [])
+                    .Distinct()
+                    .Where(unit => unit?.Spellbooks != null);
+                foreach (var unit in units)
+                {
+                    foreach (var book in unit.Spellbooks)
+                    {
+                        var entry = new SpellbookSnapshotEntry
+                        {
+                            Book = book,
+                            Levels = book.m_MemorizedSpells.Select(level => level?.ToList()).ToArray(),
+                            States = book.m_MemorizedSpells.Where(level => level != null)
+                                .SelectMany(level => level).Distinct()
+                                .ToDictionary(slot => slot, slot => (SpellField(slot), slot.Available,
+                                    slot.LinkedSlots?.ToArray(), slot.IsOpposition)),
+                            Removed = book.RemoveMemorizedSpells.ToList()
+                        };
+                        Entries.Add(entry);
+                    }
+                }
+            }
+            public void Restore()
+            {
+                foreach (var entry in Entries) entry.Restore();
+            }
         }
     }
 }

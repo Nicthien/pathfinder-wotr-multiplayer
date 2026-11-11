@@ -386,6 +386,24 @@ public static class WellKnownKeys
         [Description("realTime")]
         public static class RealTime
         {
+            [Description("regroupPlayer")]
+            public static class RegroupPlayer
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("regroupUnavailable")]
+            public static class RegroupUnavailable
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("transitionSyncFailed")]
+            public static class TransitionSyncFailed
+            {
+                public static string Key { get; set; }
+            }
+
             [Description("combatStatus")]
             public static class CombatStatus
             {

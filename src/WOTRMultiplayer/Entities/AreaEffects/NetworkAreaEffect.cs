@@ -29,6 +29,8 @@ namespace WOTRMultiplayer.Entities.AreaEffects
 
         public long? DurationTicks { get; set; }
 
+        public long? RemainingDurationTicks { get; set; }
+
         public string Name { get; set; }
 
         public NetworkVector3 Position { get; set; }

@@ -7,6 +7,7 @@ using WOTRMultiplayer.Entities.Combat;
 using WOTRMultiplayer.Entities.Combat.RealTime;
 using WOTRMultiplayer.Entities.Combat.Crusades;
 using WOTRMultiplayer.Entities.Units;
+using WOTRMultiplayer.Networking.Messages.Game;
 
 namespace WOTRMultiplayer.Abstractions.GameInteraction
 {
@@ -32,6 +33,11 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
         List<NetworkUnit> GetParty();
 
         int RegroupDistantPlayersForCombat(IReadOnlyCollection<string> playerControlledUnitIds, float minimumDistance);
+
+        bool TryRegroupParty(IReadOnlyCollection<string> unitIds, IReadOnlyCollection<string> targetUnitIds,
+            out List<PartyRegroupPosition> positions);
+        bool ApplyPartyRegroup(IReadOnlyCollection<PartyRegroupPosition> positions);
+        List<PartyRegroupPosition> CapturePartyRegroupPositions();
 
         void UpdateUnits(List<NetworkUnit> networkUnits, bool updatePosition);
 

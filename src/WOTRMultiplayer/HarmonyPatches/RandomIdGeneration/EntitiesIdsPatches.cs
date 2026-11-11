@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -500,14 +500,14 @@ namespace WOTRMultiplayer.HarmonyPatches.RandomIdGeneration
                     // back on while serializing a native checkpoint. EntityFact.Attach
                     // normally allocates a new id on that re-attach, which made the
                     // supposedly read-only capture mutate live buff identities and
-                    // forced every RTwP -> TB reconstruction to abort. Only reuse an
-                    // id already owned by this exact fact; a genuinely new fact while
-                    // the world is held remains a hard failure below. The scope
-                    // may be authorized either by the combat-save pause lease or
-                    // by the host's native reconstruction barrier, so Active is
-                    // the single source of truth here.
+                    // forced every RTwP -> TB reconstruction to abort. Remembered
+                    // scope facts, including stealth buff clocks, are restored for
+                    // the exact same live object; a genuinely new fact while the
+                    // world is held remains a hard failure below.
                     if (!string.IsNullOrWhiteSpace(fact?.UniqueId))
                         return fact.UniqueId;
+                    if (CombatSaveCaptureScope.TryReuseCapturedFact(fact, out var rememberedId))
+                        return rememberedId;
                     throw new InvalidOperationException("native-checkpoint-fact-id-not-established");
                 }
                 var rawIdentifier = $"{CommonTranspilerReplacements.GetSharedIdentifierPart()}:{fact.GetType().Name}:{fact.NameForAcronym}:{fact.Owner?.UniqueId}";

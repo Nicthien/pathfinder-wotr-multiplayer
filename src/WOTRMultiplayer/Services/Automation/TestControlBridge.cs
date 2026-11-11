@@ -309,6 +309,247 @@ namespace WOTRMultiplayer.Services.Automation
                         }, null);
                         return;
                     }
+                    case "request_party_regroup":
+                    {
+                        var target = arguments.Value<long?>("targetPlayerId")
+                            ?? throw new InvalidDataException("target-player-required");
+                        if (_actors.Host is MultiplayerHost host && host.IsActive) host.RequestPartyRegroup(target);
+                        else if (_actors.Client is MultiplayerClient client && client.IsActive) client.RequestPartyRegroup(target);
+                        else throw new InvalidOperationException("multiplayer-session-not-active");
+                        Complete(requestId, new JObject { ["requested"] = true, ["targetPlayerId"] = target }, null);
+                        return;
+                    }
+                    case "show_lobby":
+                    {
+                        if (_actors.Current?.IsActive != true) throw new InvalidOperationException("multiplayer-session-not-active");
+                        Main.Lobby.EnsureStandaloneWindowInitialized();
+                        if (!Main.Lobby.Window.IsVisible) Main.Lobby.Window.Show();
+                        Complete(requestId, new JObject { ["visible"] = Main.Lobby.Window.IsVisible }, null);
+                        return;
+                    }
+                    case "press_regroup_button":
+                    {
+                        var target = arguments.Value<long?>("targetPlayerId") ?? throw new InvalidDataException("target-player-required");
+                        var name = "RegroupPlayer_" + target;
+                        var button = Resources.FindObjectsOfTypeAll<Owlcat.Runtime.UI.Controls.Button.OwlcatButton>()
+                            .FirstOrDefault(value => value.gameObject.activeInHierarchy && value.gameObject.name == name)
+                            ?? throw new InvalidOperationException("regroup-button-not-visible");
+                        if (!button.Interactable) throw new InvalidOperationException("regroup-button-not-interactable");
+                        var label = button.GetComponentInChildren<TMPro.TextMeshProUGUI>()?.text;
+                        button.OnLeftClick.Invoke();
+                        Complete(requestId, new JObject { ["pressed"] = true, ["label"] = label, ["targetPlayerId"] = target }, null);
+                        return;
+                    }
+                    case "transition_area":
+                    {
+                        RequireHost();
+                        var exitId = arguments.Value<string>("exitId");
+                        if (string.IsNullOrWhiteSpace(exitId)) throw new InvalidDataException("exit-id-required");
+                        var transition = Main.State.GetAreaTransitionPart(exitId)
+                            ?? throw new InvalidOperationException("area-transition-not-found");
+                        Kingmaker.UnitLogic.Commands.AreaTransitionGroupCommand.ExecuteTransition(transition);
+                        Complete(requestId, new JObject { ["requested"] = true, ["exitId"] = exitId }, null);
+                        return;
+                    }
+                    case "save_normal_new":
+                    {
+                        RequireHost();
+                        var manager = Game.Instance?.SaveManager
+                            ?? throw new InvalidOperationException("save-manager-not-ready");
+                        if (!manager.IsSaveAllowed(Kingmaker.EntitySystem.Persistence.SaveInfo.SaveType.Manual))
+                            throw new InvalidOperationException("native-save-not-allowed");
+                        var name = "Codex laboratory " + Guid.NewGuid().ToString("N");
+                        var save = manager.CreateNewSave(name);
+                        Game.Instance.SaveGame(save, () => Complete(requestId,
+                            new JObject { ["name"] = name, ["fileName"] = save.FileName }, null));
+                        return;
+                    }
+                    case "set_synthetic_leveling_guard":
+                    {
+                        var host = RequireHost() as MultiplayerHost
+                            ?? throw new InvalidOperationException("host-runtime-unavailable");
+                        var enabled = RequireBoolean(arguments, "enabled");
+                        const string syntheticUnit = "codex-laboratory-synthetic-leveling";
+                        if (enabled)
+                        {
+                            if (host.Game.Leveling != null) throw new InvalidOperationException("leveling-already-active");
+                            host.Game.Leveling = new WOTRMultiplayer.Entities.Leveling.NetworkLeveling(syntheticUnit,
+                                WOTRMultiplayer.Entities.Leveling.NetworkLevelingType.Leveling);
+                        }
+                        else
+                        {
+                            if (host.Game.Leveling?.UnitId != syntheticUnit)
+                                throw new InvalidOperationException("synthetic-leveling-not-active");
+                            host.Game.Leveling = null;
+                        }
+                        Complete(requestId, new JObject { ["enabled"] = enabled,
+                            ["syncGuardActive"] = host.IsSavingBlockedByCombatSync }, null);
+                        return;
+                    }
+                    case "simulate_unconfirmed_client_combat":
+                    {
+                        var client = _actors.Client as MultiplayerClient;
+                        if (client?.IsActive != true || client.Game?.Combat != null)
+                            throw new InvalidOperationException("client-must-be-outside-combat");
+                        client.CombatStarted();
+                        if (client.Game.Combat?.Stage != NetworkCombatStage.Initiating)
+                            throw new InvalidOperationException("client-combat-start-not-created");
+                        Complete(requestId, new JObject { ["started"] = true }, null);
+                        return;
+                    }
+                    case "inspect_native_combat":
+                    {
+                        var controller = Game.Instance.TurnBasedCombatController;
+                        Complete(requestId, new JObject { ["initialized"] = controller.Initialized,
+                            ["playerInCombat"] = Game.Instance.Player.IsInCombat,
+                            ["turnBasedMode"] = Game.Instance.Player.IsTurnBasedModeOn(),
+                            ["gameMode"] = Game.Instance.CurrentMode.ToString() }, null);
+                        return;
+                    }
+                    case "retry_native_combat":
+                    {
+                        var controller = Game.Instance.TurnBasedCombatController;
+                        if (!controller.Initialized && Game.Instance.Player.IsInCombat)
+                            HarmonyLib.AccessTools.Method(controller.GetType(), "Reset").Invoke(controller, new object[] { true, true });
+                        Complete(requestId, new JObject { ["initialized"] = controller.Initialized }, null);
+                        return;
+                    }
+                    case "stop_scripted_dialog":
+                    {
+                        RequireHost();
+                        Game.Instance.DialogController.StopDialog();
+                        Complete(requestId, new JObject { ["requested"] = true }, null);
+                        return;
+                    }
+                    case "start_scripted_dialog":
+                    {
+                        var host = RequireHost() as MultiplayerHost
+                            ?? throw new InvalidOperationException("host-runtime-unavailable");
+                        if (host.Game?.Combat != null) throw new InvalidOperationException("host-in-combat");
+                        var id = arguments.Value<string>("dialogId");
+                        if (string.IsNullOrWhiteSpace(id)) throw new InvalidDataException("dialog-id-required");
+                        var dialog = Kingmaker.Blueprints.ResourcesLibrary.TryGetBlueprint<Kingmaker.DialogSystem.Blueprints.BlueprintDialog>(id)
+                            ?? throw new InvalidOperationException("dialog-blueprint-not-found");
+                        WOTRMultiplayer.HarmonyPatches.Dialogs.DialogsPatches.StartDialog_RunAction_Prefix();
+                        Game.Instance.DialogController.StartDialog(dialog, null, null, null, null);
+                        Complete(requestId, new JObject { ["dialogId"] = id, ["requested"] = true }, null);
+                        return;
+                    }
+                    case "prepare_mythic_leveling":
+                    {
+                        var unitId = arguments.Value<string>("unitId");
+                        var unit = Main.State.GetUnitEntity(unitId) ?? throw new InvalidOperationException("unit-not-found");
+                        if (unit.Progression.MythicExperience <= unit.Progression.MythicLevel)
+                            unit.Progression.GainMythicExperience(1);
+                        Complete(requestId, new JObject { ["unitId"] = unitId, ["level"] = unit.Progression.MythicLevel,
+                            ["experience"] = unit.Progression.MythicExperience }, null);
+                        return;
+                    }
+                    case "inspect_party_visibility":
+                    {
+                        var units = new JArray();
+                        foreach (var unit in Game.Instance.Player.PartyAndPets.Where(u => u != null))
+                            units.Add(new JObject { ["unitId"] = unit.UniqueId, ["name"] = unit.CharacterName,
+                                ["viewVisible"] = unit.View?.IsVisible, ["viewActive"] = unit.View?.gameObject.activeInHierarchy,
+                                ["playerVisible"] = unit.IsVisibleForPlayer });
+                        Complete(requestId, new JObject { ["units"] = units }, null);
+                        return;
+                    }
+                    case "open_mythic_leveling":
+                    {
+                        var actor = _actors.Current ?? throw new InvalidOperationException("multiplayer-session-not-active");
+                        var unitId = arguments.Value<string>("unitId");
+                        if (string.IsNullOrWhiteSpace(unitId) || !actor.IsControlledByLocalPlayer(unitId))
+                            throw new InvalidOperationException("leveling-unit-not-controlled-locally");
+                        var unit = Main.State.GetUnitEntity(unitId) ?? throw new InvalidOperationException("leveling-unit-not-found");
+                        var accepted = Main.Multiplayer.RequestLevelingUI(unitId,
+                            WOTRMultiplayer.Entities.Leveling.NetworkLevelingType.MythicLeveling);
+                        if (accepted) Kingmaker.UnitLogic.Class.LevelUp.LevelUpConfig.Create(unit,
+                            Kingmaker.UnitLogic.Class.LevelUp.LevelUpState.CharBuildMode.Mythic).OpenUI();
+                        Complete(requestId, new JObject { ["requested"] = true, ["openedImmediately"] = accepted, ["unitId"] = unitId }, null);
+                        return;
+                    }
+                    case "complete_leveling_ui":
+                    {
+                        var vm = Main.UIAccessor.CharGenView?.ViewModel
+                            ?? throw new InvalidOperationException("leveling-ui-not-open");
+                        vm.Complete();
+                        Complete(requestId, new JObject { ["requested"] = true }, null);
+                        return;
+                    }
+                    case "inspect_leveling_ui":
+                    {
+                        var vm = Main.UIAccessor.CharGenView?.ViewModel
+                            ?? throw new InvalidOperationException("leveling-ui-not-open");
+                        var phases = new JArray();
+                        for (var i = 0; i < vm.PhasesCollection.Count; i++)
+                        {
+                            var phase = vm.PhasesCollection[i];
+                            phases.Add(new JObject { ["index"] = i, ["type"] = phase.GetType().Name,
+                                ["name"] = phase.PhaseName.Value, ["current"] = ReferenceEquals(phase, vm.CurrentPhaseVM.Value) });
+                        }
+                        var features = new JArray();
+                        foreach (var view in Resources.FindObjectsOfTypeAll<Kingmaker.UI.MVVM._PCView.CharGen.Phases.FeatureSelector.CharGenFeatureSelectorItemPCView>())
+                            if (view.isActiveAndEnabled && view.ViewModel?.Feature?.Feature != null)
+                                features.Add(new JObject { ["id"] = view.ViewModel.Feature.Feature.AssetGuid.ToString(),
+                                    ["name"] = view.ViewModel.Feature.NameForAcronym });
+                        Complete(requestId, new JObject { ["phases"] = phases, ["features"] = features }, null);
+                        return;
+                    }
+                    case "select_leveling_phase":
+                    {
+                        var vm = Main.UIAccessor.CharGenView?.ViewModel
+                            ?? throw new InvalidOperationException("leveling-ui-not-open");
+                        var index = arguments.Value<int?>("index") ?? throw new InvalidDataException("phase-index-required");
+                        if (index < 0 || index >= vm.PhasesCollection.Count) throw new InvalidDataException("phase-index-out-of-range");
+                        vm.CurrentPhaseVM.Value = vm.PhasesCollection[index];
+                        Complete(requestId, new JObject { ["selected"] = index }, null);
+                        return;
+                    }
+                    case "select_leveling_feature":
+                    {
+                        var id = arguments.Value<string>("featureId");
+                        var view = Resources.FindObjectsOfTypeAll<Kingmaker.UI.MVVM._PCView.CharGen.Phases.FeatureSelector.CharGenFeatureSelectorItemPCView>()
+                            .FirstOrDefault(item => item.isActiveAndEnabled && item.ViewModel?.Feature?.Feature != null
+                                && string.Equals(item.ViewModel.Feature.Feature.AssetGuid.ToString(), id, StringComparison.OrdinalIgnoreCase))
+                            ?? throw new InvalidOperationException("leveling-feature-view-not-found");
+                        view.ApplyOnClick();
+                        Complete(requestId, new JObject { ["selected"] = id }, null);
+                        return;
+                    }
+                    case "inspect_pit_spells":
+                    {
+                        var spells = new JArray();
+                        foreach (var unit in Game.Instance.Player.PartyAndPets.Where(u => u != null))
+                            foreach (var book in unit.Spellbooks)
+                                foreach (var slot in book.m_MemorizedSpells.SelectMany(level => level))
+                                    if (slot.Spell?.Blueprint != null && string.Equals(slot.Spell.Blueprint.AssetGuid.ToString(),
+                                        "29ccc62632178d344ad0be0865fd3113", StringComparison.OrdinalIgnoreCase))
+                                        spells.Add(new JObject { ["unitId"] = unit.UniqueId, ["unitName"] = unit.CharacterName,
+                                            ["available"] = slot.Available, ["abilityId"] = slot.Spell.UniqueId });
+                        Complete(requestId, new JObject { ["spells"] = spells }, null);
+                        return;
+                    }
+                    case "cast_pit_at_party":
+                    {
+                        var host = RequireHost();
+                        var unitId = arguments.Value<string>("unitId");
+                        if (!host.IsControlledByLocalPlayer(unitId)) throw new InvalidOperationException("caster-not-controlled-by-host");
+                        var unit = Main.State.GetUnitEntity(unitId) ?? throw new InvalidOperationException("caster-not-found");
+                        var ability = unit.Spellbooks.SelectMany(book => book.m_MemorizedSpells.SelectMany(level => level))
+                            .FirstOrDefault(slot => slot.Available && slot.Spell?.Blueprint != null
+                                && string.Equals(slot.Spell.Blueprint.AssetGuid.ToString(), "29ccc62632178d344ad0be0865fd3113", StringComparison.OrdinalIgnoreCase))?.Spell
+                            ?? throw new InvalidOperationException("prepared-pit-spell-not-found");
+                        var targetId = arguments.Value<string>("targetUnitId");
+                        var target = Main.State.GetUnitEntity(targetId) ?? throw new InvalidOperationException("target-not-found");
+                        var castCommand = Kingmaker.UnitLogic.Commands.UnitUseAbility.CreateCastCommand(ability,
+                            new Kingmaker.Utility.TargetWrapper(target.Position),
+                            Kingmaker.UnitLogic.Commands.Base.UnitCommand.CommandType.Standard);
+                        castCommand.CreatedByPlayer = true;
+                        unit.Commands.Run(castCommand);
+                        Complete(requestId, new JObject { ["requested"] = true, ["caster"] = unitId, ["target"] = targetId }, null);
+                        return;
+                    }
                     case "start_nearest_combat":
                     {
                         var actor = _actors.Current;
