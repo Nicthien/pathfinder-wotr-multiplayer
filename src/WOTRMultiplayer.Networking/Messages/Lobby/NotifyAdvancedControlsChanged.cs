@@ -11,5 +11,13 @@ namespace WOTRMultiplayer.Networking.Messages.Lobby
         [ProtoMember(1)]
         [LogMe]
         public Dictionary<string, long> Features { get; set; } = [];
+
+        [ProtoMember(2)]
+        [LogMe]
+        public Dictionary<string, long> PendingFeatures { get; set; } = [];
+
+        [ProtoMember(3)]
+        [LogMe]
+        public Dictionary<string, long> PendingSequences { get; set; } = [];
     }
 }

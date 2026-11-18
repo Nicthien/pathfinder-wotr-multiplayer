@@ -332,7 +332,9 @@ namespace WOTRMultiplayer.Networking.Messages
             ClientCombatSaveAck,
             NotifyTurnMovementState,
             ClientPartyRegroupRequested,
-            NotifyPartyRegrouped
+            NotifyPartyRegrouped,
+            ClientFeatureControlRequested,
+            NotifyFeatureControlRequestResolved
         }
 
         public static class Mods

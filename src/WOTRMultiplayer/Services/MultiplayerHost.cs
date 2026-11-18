@@ -2626,6 +2626,10 @@ namespace WOTRMultiplayer.Services
                .On<NotifyGlobalMapRecruitmentClosed>(OnNotifyGlobalMapRecruitmentClosed)
                .On<NotifyGlobalMapCommonPopupShown>(OnNotifyGlobalMapCommonPopupShown)
                .On<ClientArmyCombatTurnSynchronized>(OnClientArmyCombatTurnSynchronized)
+               .On<ClientFeatureControlRequested>(OnClientFeatureControlRequested)
+               .On<NotifyVendorItemTransferred>(OnClientVendorItemTransferred)
+               .On<NotifyVendorDealMade>(OnClientVendorDealMade)
+               .On<NotifyVendorWindowClosed>(OnClientVendorWindowClosed)
 
                // kingdom
                .On<NotifyKingdomNavigationChanged>(OnNotifyKingdomNavigationChanged)
@@ -2695,6 +2699,27 @@ namespace WOTRMultiplayer.Services
                     Game.ArmyCombat.Turn.SyncedPlayers.Add(receivedFrom);
                 }
             }
+        }
+
+        private void OnClientVendorItemTransferred(long receivedFrom, NotifyVendorItemTransferred message)
+            => ForwardVendorMessageIfAuthorized(receivedFrom, message);
+
+        private void OnClientVendorDealMade(long receivedFrom, NotifyVendorDealMade message)
+            => ForwardVendorMessageIfAuthorized(receivedFrom, message);
+
+        private void OnClientVendorWindowClosed(long receivedFrom, NotifyVendorWindowClosed message)
+            => ForwardVendorMessageIfAuthorized(receivedFrom, message);
+
+        private void ForwardVendorMessageIfAuthorized(long receivedFrom, object message)
+        {
+            // The sender has already made its local change. Only a current
+            // controller can ask the host to replicate it to the other peers.
+            if (!IsVendorOperationAuthorized(receivedFrom))
+            {
+                Logger.LogWarning("Vendor operation rejected because the sender does not control vendors. PlayerId={PlayerId}", receivedFrom);
+                return;
+            }
+            _networkHost.BroadcastExcept(receivedFrom, message);
         }
 
          private void OnClientInvalidUnitTurnStartRequested(long receivedFrom, ClientInvalidUnitTurnStartRequested message)
@@ -4307,6 +4332,13 @@ namespace WOTRMultiplayer.Services
                         Game.FeatureControllers.AddOrUpdate(feature, Game.LocalPlayerId, (key, existing) => Game.LocalPlayerId);
                     }
                 }
+                foreach (var pending in Game.FeatureControlTransfers.ToArray())
+                {
+                    if (pending.Value.RequesterId == removedPlayer.Id)
+                    {
+                        Game.FeatureControlTransfers.TryRemove(pending.Key, out _);
+                    }
+                }
                 SendAdvancedControlsUpdate();
 
                 // Only an actual disconnection removes a voter. Loading/unready is not absence.
@@ -5037,7 +5069,9 @@ namespace WOTRMultiplayer.Services
         {
             var message = new NotifyAdvancedControlsChanged
             {
-                Features = Mapper.Map<Dictionary<string, long>>(Game.FeatureControllers)
+                Features = Mapper.Map<Dictionary<string, long>>(Game.FeatureControllers),
+                PendingFeatures = Game.FeatureControlTransfers.ToDictionary(x => x.Key.ToString(), x => x.Value.RequesterId),
+                PendingSequences = Game.FeatureControlTransfers.ToDictionary(x => x.Key.ToString(), x => x.Value.Sequence)
             };
             return message;
         }

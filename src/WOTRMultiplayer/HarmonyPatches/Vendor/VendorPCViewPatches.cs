@@ -10,6 +10,8 @@ using Kingmaker.UI.MVVM._PCView.Vendor;
 using Kingmaker.UI.MVVM._VM.Vendor;
 using Microsoft.Extensions.Logging;
 using UniRx;
+using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.UI;
 
 namespace WOTRMultiplayer.HarmonyPatches.Vendor
 {
@@ -80,6 +82,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Vendor
             }
 
             __instance.m_CloseButton.Interactable = Main.Multiplayer.CanControlVendorDeals();
+            FeatureControlButtonFactory.Add(__instance.m_DealButton.transform.parent, NetworkPlayerControlledFeature.VendorDeal);
         }
 
         private static IDisposable SubscribeToEscHotKey(VendorPCView view)

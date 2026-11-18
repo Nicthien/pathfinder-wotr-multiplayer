@@ -190,6 +190,11 @@
                     }
                 }
             },
+            "featureControl": {
+                "take": "Take control ({0})",
+                "pending": "Request pending…",
+                "yours": "You have control"
+            },
             "characters": {
                 "title": "Characters"
             },

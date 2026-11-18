@@ -43,6 +43,10 @@ namespace WOTRMultiplayer.Entities
 
         public ConcurrentDictionary<NetworkPlayerControlledFeature, long> FeatureControllers { get; set; } = [];
 
+        // A transfer is owned by the host. Clients only use this state to keep
+        // their controls disabled while the host waits for a safe hand-off.
+        public ConcurrentDictionary<NetworkPlayerControlledFeature, NetworkFeatureControlTransfer> FeatureControlTransfers { get; set; } = [];
+
         public List<NetworkCharacter> Characters { get; set; } = [];
 
         public NetworkArmyCombat ArmyCombat { get; set; }

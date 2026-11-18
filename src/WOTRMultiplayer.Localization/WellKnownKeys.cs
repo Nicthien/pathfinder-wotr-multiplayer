@@ -831,6 +831,28 @@ public static class WellKnownKeys
             }
         }
 
+        [Description("featureControl")]
+        public static class FeatureControl
+        {
+            [Description("take")]
+            public static class Take
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("pending")]
+            public static class Pending
+            {
+                public static string Key { get; set; }
+            }
+
+            [Description("yours")]
+            public static class Yours
+            {
+                public static string Key { get; set; }
+            }
+        }
+
         [Description("characters")]
         public static class Characters
         {

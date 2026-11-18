@@ -137,7 +137,13 @@ namespace WOTRMultiplayer.Networking
             // Progression messages need actor-level identity and owner validation
             // before they can be relayed to peers which trust this host.
             if (networkMessageMetadata.Message is IForwardableMessage
-                && networkMessageMetadata.Message is not ILevelingMessage)
+                && networkMessageMetadata.Message is not ILevelingMessage
+                // Vendor operations are validated by MultiplayerHost before a
+                // client can observe them. They must not use the legacy blind
+                // forwarding path.
+                && networkMessageMetadata.Message is not NotifyVendorDealMade
+                && networkMessageMetadata.Message is not NotifyVendorItemTransferred
+                && networkMessageMetadata.Message is not NotifyVendorWindowClosed)
             {
                 try
                 {

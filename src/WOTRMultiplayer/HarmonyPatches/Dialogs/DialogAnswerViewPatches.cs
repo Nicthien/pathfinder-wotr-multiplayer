@@ -2,6 +2,8 @@
 using Kingmaker.UI.MVVM._PCView.Dialog.Dialog;
 using Owlcat.Runtime.UI.Controls.Other;
 using UniRx;
+using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.UI;
 
 namespace WOTRMultiplayer.HarmonyPatches.Dialogs
 {
@@ -24,6 +26,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Dialogs
 
                 Main.Multiplayer.OnAlternateCueAnswerAction(currentCue, answerName);
             }));
+            FeatureControlButtonFactory.Add(__instance.Button.transform.parent, NetworkPlayerControlledFeature.Dialogs);
         }
     }
 }

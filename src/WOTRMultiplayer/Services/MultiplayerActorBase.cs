@@ -64,6 +64,7 @@ namespace WOTRMultiplayer.Services
         private bool _wasPausedBeforeRemoteCutscene;
 
         private long _nextRealTimeUnitDeathSequence;
+        private long _nextFeatureControlRequestSequence;
 
         private readonly Dictionary<string, DeferredLevelingSession> _deferredLevelings = new(StringComparer.OrdinalIgnoreCase);
         private DeferredLevelingSession _activeDeferredLeveling;
@@ -520,6 +521,31 @@ namespace WOTRMultiplayer.Services
         public bool HasControlOverFeature(NetworkPlayerControlledFeature feature)
         {
             return Game.FeatureControllers.TryGetValue(feature, out var playerId) && playerId == Game.LocalPlayerId;
+        }
+
+        public virtual void RequestFeatureControl(NetworkPlayerControlledFeature feature)
+        {
+            if (Game == null || HasControlOverFeature(feature)
+                || Game.FeatureControlTransfers.ContainsKey(feature))
+            {
+                return;
+            }
+
+            Send(new ClientFeatureControlRequested
+            {
+                Feature = feature.ToString(),
+                SessionId = Game.Id,
+                Sequence = Interlocked.Increment(ref _nextFeatureControlRequestSequence)
+            });
+        }
+
+        public bool IsFeatureControlTransferPending(NetworkPlayerControlledFeature feature)
+            => Game?.FeatureControlTransfers.ContainsKey(feature) == true;
+
+        public string GetFeatureControllerName(NetworkPlayerControlledFeature feature)
+        {
+            if (Game?.FeatureControllers.TryGetValue(feature, out var playerId) != true) return string.Empty;
+            return Game.Players.FirstOrDefault(player => player.Id == playerId)?.Name ?? string.Empty;
         }
 
         public void OnEquipmentSlotChanged(NetworkEquipmentSlot equipmentSlot)
@@ -5531,16 +5557,19 @@ namespace WOTRMultiplayer.Services
 
         private void OnNotifyVendorWindowClosed(long receivedFrom, NotifyVendorWindowClosed message)
         {
+            if (this is MultiplayerHost host && !host.IsVendorOperationAuthorized(receivedFrom)) return;
             GameInteraction.CloseVendorWindow();
         }
 
         private void OnNotifyVendorDealMade(long receivedFrom, NotifyVendorDealMade message)
         {
+            if (this is MultiplayerHost host && !host.IsVendorOperationAuthorized(receivedFrom)) return;
             GameInteraction.MakeVendorDeal();
         }
 
         private void OnNotifyVendorItemTransferred(long receivedFrom, NotifyVendorItemTransferred message)
         {
+            if (this is MultiplayerHost host && !host.IsVendorOperationAuthorized(receivedFrom)) return;
             var transfer = Mapper.Map<NetworkVendorItemTransfer>(message.ItemTransfer);
             GameInteraction.TransferVendorItem(transfer);
         }

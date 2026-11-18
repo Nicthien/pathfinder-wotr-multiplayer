@@ -112,6 +112,11 @@
           "vendorDeal": { "title": "Marchands" }
         }
       },
+      "featureControl": {
+        "take": "Prendre la main ({0})",
+        "pending": "Demande en cours…",
+        "yours": "Vous avez la main"
+      },
       "characters": { "title": "Personnages" },
       "tooltips": {
         "contentDiscrepancy": {

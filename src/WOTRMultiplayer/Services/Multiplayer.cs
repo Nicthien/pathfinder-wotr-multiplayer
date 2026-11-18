@@ -118,6 +118,7 @@ namespace WOTRMultiplayer.Services
             if (_multiplayerActorAccessor.Host is MultiplayerHost host && host.IsActive)
             {
                 host.TickCombatSaveRestore();
+                host.TickFeatureControlTransfers();
                 host.PublishRealTimeCombatSnapshot();
             }
         }
@@ -2571,6 +2572,24 @@ namespace WOTRMultiplayer.Services
         public bool CanControlVendorDeals()
         {
             return _multiplayerActorAccessor.Current != null && _multiplayerActorAccessor.Current.HasControlOverFeature(NetworkPlayerControlledFeature.VendorDeal);
+        }
+
+        public void RequestFeatureControl(NetworkPlayerControlledFeature feature)
+        {
+            _multiplayerActorAccessor.Current?.RequestFeatureControl(feature);
+        }
+
+        public bool IsFeatureControlTransferPending(NetworkPlayerControlledFeature feature)
+        {
+            return _multiplayerActorAccessor.Current is MultiplayerActorBase actor
+                && actor.IsFeatureControlTransferPending(feature);
+        }
+
+        public string GetFeatureControllerName(NetworkPlayerControlledFeature feature)
+        {
+            return _multiplayerActorAccessor.Current is MultiplayerActorBase actor
+                ? actor.GetFeatureControllerName(feature)
+                : string.Empty;
         }
 
         public void OnGlobalMapSkipDay()

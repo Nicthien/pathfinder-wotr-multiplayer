@@ -307,6 +307,12 @@ namespace WOTRMultiplayer.Abstractions
 
         bool CanControlVendorDeals();
 
+        void RequestFeatureControl(NetworkPlayerControlledFeature feature);
+
+        bool IsFeatureControlTransferPending(NetworkPlayerControlledFeature feature);
+
+        string GetFeatureControllerName(NetworkPlayerControlledFeature feature);
+
         bool CanControlAlushenyrraIsles();
 
         void OnGlobalMapSkipDay();

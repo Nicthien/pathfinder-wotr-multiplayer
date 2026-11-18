@@ -919,6 +919,7 @@ namespace WOTRMultiplayer.Services
                .On<NotifySaveGameTransferProgressChanged>(OnNotifySaveGameTransferProgressChanged)
                .On<NotifyNewGameDifficultyChanged>(OnNotifyNewGameDifficultyChanged)
                .On<NotifyAdvancedControlsChanged>(OnNotifyAdvancedControlsChanged)
+               .On<NotifyFeatureControlRequestResolved>(OnNotifyFeatureControlRequestResolved)
 
                // new game sequence
                .On<NotifyNewGameSequencePhaseChanged>(OnNotifyNewGameSequencePhaseChanged)
@@ -3730,7 +3731,38 @@ namespace WOTRMultiplayer.Services
                 UpdateFeatureControl(feature.Key, feature.Value);
             }
 
+            Game.FeatureControlTransfers.Clear();
+            if (message.PendingFeatures != null)
+            {
+                foreach (var pending in message.PendingFeatures)
+                {
+                    if (!Enum.TryParse(pending.Key, out NetworkPlayerControlledFeature feature)) continue;
+                    var sequence = 0L;
+                    if (message.PendingSequences != null)
+                    {
+                        message.PendingSequences.TryGetValue(pending.Key, out sequence);
+                    }
+                    Game.FeatureControlTransfers[feature] = new NetworkFeatureControlTransfer
+                    {
+                        RequesterId = pending.Value,
+                        Sequence = sequence,
+                        SessionId = Game.Id
+                    };
+                }
+            }
+
             OnFeaturesControlChanged?.Invoke(Game.FeatureControllers);
+        }
+
+        private void OnNotifyFeatureControlRequestResolved(long playerId, NotifyFeatureControlRequestResolved message)
+        {
+            if (message == null || Game == null || !string.Equals(message.SessionId, Game.Id, StringComparison.Ordinal)
+                || !Enum.TryParse(message.Feature, out NetworkPlayerControlledFeature feature)) return;
+            if (Game.FeatureControlTransfers.TryGetValue(feature, out var pending)
+                && pending.RequesterId == message.RequesterId && pending.Sequence == message.Sequence)
+            {
+                Game.FeatureControlTransfers.TryRemove(feature, out _);
+            }
         }
 
         private void OnNotifyLobbyCharactersChanged(long playerId, NotifyLobbyCharactersChanged message)

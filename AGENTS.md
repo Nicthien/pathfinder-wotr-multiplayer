@@ -21,6 +21,7 @@ Ce fichier contient les consignes actives du projet `WotR-Multiplayer-RTwP`.
 ## Développement et validation
 
 - Solution : `src/WOTRMultiplayer.sln` ; projets de tests : `src/*.UnitTests/` ; outils PowerShell : `tools/`.
+- Pour une release destinée aux joueurs, publier une seule archive du mod : la variante standard, sans `HostPresentationPrototype`. Les builds de prototype restent des artefacts de test internes, sauf demande explicite de Nicolas. Indiquer le nom de l'archive à télécharger dans les notes de release ; tous les joueurs doivent installer le même paquet.
 - Respecter le SDK de `global.json` (actuellement 9.0.318 avec `latestPatch`).
 - Lire `docs/rtwp-local-development.md` pour le workflow, puis les documents `docs/rtwp-*.md` pertinents. Confirmer les règles actuelles dans le code et les scripts : ce document contient aussi un long historique.
 - Pour la compatibilité audio, consulter `docs/rtwp-voice-compatibility.md` et vérifier les deux projets si le changement touche leur intégration.

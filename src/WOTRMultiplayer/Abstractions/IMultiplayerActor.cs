@@ -391,6 +391,8 @@ namespace WOTRMultiplayer.Abstractions
 
         bool HasControlOverFeature(NetworkPlayerControlledFeature feature);
 
+        void RequestFeatureControl(NetworkPlayerControlledFeature feature);
+
         void OnTacticalCombatRetreat();
 
         void OnTacticalCombatAccelerationChanged(bool isAccelerated);

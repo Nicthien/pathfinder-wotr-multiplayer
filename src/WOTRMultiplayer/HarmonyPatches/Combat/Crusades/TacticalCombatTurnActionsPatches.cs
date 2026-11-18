@@ -8,6 +8,8 @@ using Kingmaker.UI.MVVM._PCView.TacticalCombat;
 using Kingmaker.UI.MVVM._PCView.TacticalCombat.ActionBar;
 using Kingmaker.UI.MVVM._VM.TacticalCombat.ActionBar;
 using UniRx;
+using WOTRMultiplayer.Entities;
+using WOTRMultiplayer.UI;
 namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
 {
     [HarmonyPatch]
@@ -26,6 +28,7 @@ namespace WOTRMultiplayer.HarmonyPatches.Combat.Crusades
             var canControl = Main.Multiplayer.CanControlTacticalCombat();
             __instance.m_AccelerateButton.Interactable = canControl;
             __instance.m_FleeButton.Interactable = canControl;
+            FeatureControlButtonFactory.Add(__instance.m_FleeButton.transform.parent, NetworkPlayerControlledFeature.CrusadeArmyCombat);
 
             __instance.AddDisposable(__instance.ViewModel.IsAccelerated.Subscribe(value =>
             {
