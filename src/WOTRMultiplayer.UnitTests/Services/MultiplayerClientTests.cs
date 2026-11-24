@@ -1764,6 +1764,7 @@ namespace WOTRMultiplayer.UnitTests.Services
             {
                 Dialog = _mapper.Map<Networking.Messages.Contracts.NetworkDialog>(dialog),
                 CueName = "cue",
+                HasSystemAnswer = true,
                 CanContinue = false,
                 Suggestions = []
             };
@@ -1785,6 +1786,44 @@ namespace WOTRMultiplayer.UnitTests.Services
                 message.Dialog.Id == "dialog" && message.CueName == "cue")))
                 .MustHaveHappenedOnceExactly();
             Assert.That(_multiplayerClient.Game.DialogState.ContinueEnabled, Is.True);
+        }
+
+        [Test]
+        public void DialogContinue_WhenClientCueDiverged_ReplacesItWithHostCueAndAcknowledges()
+        {
+            A.CallTo(() => _networkClient.IsActive).Returns(true);
+            var dialog = new NetworkDialog { Id = "dialog", Name = "scripted", IsScripted = true };
+            _multiplayerClient.Game = new NetworkGame(new NetworkGameStartUp())
+            {
+                DialogState = new NetworkDialogState(dialog)
+                {
+                    CurrentCueName = "client-cue",
+                    CurrentCueId = "client-cue-id",
+                    HasSystemAnswer = true
+                }
+            };
+            using var synchronized = new ManualResetEventSlim();
+            A.CallTo(() => _dialogInteractionService.SynchronizeDialogCueAsync("host-cue-id", "host-cue"))
+                .Invokes(() => synchronized.Set())
+                .Returns(Task.FromResult(true));
+
+            FakeUtils.GetNetworkReceiverHandler<NotifyDialogCueAnswerSuggested>(_networkClient)(NetworkConstants.HostPlayerId,
+                new NotifyDialogCueAnswerSuggested
+                {
+                    Dialog = _mapper.Map<Networking.Messages.Contracts.NetworkDialog>(dialog),
+                    CueName = "host-cue",
+                    CueId = "host-cue-id",
+                    HasSystemAnswer = true,
+                    CanContinue = false,
+                    Suggestions = []
+                });
+
+            Assert.That(synchronized.Wait(TimeSpan.FromSeconds(2)), Is.True);
+            Assert.That(_multiplayerClient.Game.DialogState.CurrentCueName, Is.EqualTo("host-cue"));
+            Assert.That(_multiplayerClient.Game.DialogState.CurrentCueId, Is.EqualTo("host-cue-id"));
+            A.CallTo(() => _networkClient.Broadcast(A<ClientDialogCueWitnessed>.That.Matches(message =>
+                message.Dialog.Id == "dialog" && message.CueName == "host-cue")))
+                .MustHaveHappenedOnceExactly();
         }
 
         [Test]

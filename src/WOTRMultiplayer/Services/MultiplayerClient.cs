@@ -447,6 +447,7 @@ namespace WOTRMultiplayer.Services
             }
 
             Game.DialogState.CurrentCueName = cueName;
+            Game.DialogState.CurrentCueId = Kingmaker.Game.Instance?.DialogController?.CurrentCue?.AssetGuid.ToString();
             Game.DialogState.Answer = null;
             Game.DialogState.HasSystemAnswer = hasSystemAnswer;
             Game.DialogState.ContinueEnabled = !hasSystemAnswer;
@@ -3593,23 +3594,44 @@ namespace WOTRMultiplayer.Services
         {
             var session = Game;
             if (playerId != NetworkConstants.HostPlayerId || session == null || message == null) return;
-            var ready = await WaitWhileTrue(() => ReferenceEquals(Game, session)
-                && (session.DialogState == null || !string.Equals(session.DialogState.CurrentCueName, message.CueName, StringComparison.OrdinalIgnoreCase)),
+            var ready = await WaitWhileTrue(() => ReferenceEquals(Game, session) && session.DialogState == null,
                 "Waiting for dialog to initialize before suggesting cue answer");
-            if (!ready || !ReferenceEquals(Game, session) || session.DialogState?.Dialog == null) return;
+            if (!ready || !ReferenceEquals(Game, session) || session.DialogState?.Dialog == null
+                || message.Dialog?.Id != session.DialogState.Dialog.Id || session.DialogState.IsSelectingAnswer) return;
 
-            if (message.Dialog?.Id != Game.DialogState.Dialog.Id || Game.DialogState.IsSelectingAnswer) return;
-            Game.DialogState.VoteRoundId = message.VoteRoundId;
+            var state = session.DialogState;
+            if (!string.Equals(state.CurrentCueName, message.CueName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(message.CueId)
+                    || !await DialogInteraction.SynchronizeDialogCueAsync(message.CueId, message.CueName)
+                    || !ReferenceEquals(Game, session) || !ReferenceEquals(session.DialogState, state))
+                {
+                    Logger.LogError("Unable to replace divergent dialog cue. LocalCue={LocalCue}, HostCue={HostCue}",
+                        state.CurrentCueName, message.CueName);
+                    return;
+                }
+
+                state.CurrentCueName = message.CueName;
+                state.CurrentCueId = message.CueId;
+                state.Answer = null;
+                state.IsSelectingAnswer = false;
+                state.VoteCommitted = false;
+                Send(new ClientDialogCueWitnessed { CueName = message.CueName, Dialog = message.Dialog });
+                Logger.LogWarning("Divergent dialog cue was synchronized from the host. Cue={Cue}", message.CueName);
+            }
+
+            state.HasSystemAnswer = message.HasSystemAnswer;
+            state.VoteRoundId = message.VoteRoundId;
 
             var suggestions = Mapper.Map<List<NetworkDialogAnswerSuggestion>>(message.Suggestions);
             var players = GetSyncedPlayers();
             DialogInteraction.MarkSuggestedCueAnswers(players, suggestions);
-            if (Game.DialogState.HasSystemAnswer)
+            if (state.HasSystemAnswer)
             {
-                Game.DialogState.ContinueEnabled = message.CanContinue;
+                state.ContinueEnabled = message.CanContinue;
                 DialogInteraction.SetDialogContinueButtonState(message.CanContinue);
                 if (!message.CanContinue)
-                    RetryDialogCueWitness(Game.DialogState, message.Dialog, message.CueName);
+                    RetryDialogCueWitness(state, message.Dialog, message.CueName);
             }
         }
 

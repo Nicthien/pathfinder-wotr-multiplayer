@@ -49,6 +49,24 @@ namespace WOTRMultiplayer.UnitTests.Services
             Assert.That(failures, Is.EqualTo(1));
         }
 
+        [Test]
+        public void EmptyArchetypeBeforeClassSelectionIsAValidNoOp()
+        {
+            var queued = new Queue<Action>();
+            var dispatcher = A.Fake<IMainThreadAccessor>();
+            A.CallTo(() => dispatcher.Post(A<Action>._)).Invokes((Action action) => queued.Enqueue(action));
+            var service = new LevelingInteractionService(A.Fake<ILogger<LevelingInteractionService>>(), dispatcher,
+                A.Fake<IUIAccessor>(), A.Fake<IPlayerNotificationService>(), A.Fake<IGameStateLookupService>(),
+                A.Fake<IUISyncCountersService>());
+            var failures = 0;
+
+            using (service.EnterReplayScope(() => true, _ => failures++))
+                service.SelectLevelingClassArchetype(null);
+
+            Assert.DoesNotThrow(() => queued.Dequeue()());
+            Assert.That(failures, Is.Zero);
+        }
+
         [TestCase("start")]
         [TestCase("complete")]
         [TestCase("name")]

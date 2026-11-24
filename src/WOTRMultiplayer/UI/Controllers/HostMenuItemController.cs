@@ -71,12 +71,12 @@ namespace WOTRMultiplayer.UI.Controllers
 
         protected override GameObject ReadyButtonObject => Buttons.Find(ReadyButtonObjectName)?.gameObject;
 
-        private TextMeshProUGUI Title => _menuContent
+        private TextMeshProUGUI Title => _menuContent == null ? null : _menuContent
             .transform
-            .Find(SaveLoadView)
-            .Find(SaveLoadScreen)
-            .Find(SaveLoadDetails)
-            .Find(SaveLoadDetailsTitle)
+            .Find(SaveLoadView)?
+            .Find(SaveLoadScreen)?
+            .Find(SaveLoadDetails)?
+            .Find(SaveLoadDetailsTitle)?
             .gameObject
             .GetComponentInChildren<TextMeshProUGUI>();
 
@@ -179,12 +179,15 @@ namespace WOTRMultiplayer.UI.Controllers
 
         public override void Deactivate()
         {
-            Title.SetText(string.Empty);
-
             if (!IsActive)
             {
                 return;
             }
+
+            // Area transitions destroy the previous menu scene before the
+            // teleport notification asks the singleton window to hide. Never
+            // dereference that stale Unity hierarchy during teardown.
+            Title?.SetText(string.Empty);
 
             if (_multiplayerHost.IsInLobby)
             {

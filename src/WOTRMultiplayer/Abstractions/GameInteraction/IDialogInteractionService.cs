@@ -19,6 +19,8 @@ namespace WOTRMultiplayer.Abstractions.GameInteraction
 
         Task<bool> StartDialogAsync(NetworkDialog networkDialog);
 
+        Task<bool> SynchronizeDialogCueAsync(string cueId, string cueName);
+
         void StopDialog();
 
         void UpdateDialogPopupUI(bool isInteractable, int readyPlayersCount, int totalPlayersCount);

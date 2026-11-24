@@ -265,6 +265,49 @@ namespace WOTRMultiplayer.Services.GameInteraction
             return hasStartedDialogTask.Task;
         }
 
+        public Task<bool> SynchronizeDialogCueAsync(string cueId, string cueName)
+        {
+            var synchronized = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _mainThreadAccessor.Post(() =>
+            {
+                try
+                {
+                    var controller = Game.Instance?.DialogController;
+                    if (controller?.Dialog == null || string.IsNullOrWhiteSpace(cueId))
+                    {
+                        synchronized.TrySetResult(false);
+                        return;
+                    }
+
+                    var cue = ResourcesLibrary.TryGetBlueprint<BlueprintCueBase>(cueId);
+                    if (cue == null || !string.Equals(cue.name, cueName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogError("Unable to resolve authoritative dialog cue. CueId={CueId}, CueName={CueName}", cueId, cueName);
+                        synchronized.TrySetResult(false);
+                        return;
+                    }
+
+                    if (string.Equals(controller.CurrentCue?.AssetGuid.ToString(), cueId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        synchronized.TrySetResult(true);
+                        return;
+                    }
+
+                    _logger.LogWarning("Replacing divergent client dialog cue with the host cue. LocalCue={LocalCue}, HostCue={HostCue}",
+                        controller.CurrentCue?.name, cueName);
+                    controller.PlayCue(cue);
+                    synchronized.TrySetResult(string.Equals(controller.CurrentCue?.AssetGuid.ToString(), cueId,
+                        StringComparison.OrdinalIgnoreCase));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unable to synchronize authoritative dialog cue. CueId={CueId}, CueName={CueName}", cueId, cueName);
+                    synchronized.TrySetResult(false);
+                }
+            });
+            return synchronized.Task;
+        }
+
         public void UpdateDialogPopupUI(bool isInteractable, int readyPlayersCount, int totalPlayersCount)
         {
             _mainThreadAccessor.Post(() =>

@@ -27,5 +27,13 @@ namespace WOTRMultiplayer.Networking.Messages.Game
         [ProtoMember(5)]
         [LogMe]
         public bool CanContinue { get; set; }
+
+        [ProtoMember(6)]
+        [LogMe]
+        public string CueId { get; set; }
+
+        [ProtoMember(7)]
+        [LogMe]
+        public bool HasSystemAnswer { get; set; }
     }
 }

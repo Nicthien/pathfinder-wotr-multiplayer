@@ -46,6 +46,11 @@ namespace WOTRMultiplayer.Playground.Core.Dummies
             return Task.FromResult(false);
         }
 
+        public Task<bool> SynchronizeDialogCueAsync(string cueId, string cueName)
+        {
+            return Task.FromResult(false);
+        }
+
         public void UpdateDialogPopupUI(bool isInteractable, int readyPlayersCount, int totalPlayersCount)
         {
         }

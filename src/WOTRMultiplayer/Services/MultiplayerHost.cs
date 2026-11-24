@@ -1146,6 +1146,7 @@ namespace WOTRMultiplayer.Services
             }
             Game.DialogState.HasSystemAnswer = hasSystemAnswer;
             Game.DialogState.CurrentCueName = cueName;
+            Game.DialogState.CurrentCueId = Kingmaker.Game.Instance?.DialogController?.CurrentCue?.AssetGuid.ToString();
             AddCueWitness(cueName, Game.LocalPlayerId);
 
             BroadcastDialogVotes();
@@ -4950,6 +4951,8 @@ namespace WOTRMultiplayer.Services
                 VoteRoundId = Game.DialogState.VoteRoundId,
                 CanContinue = Game.DialogState.HasSystemAnswer
                     && GetPlayersWhoHaveNotSeenCueYet(cueName).Count == 0,
+                CueId = Game.DialogState.CurrentCueId,
+                HasSystemAnswer = Game.DialogState.HasSystemAnswer,
             };
             Send(cueAnswerSuggested);
         }

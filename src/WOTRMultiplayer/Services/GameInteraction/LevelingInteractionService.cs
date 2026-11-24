@@ -213,6 +213,16 @@ namespace WOTRMultiplayer.Services.GameInteraction
                 try
                 {
                     var viewModel = GetLevelingPhaseViewModel();
+                    if (levelingArchetype == null
+                        && (viewModel == null || viewModel.SelectedClassVM.Value == null))
+                    {
+                        // The game emits the empty-archetype notification before
+                        // the class notification during an ordinary level-up.
+                        // A visible view tolerates that ordering, while a headless
+                        // remote replay has nothing to deselect yet.
+                        _logger.LogInformation("No leveling archetype is selected; no replay change is required yet");
+                        return;
+                    }
                     if (viewModel == null)
                     {
                         _logger.LogWarning("Unable to select leveling class archetype due to missing viewmodel");
